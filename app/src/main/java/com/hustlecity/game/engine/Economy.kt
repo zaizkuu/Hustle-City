@@ -175,10 +175,7 @@ class Economy(private val e: GameEngine) {
         val served = min(demand, cap.toDouble())
         servedRate[b.id] = served
         val lostRate = max(0.0, demand - served)
-        if (lostRate > 0) {
-            b.custAcc += 0.0
-            if (e.rnd.nextDouble() < lostRate / 60.0) b.lostToday++
-        }
+        if (lostRate > 0 && e.rnd.nextDouble() < lostRate / 60.0) b.lostToday++
         if (workers.isEmpty()) return
         b.custAcc += served / 60.0
         val waitScore = if (demand <= 0.1) 1.0 else (served / demand).coerceIn(0.0, 1.0)

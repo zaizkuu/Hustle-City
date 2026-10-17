@@ -51,6 +51,21 @@ class WorldRenderer(private val e: GameEngine) {
     private val path = Path()
     private val rect = RectF()
 
+    // per-frame lookups by building id (avoid linear scans in the draw loops)
+    private val bizByBuilding = HashMap<Int, com.hustlecity.game.model.Business>()
+    private val rivalByBuilding = HashMap<Int, com.hustlecity.game.model.RivalBusiness>()
+    private val rentedBuildings = HashSet<Int>()
+
+    private fun rebuildLookups() {
+        val s = e.state
+        bizByBuilding.clear(); rivalByBuilding.clear(); rentedBuildings.clear()
+        for (b in s.businesses) bizByBuilding[b.buildingId] = b
+        for (r in s.rivalBusinesses) rivalByBuilding[r.buildingId] = r
+        for (r in s.rentals) rentedBuildings += r.buildingId
+    }
+
+    private fun vacant(b: Building) = b.rentable && b.placeId == null && b.id !in rentedBuildings && b.id !in rivalByBuilding
+
     private var shadowDX = 0f
     private var shadowDY = 0f
     private var playerKey = 0f
@@ -112,6 +127,7 @@ class WorldRenderer(private val e: GameEngine) {
         shadowDX = -scene.sunX * len; shadowDY = -scene.sunY * len
 
         canvas.drawColor(scene.lit(WATER, 1f))
+        rebuildLookups()
         proj.visibleGround(bbox, 30f)
         batch.begin(canvas)
         for (l in labels) labelPool += l
@@ -448,9 +464,9 @@ class WorldRenderer(private val e: GameEngine) {
         var facade = b.facade
         if (mapMode) {
             facade = c(0xFFC9CED6); roof = c(0xFFE4E7EC)
-            val rented = s.rentalFor(b.id) != null
+            val rented = b.id in rentedBuildings
             if (rented) { roof = c(0xFF5FD38D); facade = c(0xFF3FAE6E) }
-            else if (e.ui.mapFilters["rent"] == true && e.isVacant(b.id)) { roof = c(0xFF9FE3B8); facade = c(0xFF7CCB9B) }
+            else if (e.ui.mapFilters["rent"] == true && vacant(b)) { roof = c(0xFF9FE3B8); facade = c(0xFF7CCB9B) }
             if (b.id == e.ui.selected) { roof = c(0xFFFFE08A); facade = c(0xFFE6B84A) }
         } else if (b.id == e.ui.selected) {
             roof = brighten(roof, 1.25f); facade = brighten(facade, 1.15f)
@@ -493,8 +509,8 @@ class WorldRenderer(private val e: GameEngine) {
         val night = scene.daylight < .5f
         val front = (face == 0 && b.facesNorth) || (face == 1 && !b.facesNorth)
         val s = e.state
-        val biz = s.businessAt(b.id)
-        val rival = if (biz == null) s.rivalBusinessAt(b.id) else null
+        val biz = bizByBuilding[b.id]
+        val rival = if (biz == null) rivalByBuilding[b.id] else null
         val hasShop = b.kind == BKind.RETAIL || b.kind == BKind.SPECIAL || biz != null || rival != null
         val baseZ = if (hasShop) 4.2f else 1.2f
         val glass = scene.lit(GLASS, shade)
@@ -555,7 +571,7 @@ class WorldRenderer(private val e: GameEngine) {
                     if (size > 6.5f * density * .6f) label(name, tmp[0], tmp[1] + size * .35f, size, 0xFFFFFFFF.toInt())
                 }
             }
-        } else if (b.kind == BKind.RETAIL && e.isVacant(b.id) && d0 < 160f) {
+        } else if (b.kind == BKind.RETAIL && vacant(b) && d0 < 160f) {
             if (proj.project(b.doorX, if (face == 0) b.minY else b.maxY, 3.6f, tmp)) {
                 val size = (proj.focal * .6f / tmp[2]).coerceAtMost(12f * density)
                 if (size > 4f * density) label("FOR RENT", tmp[0], tmp[1], size, c(0xFF27AE60), 0xEEFFFFFF.toInt())
@@ -816,14 +832,14 @@ class WorldRenderer(private val e: GameEngine) {
             if (placeId != null && f["places"] != false) {
                 val pl = Catalog.place(placeId); emoji = pl.emoji; ring = pl.color; name = pl.name
             }
-            val biz = s.businessAt(b.id)
+            val biz = bizByBuilding[b.id]
             if (biz != null) { emoji = biz.type.emoji; ring = c(0xFF27AE60); name = biz.name }
             else if (b.id == s.player.home) { emoji = "🏠"; ring = c(0xFFEB5757); name = "Home" }
-            else if (s.rentalFor(b.id) != null) { emoji = "🔑"; ring = c(0xFF27AE60); name = b.address }
+            else if (b.id in rentedBuildings) { emoji = "🔑"; ring = c(0xFF27AE60); name = b.address }
             else {
-                val rb = s.rivalBusinessAt(b.id)
+                val rb = rivalByBuilding[b.id]
                 if (rb != null && f["type:${rb.typeId}"] == true) { emoji = Catalog.type(rb.typeId).emoji; ring = c(0xFF9AA3AD); name = rb.name }
-                else if (f["rent"] == true && e.isVacant(b.id) && b.kind == BKind.RETAIL) { emoji = "🏪"; ring = c(0xFF27AE60) }
+                else if (f["rent"] == true && b.kind == BKind.RETAIL && vacant(b)) { emoji = "🏪"; ring = c(0xFF27AE60) }
             }
             if (emoji == null) continue
             if (!proj.project(b.cx, b.cy, b.height + 3f, tmp)) continue

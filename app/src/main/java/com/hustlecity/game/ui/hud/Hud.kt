@@ -365,18 +365,22 @@ fun Joystick(e: GameEngine, modifier: Modifier = Modifier) {
                     e.input.jy = d.y / r
                 }
                 awaitEachGesture {
-                    val down = awaitFirstDown()
-                    update(down.position)
-                    down.consume()
-                    while (true) {
-                        val ev = awaitPointerEvent()
-                        val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!ch.pressed) break
-                        update(ch.position)
-                        ch.consume()
+                    try {
+                        val down = awaitFirstDown()
+                        update(down.position)
+                        down.consume()
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!ch.pressed) break
+                            update(ch.position)
+                            ch.consume()
+                        }
+                    } finally {
+                        // also runs when the joystick leaves the screen mid-drag
+                        knob = Offset.Zero
+                        e.input.jx = 0f; e.input.jy = 0f
                     }
-                    knob = Offset.Zero
-                    e.input.jx = 0f; e.input.jy = 0f
                 }
             },
         contentAlignment = Alignment.Center,
@@ -400,13 +404,16 @@ fun ActionButtons(e: GameEngine, modifier: Modifier = Modifier) {
                     .size(86.dp).clip(CircleShape).background(Color(0xAAC94040)).border(2.dp, Color(0x88FFFFFF), CircleShape)
                     .pointerInput(Unit) {
                         awaitEachGesture {
-                            awaitFirstDown().consume()
-                            e.input.brake = true
-                            while (true) {
-                                val ev = awaitPointerEvent()
-                                if (ev.changes.none { it.pressed }) break
+                            try {
+                                awaitFirstDown().consume()
+                                e.input.brake = true
+                                while (true) {
+                                    val ev = awaitPointerEvent()
+                                    if (ev.changes.none { it.pressed }) break
+                                }
+                            } finally {
+                                e.input.brake = false
                             }
-                            e.input.brake = false
                         }
                     },
                 contentAlignment = Alignment.Center,

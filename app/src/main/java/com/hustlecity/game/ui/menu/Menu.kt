@@ -103,7 +103,7 @@ fun MainMenu(e: GameEngine) {
             Text("CITY", color = HC.Yellow, fontSize = 52.sp, fontWeight = FontWeight.Black, style = titleStyle, lineHeight = 52.sp)
             Text("Start with nothing. Build an empire.", color = Color.White.copy(alpha = .85f), fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp, bottom = 22.dp))
             if (e.hasGame) {
-                HButton("Continue", Modifier.fillMaxWidth().padding(bottom = 8.dp), color = HC.Green) { e.ui.screen = Screen.GAME }
+                HButton("Continue", Modifier.fillMaxWidth().padding(bottom = 8.dp), color = HC.Green) { e.camera.yaw = 0f; e.ui.screen = Screen.GAME }
             } else if (hasSave) {
                 HButton("Continue", Modifier.fillMaxWidth().padding(bottom = 8.dp), color = HC.Green) {
                     if (!e.loadGame()) e.toast("Couldn't load the save")

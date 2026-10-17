@@ -579,9 +579,14 @@ class GameEngine(context: Context?) {
 
     // ------------------------------------------------------------------ vehicles
 
+    fun resetInput() {
+        input.jx = 0f; input.jy = 0f; input.brake = false
+    }
+
     fun enterVehicle(v: OwnedVehicle) {
         val p = state.player
         if (p.inBuilding >= 0) return
+        resetInput()
         p.driving = v.id
         p.x = v.x; p.y = v.y
         carSpeed = 0f
@@ -600,6 +605,7 @@ class GameEngine(context: Context?) {
         val v = state.vehicle(p.driving) ?: return
         p.driving = -1
         carSpeed = 0f
+        resetInput()
         // step out on the driver's side, avoiding buildings
         val sx = v.x + cos(v.heading) * -2.2f
         val sy = v.y + sin(v.heading) * -2.2f
@@ -646,6 +652,8 @@ class GameEngine(context: Context?) {
         p.x = b.doorX; p.y = b.doorY
         interior = InteriorScene(this, b, mode)
         ui.designer = false
+        ui.phoneOpen = false
+        resetInput()
         when (mode) {
             InteriorMode.EMPTY -> ui.panel = Panel.StartBusiness(b.id)
             InteriorMode.PLACE -> ui.panel = Panel.Place(b.id, b.placeId!!)
@@ -657,6 +665,7 @@ class GameEngine(context: Context?) {
 
     private fun exitBuildingInternal() {
         val p = state.player
+        resetInput()
         p.workingAt = -1
         p.inBuilding = -1
         interior = null
