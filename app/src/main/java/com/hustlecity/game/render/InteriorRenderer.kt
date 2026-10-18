@@ -26,6 +26,8 @@ class InteriorRenderer(private val e: GameEngine) {
     private val dIdx = IntArray(maxDraw)
     private val dKey = FloatArray(maxDraw)
     private val order = IntArray(maxDraw)
+    private val people = PersonPainter(scene)
+    private val px = FloatArray(10); private val py = FloatArray(10); private val pz = FloatArray(10)
 
     companion object {
         val BG = c(0xFF16181D)
@@ -59,6 +61,7 @@ class InteriorRenderer(private val e: GameEngine) {
         }
         // entrance mat
         scene.groundRect(sc.doorX - 1f, sc.d - .9f, sc.doorX + 1f, sc.d.toFloat(), .01f, c(0xFF3B3F46))
+        sc.business?.let { if (!e.ui.designer) drawDirt(sc, it) }
 
         if (e.ui.designer) {
             val line = scene.withAlpha(0xFFFFFFFF.toInt(), .22f)
@@ -116,12 +119,13 @@ class InteriorRenderer(private val e: GameEngine) {
                     }
                     drawItem(def, p.x.toFloat(), p.y.toFloat(), p.rot, 1f)
                 }
-                1 -> sc.visitors.getOrNull(dIdx[i])?.let { person(it.x, it.y, it.shirt, it.skin, it.phase) }
-                2 -> sc.staff.getOrNull(dIdx[i])?.let { person(it.x, it.y, it.shirt, it.skin, 0f, apron = true) }
+                1 -> sc.visitors.getOrNull(dIdx[i])?.let { person(it, false) }
+                2 -> sc.staff.getOrNull(dIdx[i])?.let { person(it, true) }
                 3 -> {
                     val p = e.state.player
                     scene.disc(sc.px, sc.py, .02f, .45f, .45f, 12, scene.withAlpha(c(0xFF27AE60), .55f))
-                    person(sc.px, sc.py, SHIRT_COLORS[p.shirt % SHIRT_COLORS.size], SKIN_TONES[p.skin % SKIN_TONES.size], e.realTime * 6f)
+                    people.draw(sc.px, sc.py, 0f, sc.playerHeading, e.realTime * 7f, sc.playerMoving, SHIRT_COLORS[p.shirt % SHIRT_COLORS.size], PersonPainter.PANTS[1],
+                        SKIN_TONES[p.skin % SKIN_TONES.size], PersonPainter.HAIR[p.skin % PersonPainter.HAIR.size])
                 }
                 4 -> {
                     val car = sc.showroom[dIdx[i]]
@@ -189,11 +193,65 @@ class InteriorRenderer(private val e: GameEngine) {
         }
     }
 
-    private fun person(x: Float, y: Float, shirt: Int, skin: Int, phase: Float, apron: Boolean = false) {
-        val bob = abs(sin(phase)) * .04f
-        scene.billboard(x, y, 0f, .8f, .13f, scene.lit(c(0xFF34383F), 1f))
-        scene.billboard(x, y, .8f + bob, 1.4f + bob, .22f, scene.lit(if (apron) c(0xFF2C3E50) else shirt, 1f))
-        scene.billboard(x, y, 1.45f + bob, 1.72f + bob, .13f, scene.lit(skin, 1f))
+    private fun person(v: com.hustlecity.game.engine.Person, staff: Boolean) {
+        people.draw(v.x, v.y, v.z, v.heading, v.phase, v.moving, v.shirt, PersonPainter.PANTS[v.pants % PersonPainter.PANTS.size], v.skin,
+            PersonPainter.HAIR[v.hair % PersonPainter.HAIR.size], pose = v.pose, apron = if (staff) c(0xFF2C3E50) else 0)
+    }
+
+    /** Small deterministic hash in [0, 1) so the dirt pattern on a tile stays put from frame to frame. */
+    private fun hf(a: Int, b: Int): Float {
+        var h = a * 374761393 + b * 668265263
+        h = (h xor (h ushr 13)) * 1274126177
+        return ((h xor (h ushr 16)) and 0xFFFFFF) / 16777216f
+    }
+
+    /**
+     * Procedural dirt: scuffs and footprints on lightly used tiles, stains as they get worse,
+     * and litter (wrappers, cups) on the dirtiest ones. Near the door it turns to muddy prints.
+     */
+    private fun drawDirt(sc: InteriorScene, b: com.hustlecity.game.model.Business) {
+        val dirt = b.dirt
+        if (dirt.size != sc.w * sc.d) return
+        val mudBrown = c(0xFF5A4632); val grime = c(0xFF3A3632)
+        for (t in dirt.indices) {
+            val v = dirt[t]
+            if (v < 3f) continue
+            val x0 = (t % sc.w).toFloat(); val y0 = (t / sc.w).toFloat()
+            val nearDoor = kotlin.math.abs(x0 + .5f - sc.doorX) < 2.5f && y0 >= sc.d - 3
+            val k = (v / 100f).coerceIn(0f, 1f)
+            // footprints and scuffs
+            val prints = 1 + (k * 5).toInt()
+            for (n in 0 until prints) {
+                val fx = x0 + .12f + hf(t, n * 3) * .76f
+                val fy = y0 + .12f + hf(t, n * 3 + 1) * .76f
+                val rot = hf(t, n * 3 + 2) > .5f
+                val col = scene.withAlpha(if (nearDoor) mudBrown else grime, .1f + .32f * k)
+                scene.disc(fx, fy, .006f, if (rot) .11f else .06f, if (rot) .06f else .11f, 7, col)
+            }
+            // stains spread as the floor gets dirtier
+            if (v > 22f) {
+                val cx = x0 + .25f + hf(t, 40) * .5f; val cy = y0 + .25f + hf(t, 41) * .5f
+                val r = .12f + .3f * k * (.6f + .4f * hf(t, 42))
+                val m = 7
+                for (q in 0 until m) {
+                    val a = q / m.toFloat() * 6.2832f
+                    val rr = r * (.65f + .5f * hf(t, 50 + q))
+                    px[q] = cx + kotlin.math.cos(a) * rr; py[q] = cy + kotlin.math.sin(a) * rr; pz[q] = .008f
+                }
+                val tone = when ((hf(t, 43) * 3).toInt()) { 0 -> c(0xFF6B4A2F); 1 -> c(0xFF4E4A44); else -> c(0xFF7A6A3A) }
+                scene.poly(m, px, py, pz, scene.withAlpha(scene.lit(if (nearDoor) mudBrown else tone, 1f), .22f + .3f * k))
+            }
+            // litter on the worst tiles
+            if (v > 55f) {
+                val lx = x0 + .2f + hf(t, 60) * .6f; val ly = y0 + .2f + hf(t, 61) * .6f
+                val paper = when ((hf(t, 62) * 4).toInt()) { 0 -> c(0xFFF2F2F2); 1 -> c(0xFFEB5757); 2 -> c(0xFFF2C94C); else -> c(0xFF56CCF2) }
+                scene.box(lx - .07f, ly - .05f, 0f, lx + .07f, ly + .05f, .015f, paper, paper)
+                if (v > 75f) {
+                    val cx2 = x0 + .2f + hf(t, 63) * .6f; val cy2 = y0 + .2f + hf(t, 64) * .6f
+                    scene.box(cx2 - .04f, cy2 - .04f, 0f, cx2 + .04f, cy2 + .04f, .11f, c(0xFFF5F5F5), c(0xFFC0392B))
+                }
+            }
+        }
     }
 
     private fun drawCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int) {

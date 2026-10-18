@@ -209,6 +209,12 @@ fun TopBar(e: GameEngine) {
                     Icon(Icons.Filled.AccessTime, null, tint = Color.White, modifier = Modifier.size(15.dp))
                     Text(" ${s.clock}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
+                // weather: tap for the forecast
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { e.ui.info = "Weather" to e.weather.forecastText() }.padding(horizontal = 2.dp)) {
+                    val sky = e.weather.sky()
+                    Text(sky.icon, fontSize = 14.sp)
+                    if (!tiny) Text(" ${e.weather.temperature().roundToInt()}°", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val paused = e.speedIndex == 0
                     Icon(

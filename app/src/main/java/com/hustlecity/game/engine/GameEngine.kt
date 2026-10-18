@@ -62,6 +62,7 @@ class GameEngine(context: Context?) {
     lateinit var city: City
     val traffic = Traffic()
     val economy = Economy(this)
+    val weather = WeatherSystem(this)
     val camera = CameraRig()
     val input = Input()
     var interior: InteriorScene? = null
@@ -118,6 +119,7 @@ class GameEngine(context: Context?) {
         s.vehicles += OwnedVehicle(s.newId(), "tico", spot.first, spot.second, (Math.PI / 2).toFloat(), fuel = .6, condition = .75)
         // rivals and their businesses
         economy.rivals.seed(Random(seed + 7))
+        weather.ensure()
         message("Uncle Sal", Objectives.groups[0].intro, notify = false)
         message("Uncle Sal", "Your old Tico Compact is parked outside your apartment at ${home.address}. Tap the phone apps to get around — Maps shows the whole city.", notify = false)
         camera.zoom = 70f
@@ -147,6 +149,7 @@ class GameEngine(context: Context?) {
         city = City(s.seed)
         rnd = Random(System.nanoTime())
         economy.rivals.migrate()
+        weather.ensure()
         interior = null
         minuteAcc = 0.0
         s.player.workingAt = if (s.skip?.kind == SkipKind.WORK) s.skip!!.target else -1
@@ -306,6 +309,59 @@ class GameEngine(context: Context?) {
 
     private var doorClock = 0f
 
+    /** Weather as the renderers see it: each value eases toward the current sky over a few seconds. */
+    class SkyVisual {
+        var rain = 0f; var snow = 0f; var fog = 0f; var cloud = 0f; var storm = 0f
+        /** How wet the streets are (lags behind the rain). */
+        var wet = 0f
+        var flash = 0f
+        var nextFlash = 6f
+        var thunderIn = -1f
+    }
+    val skyVis = SkyVisual()
+
+    /** Walking animation of the player (outside and inside). */
+    var walkPhase = 0f
+    var walkAmount = 0f
+    private var crowdClock = 0f
+
+    private fun updateSky(dt: Float) {
+        val v = skyVis
+        val sky = if (hasGame) weather.sky() else com.hustlecity.game.model.Sky.CLEAR
+        val tr = when (sky) { com.hustlecity.game.model.Sky.RAIN -> .75f; com.hustlecity.game.model.Sky.STORM -> 1f; else -> 0f }
+        val ts = if (sky == com.hustlecity.game.model.Sky.SNOW) .85f else 0f
+        val tf = if (sky == com.hustlecity.game.model.Sky.FOG) .85f else 0f
+        val tc = when (sky) { com.hustlecity.game.model.Sky.CLEAR -> 0f; com.hustlecity.game.model.Sky.CLOUDY -> .7f; com.hustlecity.game.model.Sky.FOG -> .4f; com.hustlecity.game.model.Sky.SNOW -> .8f; com.hustlecity.game.model.Sky.RAIN -> .9f; com.hustlecity.game.model.Sky.STORM -> 1f }
+        val tst = if (sky == com.hustlecity.game.model.Sky.STORM) 1f else 0f
+        val k = (dt * .25f).coerceAtMost(1f)
+        v.rain += (tr - v.rain) * k; v.snow += (ts - v.snow) * k; v.fog += (tf - v.fog) * k; v.cloud += (tc - v.cloud) * k; v.storm += (tst - v.storm) * k
+        v.wet = if (v.rain > .2f) (v.wet + dt * .08f).coerceAtMost(1f) else (v.wet - dt * .01f).coerceAtLeast(0f)
+        // lightning, then thunder a moment later
+        v.flash = (v.flash - dt * 4f).coerceAtLeast(0f)
+        if (v.storm > .5f) {
+            v.nextFlash -= dt
+            if (v.nextFlash <= 0f) {
+                v.flash = 1f
+                v.nextFlash = 5f + rnd.nextFloat() * 14f
+                v.thunderIn = .3f + rnd.nextFloat() * 1.6f
+            }
+        }
+        if (v.thunderIn >= 0f) {
+            v.thunderIn -= dt
+            if (v.thunderIn < 0f) Audio.play(com.hustlecity.game.audio.Sfx.THUNDER)
+        }
+        Audio.rainLevel = if (state.player.inBuilding >= 0 && hasGame) v.rain * .3f else v.rain
+        // fewer people out in bad weather; cars slow down on wet or snowy roads
+        crowdClock -= dt
+        if (crowdClock <= 0f) {
+            crowdClock = .5f
+            val f = if (hasGame) weather.pedFactor() else 1f
+            traffic.setPedTarget((settings.pedCount * f).toInt(), camera.tx, camera.ty)
+            traffic.speedFactor = if (hasGame) weather.carSpeedFactor() else 1f
+            traffic.hurry = if (v.rain > .3f || v.snow > .3f) 1.18f else 1f
+        }
+    }
+
     /** Tells pedestrians which shop doors near the camera are open, and how likely they are to walk in. */
     private fun refreshDoors(fx: Float, fy: Float) {
         val hour = state.hour
@@ -343,9 +399,11 @@ class GameEngine(context: Context?) {
             camera.yaw += dt * .05f
             traffic.update(dt, camera.tx, camera.ty, 230f, -9999f, -9999f)
             realTime += dt
+            updateSky(dt)
             return
         }
         realTime += dt
+        updateSky(dt)
         fpsAcc += dtIn; fpsFrames++
         if (fpsAcc >= .5f) { fps = fpsFrames / fpsAcc; fpsAcc = 0f; fpsFrames = 0 }
         if (crashCooldown > 0) crashCooldown -= dt
@@ -572,7 +630,7 @@ class GameEngine(context: Context?) {
             }
             SkipKind.CLEAN -> {
                 val biz = state.business(job.target) ?: return
-                if (!cancelled) biz.cleanliness = (biz.cleanliness + 50).coerceAtMost(100.0)
+                if (!cancelled) economy.dirt.clean(biz, 50.0)
                 toast("Cleanliness ${biz.cleanliness.roundToInt()}%")
             }
             SkipKind.REST -> if (!cancelled) {
@@ -611,7 +669,9 @@ class GameEngine(context: Context?) {
                 if (traffic.bump(px, py, .45f, tmp)) { px = tmp[0]; py = tmp[1] }
                 p.x = px; p.y = py
                 p.heading = atan2(wx, -wy)
-            }
+                walkPhase += dt * speed * 1.7f
+                walkAmount = mag
+            } else walkAmount = 0f
         }
     }
 

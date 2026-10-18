@@ -38,7 +38,22 @@ class Person(var x: Float, var y: Float, var shirt: Int, var skin: Int) {
     /** Tile this customer has reserved (display spot or seat), so two people never share one. */
     var claim = -1
     var retries = 0
+    // 3D look and pose
+    var heading = 0f
+    var moving = 0f
+    var pose = 0
+    var z = 0f
+    var pants = 0
+    var hair = 0
+    /** Seat or machine this person will use at the current stop. */
+    var seat: SeatPos? = null
+    var seated = false
+    /** Item index being used (to face it). */
+    var item = -1
 }
+
+/** A place to sit or exercise on a piece of furniture, in room coordinates. */
+class SeatPos(val tile: Int, val x: Float, val y: Float, val z: Float, val heading: Float, val pose: Int)
 
 val FLOOR_COLORS = intArrayOf(c(0xFFC08A5B), c(0xFFD9D4CC), c(0xFF6B5E55), c(0xFF5C6BC0), c(0xFF9E9E9E), c(0xFFB5654A), c(0xFF8FD3B6), c(0xFF3A3A3A))
 val WALL_COLORS = intArrayOf(c(0xFFEDE3D3), c(0xFFF5F5F5), c(0xFFE57058), c(0xFF34495E), c(0xFF9CB59A), c(0xFFE2B33C), c(0xFFF1A7C1), c(0xFFB0B5BA))
@@ -66,6 +81,14 @@ fun itemForTag(tag: String): String = when (tag) {
     "tablet" -> "graphic_tablet"
     "globe" -> "desk_globe"
     "calendar" -> "desk_calendar"
+    "ice_cream" -> "ice_cream_freezer"
+    "shoes" -> "shoe_rack"
+    "magazines" -> "magazine_rack"
+    "security_cam" -> "security_camera"
+    "baskets" -> "shopping_baskets"
+    "trash" -> "trash_can"
+    "scale" -> "digital_scale"
+    "meeting" -> "meeting_table"
     else -> tag
 }
 
@@ -80,6 +103,8 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     var showWalls = true
     var px = 0f
     var py = 0f
+    var playerHeading = 0f
+    var playerMoving = 0f
     private var ppath = IntArray(0)
     private var ppathIdx = 0
     val visitors = ArrayList<Person>()
@@ -267,6 +292,9 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         }
         val occ = walkOcc()
         refreshQueues(occ)
+        playerMoving *= .7f
+        for (v in visitors) v.moving *= .7f
+        for (v in staff) v.moving *= .7f
         for (v in visitors) stepVisitor(v, step, occ)
         for (v in visitors) if (v.done) leaveQueue(v)
         visitors.removeAll { it.done }
@@ -281,7 +309,13 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         val nx: Float; val ny: Float
         val arrived = dd <= maxStep
         if (arrived) { nx = tx; ny = ty } else { nx = cx + dx / dd * maxStep; ny = cy + dy / dd * maxStep }
-        if (isPlayer) { px = nx; py = ny } else { person!!.x = nx; person.y = ny; person.phase += maxStep * 4f }
+        if (isPlayer) {
+            if (dd > 1e-3f) { playerHeading = kotlin.math.atan2(dx, -dy); playerMoving = 1f }
+            px = nx; py = ny
+        } else {
+            if (dd > 1e-3f) { person!!.heading = kotlin.math.atan2(dx, -dy); person.moving = 1f }
+            person!!.x = nx; person.y = ny; person.phase += maxStep * 4f
+        }
         return arrived
     }
 
@@ -326,12 +360,43 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         val p = items.getOrNull(item) ?: return -1
         val def = Catalog.item(p.itemId) ?: return -1
         val taken = claimed(v)
+        v.seat = null
+        v.item = item
+        val seats = seatsOf(item).filter { it.tile !in taken }
+        if (Catalog.sitSpots.containsKey(def.id)) {
+            if (seats.isEmpty()) return -1
+            val sp = seats[e.rnd.nextInt(seats.size)]
+            v.seat = sp
+            return sp.tile
+        }
         val tiles = if ("dance_floor" in def.tags) {
             val (fw, fd) = itemDims(def, p.rot)
             (0 until fw * fd).map { idx(p.x + it % fw, p.y + it / fw) }
         } else frontTiles(p, occ)
         val free = tiles.filter { it >= 0 && it !in taken }
         return if (free.isEmpty()) -1 else free[e.rnd.nextInt(free.size)]
+    }
+
+    /** Seats/machines on an item, rotated into the room. */
+    fun seatsOf(item: Int): List<SeatPos> {
+        val p = items.getOrNull(item) ?: return emptyList()
+        val def = Catalog.item(p.itemId) ?: return emptyList()
+        val spots = Catalog.sitSpots[def.id] ?: return emptyList()
+        val w0 = def.w.toFloat(); val d0 = def.d.toFloat()
+        return spots.map { sp ->
+            val (ax, ay) = when (p.rot % 4) {
+                0 -> sp.x to sp.y
+                1 -> (d0 - sp.y) to sp.x
+                2 -> (w0 - sp.x) to (d0 - sp.y)
+                else -> sp.y to (w0 - sp.x)
+            }
+            // facing direction, rotated the same way
+            val lx = when (sp.face) { 1 -> 1f; 3 -> -1f; else -> 0f }
+            val ly = when (sp.face) { 0 -> -1f; 2 -> 1f; else -> 0f }
+            val (vx, vy) = when (p.rot % 4) { 0 -> lx to ly; 1 -> -ly to lx; 2 -> -lx to -ly; else -> ly to -lx }
+            val wx = p.x + ax; val wy = p.y + ay
+            SeatPos(idx(floor(wx).toInt().coerceIn(0, w - 1), floor(wy).toInt().coerceIn(0, d - 1)), wx, wy, sp.z, kotlin.math.atan2(vx, -vy), if (sp.pose == 3) 3 else 1)
+        }
     }
 
     /** A free seat among every item with this tag. */
@@ -411,6 +476,8 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         if (list.isEmpty() && !pays && seat.isEmpty()) return
         val p = Person(doorX.toFloat(), d + .2f, SHIRT_COLORS[r.nextInt(SHIRT_COLORS.size)], SKIN_TONES[r.nextInt(SKIN_TONES.size)])
         p.speed = 1.35f + r.nextFloat() * .5f
+        p.pants = r.nextInt(16)
+        p.hair = r.nextInt(16)
         p.stops = list.toIntArray()
         p.seatTag = seat
         // food and tickets are paid for first; shops are paid on the way out
@@ -499,9 +566,40 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         return true
     }
 
+    /** After reaching a stop: step onto the seat/machine, or turn to face the display. True once settled. */
+    private fun settle(v: Person, dt: Float): Boolean {
+        val sp = v.seat
+        if (sp != null && !v.seated) {
+            if (!moveToward(sp.x, sp.y, v.speed * dt, false, v)) return false
+            v.seated = true
+            v.heading = sp.heading
+            v.pose = sp.pose
+            v.z = if (sp.pose == 3) sp.z else sp.z
+            return true
+        }
+        if (sp == null) {
+            val p = items.getOrNull(v.item)
+            val def = p?.let { Catalog.item(it.itemId) }
+            if (p != null && def != null) {
+                val (fw, fd) = itemDims(def, p.rot)
+                val cx = p.x + fw / 2f; val cy = p.y + fd / 2f
+                if ("dance_floor" in def.tags) v.pose = 2
+                else if (kotlin.math.abs(cx - v.x) + kotlin.math.abs(cy - v.y) > .05f) v.heading = kotlin.math.atan2(cx - v.x, -(cy - v.y))
+            }
+        }
+        return true
+    }
+
+    /** Gets up from a seat (or stops dancing) before walking on. */
+    private fun standUp(v: Person) {
+        if (v.pose == 0 && v.z == 0f && !v.seated) return
+        v.pose = 0; v.z = 0f; v.seated = false; v.seat = null
+    }
+
     private fun stepVisitor(v: Person, dt: Float, occ: BooleanArray) {
         if (dt <= 0f) return
-        if (v.wait > 0f) { v.wait -= dt; return }
+        if (v.wait > 0f) { v.wait -= dt; if (v.pose == 2 || v.pose == 3) v.phase += dt * 5f; return }
+        if (v.goal < 0 || v.stage == 3) standUp(v)
         when (v.stage) {
             0 -> { // browsing displays / using machines
                 if (v.stopIdx >= v.stops.size) {
@@ -518,7 +616,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                     v.claim = spot
                     goTo(v, spot, occ)
                 }
-                if (walk(v, dt, occ)) {
+                if (walk(v, dt, occ) && settle(v, dt)) {
                     v.stopIdx++
                     v.wait = when (typeId) {
                         "gym", "hairdresser" -> 7f + e.rnd.nextFloat() * 5f
@@ -570,7 +668,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                     v.claim = seat
                     goTo(v, seat, occ)
                 }
-                if (walk(v, dt, occ)) {
+                if (walk(v, dt, occ) && settle(v, dt)) {
                     v.wait = when (typeId) { "cinema", "theater" -> 14f; "nightclub" -> 10f; else -> 7f } + e.rnd.nextFloat() * 8f
                     v.seatTag = ""
                     v.stage = 3
@@ -590,10 +688,29 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
 
     private val staffById = HashMap<Int, Person>()
     private val staffGoal = HashMap<Int, Int>()
+    private val staffTimer = HashMap<Int, Float>()
+
+    /** Where a staff member works: a tile, plus the item to face or a seat to sit on. */
+    private class Post(val tile: Int, val face: Int = -1, val seat: SeatPos? = null)
+
+    private fun deskSeat(item: Int): SeatPos? {
+        val p = items.getOrNull(item) ?: return null
+        val def = Catalog.item(p.itemId) ?: return null
+        // the chair in front of the desk, facing the screen
+        val (ax, ay, vx, vy) = when (p.rot % 4) {
+            0 -> floatArrayOf(1f, 1.15f, 0f, -1f)
+            1 -> floatArrayOf(-.15f, 1f, 1f, 0f)
+            2 -> floatArrayOf(1f, -.15f, 0f, 1f)
+            else -> floatArrayOf(1.15f, 1f, -1f, 0f)
+        }.let { arrayOf(it[0], it[1], it[2], it[3]) }
+        val wx = p.x + ax; val wy = p.y + ay
+        if (wx < 0 || wy < 0 || wx >= w || wy >= d || def.w < 2) return null
+        return SeatPos(idx(floor(wx).toInt(), floor(wy).toInt()), wx, wy, .45f, kotlin.math.atan2(vx, -vy), 1)
+    }
 
     private fun updateStaff(dt: Float, occ: BooleanArray) {
         val s = e.state
-        val wanted = LinkedHashMap<Int, Int>() // staff key -> tile
+        val posts = LinkedHashMap<Int, Post>()
         val looks = HashMap<Int, Pair<Int, Int>>()
         when (mode) {
             InteriorMode.BUSINESS -> {
@@ -602,44 +719,76 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 val counters = counters()
                 var regIdx = 0
                 var desk = 0
+                val desks = itemsWith("desk").map { it.index }
                 val working = s.employees.filter { it.businessId == b.id && it.worksAt(s.hour, s.weekday) }
                 for ((n, emp) in working.withIndex()) {
-                    val spot: Int? = when (emp.role) {
-                        StaffRole.CUSTOMER_SERVICE -> counters.getOrNull(regIdx++)?.let { items.getOrNull(it) }?.let { frontTiles(it, occFull, true).firstOrNull() }
-                        StaffRole.CLEANER -> staffGoal[emp.id]?.takeIf { e.rnd.nextFloat() > dt / 6f } ?: freeTile(occFull, e.rnd.nextInt(w * d))
-                        StaffRole.DJ -> itemsWith("dj_booth").firstOrNull()?.let { frontTiles(it.value, occFull, true).firstOrNull() ?: frontTiles(it.value, occFull).firstOrNull() }
-                        StaffRole.ACTOR -> itemsWith("stage").firstOrNull()?.let { st -> frontTiles(st.value, occFull).getOrNull(n % 4) }
-                        StaffRole.PROJECTIONIST -> itemsWith("screen").firstOrNull()?.let { frontTiles(it.value, occFull, true).firstOrNull() }
-                        else -> if (b.type.office) itemsWith("desk").getOrNull(desk++)?.let { frontTiles(it.value, occFull).firstOrNull() }
-                            else browseTargets().getOrNull(n)?.let { frontTiles(it, occFull).lastOrNull() }
+                    fun behind(item: Int?): Post? = item?.let { ii -> items.getOrNull(ii)?.let { frontTiles(it, occFull, true).firstOrNull() ?: frontTiles(it, occFull).firstOrNull() }?.let { Post(it, ii) } }
+                    val post: Post? = when (emp.role) {
+                        StaffRole.CUSTOMER_SERVICE -> behind(counters.getOrNull(regIdx++))
+                        StaffRole.CLEANER -> {
+                            // head for the dirtiest floor, scrub it, move on
+                            val cur = staffGoal[emp.id]
+                            val t = staffTimer[emp.id] ?: 0f
+                            if (cur != null && cur >= 0 && t > 0f) Post(cur)
+                            else (e.economy.dirt.dirtiest(b, 6).randomOrNull(e.rnd) ?: freeTile(occFull, e.rnd.nextInt(w * d))).let { staffTimer[emp.id] = 4f; Post(it) }
+                        }
+                        StaffRole.DJ -> behind(itemsWith("dj_booth").firstOrNull()?.index)
+                        StaffRole.ACTOR -> itemsWith("stage").firstOrNull()?.let { st -> frontTiles(st.value, occFull).getOrNull(n % 4)?.let { Post(it, -1) } }
+                        StaffRole.PROJECTIONIST -> behind(itemsWith("screen").firstOrNull()?.index)
+                        else -> if (b.type.office) desks.getOrNull(desk++)?.let { di -> deskSeat(di)?.let { Post(it.tile, di, it) } ?: behind(di) }
+                            else browseTargets().getOrNull(n)?.let { it2 -> items.indexOf(it2).let { ii -> frontTiles(it2, occFull).lastOrNull()?.let { Post(it, ii) } } }
                     }
-                    val tile = spot ?: freeTile(occFull, n * 7 + 3)
-                    if (tile >= 0) { wanted[emp.id] = tile; looks[emp.id] = SHIRT_COLORS[emp.id % SHIRT_COLORS.size] to SKIN_TONES[emp.id % SKIN_TONES.size] }
+                    val p = post ?: freeTile(occFull, n * 7 + 3).takeIf { it >= 0 }?.let { Post(it) } ?: continue
+                    posts[emp.id] = p
+                    looks[emp.id] = SHIRT_COLORS[emp.id % SHIRT_COLORS.size] to SKIN_TONES[emp.id % SKIN_TONES.size]
+                    if (emp.role == StaffRole.CLEANER && dt > 0f) {
+                        val person = staffById[emp.id]
+                        if (person != null && person.pathIdx >= person.path.size) {
+                            staffTimer[emp.id] = (staffTimer[emp.id] ?: 0f) - dt
+                            e.economy.dirt.scrub(b, p.tile, 6f * dt)
+                            person.phase += dt * 6f
+                        }
+                    }
                 }
             }
             InteriorMode.RIVAL, InteriorMode.PLACE -> {
                 val occFull = occupancy()
-                counters().firstOrNull()?.let { items.getOrNull(it) }?.let { reg ->
-                    frontTiles(reg, occFull, true).firstOrNull()?.let { t -> wanted[-1] = t; looks[-1] = c(0xFF2C3E50) to SKIN_TONES[building.id % SKIN_TONES.size] }
+                counters().firstOrNull()?.let { ci ->
+                    items.getOrNull(ci)?.let { reg -> frontTiles(reg, occFull, true).firstOrNull()?.let { t -> posts[-1] = Post(t, ci); looks[-1] = c(0xFF2C3E50) to SKIN_TONES[building.id % SKIN_TONES.size] } }
                 }
             }
             else -> {}
         }
-        staffById.keys.retainAll(wanted.keys)
-        for ((key, tile) in wanted) {
+        staffById.keys.retainAll(posts.keys)
+        for ((key, post) in posts) {
             val (shirt, skin) = looks[key]!!
             val p = staffById.getOrPut(key) {
-                // new shift: walk in from the door (or appear at the post when the scene opens)
+                // new shift: walk in from the door (or be at the post already when the scene opens)
                 val fresh = staff.isEmpty() && visitors.isEmpty()
-                Person(if (fresh) tile % w + .5f else doorX.toFloat(), if (fresh) tile / w + .5f else d - .5f, shirt, skin).also { it.speed = 1.8f }
+                Person(if (fresh) post.tile % w + .5f else doorX.toFloat(), if (fresh) post.tile / w + .5f else d - .5f, shirt, skin).also {
+                    it.speed = 1.8f; it.pants = key and 15; it.hair = (key * 7) and 15
+                }
             }
-            if (staffGoal[key] != tile || p.goal != tile) {
-                staffGoal[key] = tile
-                goTo(p, tile, occ)
+            if (staffGoal[key] != post.tile || p.goal != post.tile) {
+                staffGoal[key] = post.tile
+                p.pose = 0; p.z = 0f; p.seated = false
+                goTo(p, post.tile, occ)
             }
             if (dt > 0f && p.pathIdx < p.path.size) {
                 val t = p.path[p.pathIdx]
                 if (moveToward(t % w + .5f, t / w + .5f, p.speed * dt, false, p)) p.pathIdx++
+            } else if (p.pathIdx >= p.path.size) {
+                val seat = post.seat
+                if (seat != null && !p.seated) {
+                    if (dt <= 0f || moveToward(seat.x, seat.y, p.speed * dt, false, p)) { p.x = seat.x; p.y = seat.y; p.seated = true; p.pose = 1; p.z = seat.z; p.heading = seat.heading }
+                } else if (seat == null && post.face >= 0) {
+                    items.getOrNull(post.face)?.let { it2 ->
+                        Catalog.item(it2.itemId)?.let { def ->
+                            val (fw, fd) = itemDims(def, it2.rot)
+                            p.heading = kotlin.math.atan2(it2.x + fw / 2f - p.x, -(it2.y + fd / 2f - p.y))
+                        }
+                    }
+                }
             }
         }
         staff.clear()

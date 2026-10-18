@@ -69,8 +69,10 @@ data class BizDay(
     val satisfaction: Double,
     /** Licence fees (cinemas and theaters). */
     val fees: Double = 0.0,
+    /** Cost of shoplifted stock. */
+    val stolen: Double = 0.0,
 ) {
-    val profit get() = revenue - cogs - wages - rent - marketing - fees
+    val profit get() = revenue - cogs - wages - rent - marketing - fees - stolen
 }
 
 @Serializable
@@ -120,6 +122,10 @@ data class Business(
     val history: MutableList<BizDay> = mutableListOf(),
     var pendingDelivery: MutableList<CargoItem> = mutableListOf(),
     var pendingDeliveryAt: Long = -1,
+    /** Dirt on each floor tile (0..100), row by row over the interior grid. */
+    var dirt: MutableList<Float> = mutableListOf(),
+    /** Cost of stock shoplifted today. */
+    var stolenToday: Double = 0.0,
 ) {
     val type get() = Catalog.type(typeId)
 }
@@ -157,6 +163,16 @@ data class Employee(
             return perDay * Integer.bitCount(days)
         }
 }
+
+@Serializable
+enum class Sky(val label: String, val icon: String) {
+    CLEAR("Clear", "☀"), CLOUDY("Cloudy", "⛅"), RAIN("Rain", "🌧"), STORM("Thunderstorm", "⛈"), SNOW("Snow", "❄"), FOG("Fog", "🌫");
+
+    val wet get() = this == RAIN || this == STORM || this == SNOW
+}
+
+@Serializable
+data class WeatherSpan(val start: Long, val end: Long, val sky: Sky)
 
 @Serializable
 data class Rental(val buildingId: Int, var rentPerMonth: Double, val startDay: Int, val owned: Boolean = false)
@@ -293,6 +309,10 @@ data class GameState(
     /** Bankruptcy no longer ends the game. */
     var sandbox: Boolean = false,
     var gameOver: Boolean = false,
+    /** Upcoming weather, in time order. */
+    val weather: MutableList<WeatherSpan> = mutableListOf(),
+    /** 0..1 snow lying on the ground. */
+    var snowCover: Double = 0.0,
 ) {
     val day: Int get() = (minute / MINUTES_PER_DAY).toInt() + 1
     val hour: Int get() = ((minute % MINUTES_PER_DAY) / 60).toInt()

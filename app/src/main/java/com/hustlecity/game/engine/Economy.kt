@@ -95,6 +95,14 @@ object BizCalc {
         return e.state.employees.filter { it.businessId == b.id && it.role == role && it.worksAt(hour, weekday) }.map { it.skill }
     }
 
+    /** Customers per hour the [n] busiest registers can check out (counters are faster than registers). */
+    fun registerCapacity(b: Business, n: Int): Double =
+        b.furniture.mapNotNull { p -> Catalog.item(p.itemId)?.takeIf { it.fn == ItemFn.CASH_REGISTER }?.let { if (it.capacity > 0) it.capacity else 40 } }
+            .sortedDescending().take(n).sum().toDouble()
+
+    /** Share of shoplifting attempts that security stops. */
+    fun security(b: Business) = (count(b, "security_cam") * .3 + count(b, "security_gate") * .55).coerceAtMost(.95)
+
     fun cleaners(e: GameEngine, b: Business, hour: Int, weekday: Int) =
         e.state.employees.count { it.businessId == b.id && it.role == StaffRole.CLEANER && it.worksAt(hour, weekday) }
 
@@ -124,14 +132,14 @@ object BizCalc {
         if (type.office) {
             // clients find firms by reputation and advertising rather than foot traffic
             val comp = 1.0 / (1.0 + .06 * e.economy.rivals.competitionFor(b))
-            return type.baseDemand * (.35 + .9 * b.reputation) * (1.0 + b.marketing) * type.curve[hour] * comp
+            return type.baseDemand * (.35 + .9 * b.reputation) * (1.0 + b.marketing) * type.curve[hour] * comp * e.weather.demandFactor(type)
         }
         val promo = promotion(b, building)
         val hood = City.neighborhoods[building.neighborhood]
         val wealth = if (type.wealthSensitive) hood.wealth.toDouble().pow(1.6) else 1.0
         val comp = 1.0 / (1.0 + .15 * e.economy.rivals.competitionFor(b))
         val rep = .55 + .9 * b.reputation
-        return type.baseDemand * (.25 + 1.6 * promo) * type.curve[hour] * wealth * comp * rep
+        return type.baseDemand * (.25 + 1.6 * promo) * type.curve[hour] * wealth * comp * rep * e.weather.demandFactor(type)
     }
 
     /** Customers per hour the business can serve with the given workers. */
@@ -142,7 +150,7 @@ object BizCalc {
         val n = workers.size
         val skill = workers.average()
         // billable hours: one per professional at a desk, more for skilled staff
-        if (b.type.office) return min(count(b, "desk"), n) * (.6 + .4 * skill)
+        if (b.type.office) return min(count(b, "desk"), n) * (.6 + .4 * skill) * (if (count(b, "copier") > 0) 1.05 else 1.0)
         val registers = countFn(b, ItemFn.CASH_REGISTER)
         val seats = b.furniture.sumOf { p -> Catalog.item(p.itemId)?.takeIf { "cinema_seat" in it.tags }?.capacity ?: 0 }.toDouble()
         var cap = when (b.typeId) {
@@ -151,8 +159,8 @@ object BizCalc {
                 val floor = count(b, "dance_floor") * 35.0
                 minOf(min(bars, n) * 45.0 * (.6 + .4 * skill), floor)
             }
-            "cinema" -> minOf(min(registers, n) * 40.0 * (.6 + .4 * skill), seats, count(b, "screen") * 45.0)
-            "theater" -> minOf(min(registers, n) * 40.0 * (.6 + .4 * skill), seats, count(b, "stage") * 40.0)
+            "cinema" -> minOf(registerCapacity(b, n) * (.6 + .4 * skill), seats, count(b, "screen") * 45.0)
+            "theater" -> minOf(registerCapacity(b, n) * (.6 + .4 * skill), seats, count(b, "stage") * 40.0)
             "gym" -> {
                 val eq = b.furniture.sumOf { p -> Catalog.item(p.itemId)?.takeIf { "workout" in it.tags }?.capacity ?: 0 } * 1.5
                 val lockers = count(b, "locker") * 16.0
@@ -163,9 +171,11 @@ object BizCalc {
                 val chairs = count(b, "hair_chair")
                 if (registers == 0) 0.0 else min(chairs, n) * 2.2 * (.7 + .3 * skill)
             }
-            else -> min(registers, n) * 40.0 * (.6 + .4 * skill)
+            "produce" -> registerCapacity(b, n) * (.6 + .4 * skill) * (if (count(b, "scale") > 0) 1.15 else 1.0)
+            else -> registerCapacity(b, n) * (.6 + .4 * skill)
         }
-        if (building != null) cap = min(cap, building.customerLimit.toDouble())
+        // shopping baskets let more people shop at once
+        if (building != null) cap = min(cap, building.customerLimit + 15.0 * min(3, count(b, "baskets")))
         return cap
     }
 
@@ -202,6 +212,7 @@ class Economy(private val e: GameEngine) {
     /** Last computed served customers per hour, per business id (for visuals and Insight). */
     val servedRate = HashMap<Int, Double>()
     val rivals = RivalAI(e)
+    val dirt = DirtModel(e)
     val capacityNow = HashMap<Int, Int>()
 
     fun minute() {
@@ -267,11 +278,14 @@ class Economy(private val e: GameEngine) {
         var bought = false
         val products = b.type.products
         if (products.isEmpty()) return
-        val picks = products.filter { rnd.nextDouble() < it.second }.ifEmpty { listOf(products.first()) }
+        // what people want depends on the weather: umbrellas in the rain, ice cream in the heat
+        val picks = products.filter { rnd.nextDouble() < (it.second * e.weather.productFactor(it.first)).coerceAtMost(.95) }.ifEmpty { listOf(products.first()) }
         for ((pid, _) in picks) {
             val p = Catalog.product(pid) ?: continue
-            wanted++
             val available = if (p.service) BizCalc.count(b, p.tag) > 0 else (b.stock[pid] ?: 0) > 0
+            // extras the store doesn't carry are no disappointment
+            if (!available && pid in b.type.optional && (p.service || BizCalc.capacityFor(b, pid) == 0)) continue
+            wanted++
             if (!available) { missing++; continue }
             val price = b.prices[pid] ?: p.price
             val prob = BizCalc.buyProbability(price / BizCalc.marketPrice(e, b, pid))
@@ -289,8 +303,17 @@ class Economy(private val e: GameEngine) {
         b.customersToday++
         b.hourlyToday[e.state.hour] = b.hourlyToday[e.state.hour] + 1
         val area = building?.area ?: 75
-        // office clients rarely visit; shops get dirty with every customer
-        if (!b.type.office) b.cleanliness = (b.cleanliness - 28.0 / area).coerceAtLeast(0.0)
+        // office clients rarely visit; shops get dirty with every customer, along the routes they walk
+        if (!b.type.office) dirt.onCustomer(b, area)
+        // shoplifting: valuable, easy-to-pocket goods go missing unless security stops it
+        if (b.type.theftRisk > 0 && rnd.nextDouble() < b.type.theftRisk * (1 - BizCalc.security(b))) {
+            val stocked = b.stock.entries.filter { it.value > 0 }
+            if (stocked.isNotEmpty()) {
+                val (pid, q) = stocked[rnd.nextInt(stocked.size)]
+                b.stock[pid] = q - 1
+                b.stolenToday += b.unitCost[pid] ?: Catalog.product(pid)?.cost ?: 0.0
+            }
+        }
         b.satPrice += if (priceSamples == 0) .5 else priceScore / priceSamples
         b.satAvail += if (wanted == 0) 1.0 else 1.0 - missing.toDouble() / wanted
         b.satWait += waitScore
@@ -319,10 +342,11 @@ class Economy(private val e: GameEngine) {
             val cleaners = BizCalc.cleaners(e, b, prevHour, prevWeekday)
             if (cleaners > 0) {
                 val boost = if (BizCalc.countFn(b, ItemFn.CLEANING) > 0) 1.5 else 1.0
-                b.cleanliness = (b.cleanliness + cleaners * 30.0 * boost).coerceAtMost(100.0)
+                dirt.clean(b, cleaners * 30.0 * boost)
             }
         }
         if (hour == 6) purchasingRun()
+        e.weather.hourly()
         // scheduled deliveries
         if (Catalog.COURSE_LOGISTICS in s.player.courses) {
             for (b in s.businesses) {
@@ -470,7 +494,11 @@ class Economy(private val e: GameEngine) {
             val wages = s.employees.filter { it.businessId == b.id }.sumOf { it.hoursToday * it.wage }
             val fees = if (b.tempClosed) 0.0 else b.type.dailyFee
             if (fees > 0) e.spend(fees, "Licences", allowDebt = true, silent = true)
-            b.history += BizDay(finishedDay, b.revenueToday, b.cogsToday, wages, rent, marketingCost, b.customersToday, sat, fees)
+            b.history += BizDay(finishedDay, b.revenueToday, b.cogsToday, wages, rent, marketingCost, b.customersToday, sat, fees, b.stolenToday)
+            if (b.stolenToday >= 40 && BizCalc.security(b) < .3) {
+                e.message("${b.name}", "Shoplifters took ${e.money(b.stolenToday)} of stock yesterday. Security cameras or anti-theft gates (Essentials Appliances) stop most of it.")
+            }
+            b.stolenToday = 0.0
             if (b.history.size > 30) b.history.removeAt(0)
             for (h in 0 until 24) { b.hourlyYesterday[h] = b.hourlyToday[h]; b.hourlyToday[h] = 0 }
             b.revenueToday = 0.0; b.cogsToday = 0.0; b.customersToday = 0; b.lostToday = 0

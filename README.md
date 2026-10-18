@@ -11,6 +11,8 @@ Native Kotlin + Jetpack Compose. The 3D city is rendered with a small custom eng
 - 2.5D perspective rendering with windows, storefronts, awnings, rooftop units, sun-tracking shadows, a day/night cycle with lit windows and street lamps.
 - Traffic with traffic lights: cars plan their turns and take smooth arcs, keep their distance and give way to pedestrians. Pedestrians cross on the walk signal, step aside for each other and walk into open shops. Buildings turn see-through when they block your view.
 - Walk with the on-screen joystick, or drive your own car with fuel, condition and cargo space. Taxis are available from any building card.
+- 3D people built from boxes, with walking, sitting, dancing and treadmill-running animations. Pedestrians carry umbrellas in the rain.
+- Dynamic weather that follows the seasons (the game starts in April): clear, cloudy, rain, thunderstorms with lightning and thunder, snow that settles on roofs and sidewalks, and fog. Streets look wet after rain, and the top bar shows a three-day forecast.
 
 **Your character**
 - Energy, hunger and happiness. Sleep at home, eat from your fridge or at restaurants, and avoid passing out.
@@ -23,7 +25,11 @@ Native Kotlin + Jetpack Compose. The 3D city is rendered with a small custom eng
 - Rent a building in **Realty** and pick a business type, comparing inventory sources, nearby competitors and primary products.
 - Buy furniture at three appliance stores. Load it into your car (or pay for delivery) and place it with the grid-based **Interior Designer**, with floor and wall colors.
 - Buy wholesale stock at Metro Wholesale, CityDistro or Global Imports, then unload it onto shelves, fridges and machines.
-- Customer simulation is driven by traffic index, marketing, hour of day, competitors, price acceptance, wait times, cleanliness, interior and staff skill.
+- Customer simulation is driven by traffic index, marketing, hour of day, weather, competitors, price acceptance, wait times, cleanliness, interior and staff skill.
+- Weather changes who shops and what they buy. Bad weather keeps walk-in shoppers home but fills cinemas, cafés and bookstores. Umbrellas sell in the rain, ice cream and cold drinks in the heat, coffee and coat checks in the cold.
+- Procedural floor dirt: customers track dirt along the routes they walk, entrances get muddy when it's wet, and spills and litter appear. Trash cans catch litter, and cleaners scrub the dirtiest spots first.
+- Shoplifting hits jewelry, electronics, clothing and liquor stores; security cameras and anti-theft gates stop it.
+- A full furniture range for every business type: checkout counters, shopping baskets, security, trash cans, pizza ovens, ice cream freezers, digital scales, more gym machines, coat checks, lounge sofas, stage lights, round racks, shoe and magazine racks, mannequins, rugs, copiers, meeting tables and more. Each piece is sold at one of the four furniture stores.
 - Inside, customers browse displays, queue at the register, pay, then sit down to eat, watch the film or dance. They never share a spot, and staff walk to their posts and cleaners make their rounds.
 
 **Growing the empire**

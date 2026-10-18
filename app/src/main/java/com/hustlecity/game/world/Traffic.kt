@@ -57,6 +57,23 @@ class Traffic(private val rnd: Random = Random(7)) {
     var doorCount = 0
     val peds = ArrayList<Agent>()
     var lightClock = 0f
+    /** Weather: cars drive slower on wet or snowy roads, pedestrians walk faster in the rain. */
+    var speedFactor = 1f
+    var hurry = 1f
+
+    /** Eases the number of pedestrians toward [n]: newcomers walk in from the edge, leavers vanish off-screen. */
+    fun setPedTarget(n: Int, fx: Float, fy: Float) {
+        if (peds.size < n) peds += Agent().also { it.lastCross = EDGE }
+        else if (peds.size > n) {
+            val far = peds.filter { !it.hidden }.maxByOrNull { dist(it.x, it.y, fx, fy) } ?: return
+            if (dist(far.x, far.y, fx, fy) > 60f) peds.remove(far)
+        }
+    }
+
+    private companion object {
+        /** Spawn at the edge of the view (not anywhere). */
+        const val EDGE = Int.MIN_VALUE + 5
+    }
 
     private val carColors = intArrayOf(
         c(0xFFC0392B), c(0xFFE0E0E0), c(0xFF2C3E50), c(0xFF7F8C8D), c(0xFF1F3A93), c(0xFFF2F2F2), c(0xFF8E2442),
@@ -165,7 +182,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             stepCar(a, dt, blockerX, blockerY)
         }
         for (p in peds) {
-            if (initial || p.lastCross == Int.MIN_VALUE || (dist(p.x, p.y, fx, fy) > radius * .7f && p.state != 4)) spawnPed(p, fx, fy, radius * .7f, initial || p.lastCross == Int.MIN_VALUE)
+            if (initial || p.lastCross == Int.MIN_VALUE || p.lastCross == EDGE || (dist(p.x, p.y, fx, fy) > radius * .7f && p.state != 4)) spawnPed(p, fx, fy, radius * .7f, initial || p.lastCross == Int.MIN_VALUE)
             stepPed(p, dt)
         }
     }
@@ -229,7 +246,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             a.plan = chooseTurn(a, cross, true)
             a.timer = if (a.plan == 0) 0f else (if (a.axis == 0) 3f else if (rnd.nextBoolean()) 2.6f else 7.4f)
         }
-        var target = a.cruise
+        var target = a.cruise * speedFactor
         val turning = inRange && a.planCross == cross && a.plan > 0
         if (turning) {
             // the new lane's position along this road; start the arc a few meters before it
@@ -336,7 +353,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             a.plan = if (!inRange) 3 else if (rnd.nextFloat() < .4f) chooseTurn(a, cross, false) else 0
             if (a.plan == 0 && !((cross + a.dir) in 0..crossMax(a))) a.plan = 1
         }
-        var speed = a.cruise
+        var speed = a.cruise * hurry
         if (a.state == 2) {
             // on the crosswalk: done once past the far curb; hurry if the light is about to change
             if ((along(a) - a.tx) * a.dir > 0f) a.state = 0

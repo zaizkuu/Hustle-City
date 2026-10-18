@@ -50,6 +50,16 @@ class WorldRenderer(private val e: GameEngine) {
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND }
     private val path = Path()
     private val rect = RectF()
+    private val people = PersonPainter(scene)
+
+    // weather particles in screen space: x, y, speed, size
+    private val pX = FloatArray(420); private val pY = FloatArray(420); private val pV = FloatArray(420); private val pS = FloatArray(420)
+    private var particlesInit = false
+    private var lastT = 0f
+    private val rainPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND }
+    private val snowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val splashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val flashPaint = Paint()
 
     // per-frame lookups by building id (avoid linear scans in the draw loops)
     private val bizByBuilding = HashMap<Int, com.hustlecity.game.model.Business>()
@@ -120,6 +130,12 @@ class WorldRenderer(private val e: GameEngine) {
         setupCamera(w, h)
         val day = e.daylight()
         scene.applyDaylight(if (mapMode) max(day, .75f) else day)
+        val v = e.skyVis
+        if (!mapMode) scene.applyWeather(v.cloud, v.rain, v.storm, v.flash * .6f)
+        scene.fog = if (mapMode) 0f else max(max(v.fog, v.rain * .3f), max(v.snow * .35f, v.storm * .2f))
+        scene.fogStart = proj.dist * (if (v.fog > .3f) .3f else .7f)
+        scene.fogEnd = proj.dist * (if (v.fog > .3f) 1.5f else 3f)
+        scene.snow = if (e.hasGame) e.state.snowCover.toFloat() else 0f
         // sun moves east -> south -> west over the day
         val hour = e.state.hour + e.state.minuteOfHour / 60f
         val t = ((hour - 6f) / 12f).coerceIn(0f, 1f)
@@ -128,7 +144,7 @@ class WorldRenderer(private val e: GameEngine) {
         val len = .45f + 1.3f * (1f - sin(ang))
         shadowDX = -scene.sunX * len; shadowDY = -scene.sunY * len
 
-        canvas.drawColor(scene.lit(WATER, 1f))
+        canvas.drawColor(scene.mix(scene.lit(WATER, 1f), scene.lit(scene.fogColor, 1f), scene.fog * .7f))
         rebuildLookups()
         if (e.hasGame) { val f = e.focusPoint(); focusX = f.first; focusY = f.second }
         proj.visibleGround(bbox, 30f)
@@ -145,7 +161,7 @@ class WorldRenderer(private val e: GameEngine) {
                 0 -> drawBuilding(e.city.buildings[dIdx[i]])
                 1 -> drawTree(dIdx[i])
                 2 -> e.traffic.cars.getOrNull(dIdx[i])?.let { drawCar(it.x, it.y, it.heading, it.length, it.width, it.height, it.color, it.style, false) }
-                3 -> e.traffic.peds.getOrNull(dIdx[i])?.let { drawPerson(it.x, it.y, it.color, SKIN_TONES[(dIdx[i] * 7) % SKIN_TONES.size], it.phase, 1f) }
+                3 -> e.traffic.peds.getOrNull(dIdx[i])?.let { drawPed(it, dIdx[i]) }
                 4 -> drawPlayer()
                 5 -> e.state.vehicle(dIdx[i])?.let { v ->
                     if (e.state.player.driving != v.id && !mapMode) scene.disc(v.x, v.y, .03f, 2.6f, 2.6f, 14, scene.withAlpha(c(0xFF27AE60), .35f))
@@ -156,7 +172,61 @@ class WorldRenderer(private val e: GameEngine) {
             }
         }
         batch.flush()
+        if (!mapMode) drawWeather(canvas, w, h)
         drawOverlays(canvas, w, h)
+    }
+
+    /** Rain streaks with splashes, drifting snowflakes and lightning, drawn over the city. */
+    private fun drawWeather(canvas: Canvas, w: Int, h: Int) {
+        val v = e.skyVis
+        val dt = (e.realTime - lastT).coerceIn(0f, .1f)
+        lastT = e.realTime
+        val rnd = e.rnd
+        if (!particlesInit) {
+            for (i in pX.indices) { pX[i] = rnd.nextFloat() * w; pY[i] = rnd.nextFloat() * h; pV[i] = rnd.nextFloat(); pS[i] = rnd.nextFloat() }
+            particlesInit = true
+        }
+        val d = density
+        if (v.rain > .02f) {
+            val n = (v.rain * pX.size).toInt()
+            rainPaint.color = scene.withAlpha(0xFFD6E2EE.toInt(), .32f + .15f * v.storm)
+            rainPaint.strokeWidth = 1.1f * d
+            val slant = .22f + .25f * v.storm
+            for (i in 0 until n) {
+                val speed = (900f + pV[i] * 500f) * d / 2f
+                val len = (14f + pS[i] * 16f) * d
+                pY[i] += speed * dt
+                pX[i] += speed * dt * slant
+                if (pY[i] > h || pX[i] > w + 40) { pY[i] = -len - rnd.nextFloat() * 60f; pX[i] = rnd.nextFloat() * (w + 80f) - 80f }
+                canvas.drawLine(pX[i], pY[i], pX[i] - len * slant, pY[i] - len, rainPaint)
+                // a few splashes on the ground
+                if (i % 9 == 0) {
+                    val ph = (e.realTime * 3f + pS[i] * 7f) % 1f
+                    val sx = (pS[i] * 9301f + pV[i] * 49297f) % w
+                    val sy = h * .35f + ((pV[i] * 7919f + pS[i] * 104729f) % (h * .65f))
+                    splashPaint.color = scene.withAlpha(0xFFE3ECF5.toInt(), (1f - ph) * .35f * v.rain)
+                    splashPaint.strokeWidth = d
+                    rect.set(sx - ph * 7f * d, sy - ph * 2.5f * d, sx + ph * 7f * d, sy + ph * 2.5f * d)
+                    canvas.drawOval(rect, splashPaint)
+                }
+            }
+        }
+        if (v.snow > .02f) {
+            val n = (v.snow * pX.size * .7f).toInt()
+            snowPaint.color = scene.withAlpha(0xFFFFFFFF.toInt(), .8f)
+            for (i in 0 until n) {
+                val j = pX.size - 1 - i
+                val speed = (40f + pV[j] * 70f) * d / 2f
+                pY[j] += speed * dt
+                pX[j] += sin(e.realTime * 1.3f + pS[j] * 9f) * 18f * d * dt
+                if (pY[j] > h) { pY[j] = -5f; pX[j] = rnd.nextFloat() * w }
+                canvas.drawCircle(pX[j], pY[j], (1.1f + pS[j] * 1.6f) * d, snowPaint)
+            }
+        }
+        if (v.flash > .01f) {
+            flashPaint.color = scene.withAlpha(0xFFF4F7FF.toInt(), v.flash * .45f)
+            canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), flashPaint)
+        }
     }
 
     // ------------------------------------------------------------------ ground
@@ -168,8 +238,15 @@ class WorldRenderer(private val e: GameEngine) {
     }
 
     private fun drawGround() {
-        val sidewalk = scene.lit(SIDEWALK, .97f)
-        val asphalt = scene.lit(ASPHALT, 1f)
+        // snow lies on sidewalks and parks, roads turn to slush; rain darkens everything
+        val snow = scene.snow
+        val wet = if (mapMode) 0f else e.skyVis.wet
+        val white = scene.lit(0xFFF2F5F8.toInt(), 1f)
+        val dark = scene.lit(0xFF2A2D33.toInt(), 1f)
+        val sidewalk = scene.mix(scene.mix(scene.lit(SIDEWALK, .97f), white, snow * .9f), dark, wet * .22f)
+        val asphalt = scene.mix(scene.mix(scene.lit(ASPHALT, 1f), white, snow * .45f), dark, wet * .3f)
+        val grass = scene.mix(scene.lit(GRASS, 1f), white, snow * .95f)
+        val pathC = scene.mix(scene.lit(PATH, 1f), white, snow * .9f)
         clipRect(-City.AV_HALF - City.SIDEWALK, -City.ST_HALF - City.SIDEWALK, City.WIDTH + City.AV_HALF + City.SIDEWALK, City.HEIGHT + City.ST_HALF + City.SIDEWALK, 0f, sidewalk)
         for (i in 0 until City.AVENUES) {
             val x = City.avenueX(i)
@@ -199,12 +276,12 @@ class WorldRenderer(private val e: GameEngine) {
             for (b in e.city.blocks[row * City.COLS + col]) {
                 when (b.kind) {
                     BKind.PARK -> {
-                        clipRect(b.minX, b.minY, b.maxX, b.maxY, .02f, scene.lit(GRASS, 1f))
-                        clipRect(b.cx - 1.5f, b.minY, b.cx + 1.5f, b.maxY, .04f, scene.lit(PATH, 1f))
-                        clipRect(b.minX, b.cy - 1.5f, b.maxX, b.cy + 1.5f, .04f, scene.lit(PATH, 1f))
+                        clipRect(b.minX, b.minY, b.maxX, b.maxY, .02f, grass)
+                        clipRect(b.cx - 1.5f, b.minY, b.cx + 1.5f, b.maxY, .04f, pathC)
+                        clipRect(b.minX, b.cy - 1.5f, b.maxX, b.cy + 1.5f, .04f, pathC)
                     }
                     BKind.PARKING -> {
-                        clipRect(b.minX, b.minY, b.maxX, b.maxY, .02f, scene.lit(c(0xFF55585E), 1f))
+                        clipRect(b.minX, b.minY, b.maxX, b.maxY, .02f, scene.mix(scene.mix(scene.lit(c(0xFF55585E), 1f), white, snow * .6f), dark, wet * .3f))
                         if (!mapMode && proj.dist < 300) {
                             var x = b.minX + 3f
                             val line = scene.lit(WHITE_LINE, .9f)
@@ -622,8 +699,9 @@ class WorldRenderer(private val e: GameEngine) {
         val t = e.city.trees[i]
         scene.box(t.x - .15f, t.y - .15f, 0f, t.x + .15f, t.y + .15f, t.h * .55f, TRUNK, TRUNK)
         val base = TREE[t.tone]
-        scene.blob(t.x, t.y, t.h * .75f, t.r, scene.lit(base, .82f), 10)
-        scene.blob(t.x, t.y, t.h * .75f, t.r * .7f, scene.lit(base, 1.05f), 9, -.18f, -.25f)
+        val white = scene.lit(0xFFF2F5F8.toInt(), 1f)
+        scene.blob(t.x, t.y, t.h * .75f, t.r, scene.mix(scene.lit(base, .82f), white, scene.snow * .35f), 10)
+        scene.blob(t.x, t.y, t.h * .75f, t.r * .7f, scene.mix(scene.lit(base, 1.05f), white, scene.snow * .65f), 9, -.18f, -.25f)
     }
 
     private fun drawCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int, owned: Boolean) {
@@ -680,17 +758,20 @@ class WorldRenderer(private val e: GameEngine) {
         scene.box(x - .25f, y - .25f, 3.6f, x + .25f, y + .25f, 4.5f, lightColor, c(0xFF22252A))
     }
 
-    private fun drawPerson(x: Float, y: Float, shirt: Int, skin: Int, phase: Float, scale: Float) {
-        val bob = abs(sin(phase)) * .05f
-        scene.billboard(x, y, 0f, .85f * scale, .15f * scale, scene.lit(PANTS, 1f))
-        scene.billboard(x, y, .85f * scale + bob, 1.45f * scale + bob, .24f * scale, scene.lit(shirt, 1f))
-        scene.billboard(x, y, 1.5f * scale + bob, 1.8f * scale + bob, .14f * scale, scene.lit(skin, 1f))
+    private fun drawPed(a: com.hustlecity.game.world.Agent, i: Int) {
+        // most people carry an umbrella in the rain (and some in the snow)
+        val v = e.skyVis
+        val umbrella = if ((v.rain > .25f && i % 10 < 7) || (v.snow > .4f && i % 10 < 3)) PersonPainter.UMBRELLAS[i % PersonPainter.UMBRELLAS.size] else 0
+        people.draw(a.x, a.y, 0f, a.heading, a.phase, (a.speed / 1.3f).coerceIn(0f, 1f),
+            a.color, PersonPainter.PANTS[(i * 3) % PersonPainter.PANTS.size], SKIN_TONES[(i * 7) % SKIN_TONES.size], PersonPainter.HAIR[(i * 5) % PersonPainter.HAIR.size],
+            umbrella = umbrella)
     }
 
     private fun drawPlayer() {
         val p = e.state.player
         scene.disc(p.x, p.y, .04f, 1f, 1f, 14, scene.withAlpha(c(0xFF27AE60), .55f))
-        drawPerson(p.x, p.y, SHIRT_COLORS[p.shirt % SHIRT_COLORS.size], SKIN_TONES[p.skin % SKIN_TONES.size], e.realTime * 9f, 1.12f)
+        people.draw(p.x, p.y, 0f, p.heading, e.walkPhase, e.walkAmount, SHIRT_COLORS[p.shirt % SHIRT_COLORS.size], PersonPainter.PANTS[1],
+            SKIN_TONES[p.skin % SKIN_TONES.size], PersonPainter.HAIR[p.skin % PersonPainter.HAIR.size], 1.12f)
     }
 
     // ------------------------------------------------------------------ overlays

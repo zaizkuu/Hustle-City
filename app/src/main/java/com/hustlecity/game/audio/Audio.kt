@@ -12,7 +12,7 @@ import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.random.Random
 
-enum class Sfx { TAP, CASH, DOOR, CHIME, ERROR, CAR_DOOR }
+enum class Sfx { TAP, CASH, DOOR, CHIME, ERROR, CAR_DOOR, THUNDER }
 
 /**
  * Procedural audio: a radio with generated music stations, sound effects and an engine hum,
@@ -42,6 +42,8 @@ object Audio {
         private set
     /** Car engine throttle 0..1, or -1 when not driving. */
     @Volatile var engineLevel = -1f
+    /** Rain on the streets 0..1 (quieter indoors). */
+    @Volatile var rainLevel = 0f
 
     private val queue = ConcurrentLinkedQueue<FloatArray>()
     @Volatile private var running = false
@@ -100,6 +102,11 @@ object Audio {
         var engineLp = 0.0
         var engineAmp = 0.0
         var masterLp = 0.0
+        var rainAmp = 0.0
+        var rainLp = 0.0
+        var rainHp = 0.0
+        var rainSeed = 12345
+        var drip = 0.0
         try {
             while (running) {
                 pendingStation.let { if (it >= 0) { station = it; trackIndex = 0; pendingStation = -1; music = MusicGen(station, trackIndex) } }
@@ -110,6 +117,7 @@ object Audio {
                 val mv = if (radioOn) musicVolume else 0f
                 val sv = sfxVolume
                 val eng = engineLevel
+                val rainTarget = rainLevel.toDouble()
                 for (i in 0 until n) {
                     var m = music.next() * mv
                     // engine hum
@@ -122,6 +130,17 @@ object Audio {
                         val raw = (enginePhase * 2 - 1) + .5 * (if (enginePhase < .5) 1.0 else -1.0)
                         engineLp += (raw - engineLp) * .08
                         m += (engineLp * engineAmp * sv).toFloat()
+                    }
+                    // rain: band-passed noise plus the odd heavier drop
+                    rainAmp += (rainTarget - rainAmp) * .00005
+                    if (rainAmp > 1e-3) {
+                        rainSeed = rainSeed * 1103515245 + 12345
+                        val white = ((rainSeed ushr 8) and 0xFFFF) / 32768.0 - 1.0
+                        rainLp += (white - rainLp) * .35
+                        rainHp += (rainLp - rainHp) * .02
+                        if ((rainSeed ushr 20) and 1023 == 7) drip = .6
+                        drip *= .995
+                        m += (((rainLp - rainHp) * .55 + drip * white) * rainAmp * .28 * sv).toFloat()
                     }
                     var fx = 0f
                     for (p in active) if (p.pos < p.data.size) fx += p.data[p.pos++]
@@ -166,6 +185,18 @@ object Audio {
                     val t = i.toDouble() / SR
                     lp += ((rnd.nextFloat() * 2 - 1) - lp) * .05f
                     b[i] = (sine(t * 70) * .6f + lp * 1.5f) * exp(-t * 14).toFloat() * .5f
+                }
+            }
+            Sfx.THUNDER -> buf(2.8).also { b ->
+                var lp = 0f; var lp2 = 0f
+                for (i in b.indices) {
+                    val t = i.toDouble() / SR
+                    val w = rnd.nextFloat() * 2 - 1
+                    lp += (w - lp) * .02f
+                    lp2 += (lp - lp2) * .05f
+                    val crack = if (t < .12) w * (1 - t / .12).toFloat() * .5f else 0f
+                    val roll = (1 - exp(-t * 18)).toFloat() * exp(-t * 1.3).toFloat() * (1f + .4f * sine(t * 3.1))
+                    b[i] = (crack * .4f + lp2 * 9f * roll) * .55f
                 }
             }
             Sfx.CAR_DOOR -> buf(.25).also { b ->

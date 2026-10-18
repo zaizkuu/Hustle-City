@@ -195,6 +195,40 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         ambB = min(1f, a * (if (daylight < .6f) 1.18f else 1f))
     }
 
+    /** Overcast skies dim and cool the light; a lightning flash brightens everything for a moment. */
+    fun applyWeather(cloud: Float, rain: Float, storm: Float, flash: Float) {
+        val dim = 1f - .14f * cloud - .1f * rain - .12f * storm
+        ambR *= dim; ambG *= dim; ambB *= dim * (1f + .05f * rain)
+        if (flash > 0f) { ambR += flash * .7f; ambG += flash * .7f; ambB += flash * .8f }
+    }
+
+    /** Distance haze: 0 = none. Colors fade toward [fogColor] between [fogStart] and [fogEnd] meters from the camera. */
+    var fog = 0f
+    var fogColor = 0xFFB8C2CC.toInt()
+    var fogStart = 80f
+    var fogEnd = 400f
+
+    /** Snow lying on top faces (roofs, car roofs, awnings), 0..1. */
+    var snow = 0f
+    private val SNOW_WHITE = 0xFFF2F5F8.toInt()
+
+    fun mix(a: Int, b: Int, t: Float): Int {
+        if (t <= 0f) return a
+        val u = t.coerceAtMost(1f)
+        val ar = (a shr 16) and 255; val ag = (a shr 8) and 255; val ab = a and 255
+        val br = (b shr 16) and 255; val bg = (b shr 8) and 255; val bb = b and 255
+        return (a and 0xFF000000.toInt()) or ((ar + ((br - ar) * u).toInt()) shl 16) or ((ag + ((bg - ag) * u).toInt()) shl 8) or (ab + ((bb - ab) * u).toInt())
+    }
+
+    private fun fogged(color: Int, depth: Float): Int {
+        if (fog <= 0f) return color
+        val t = ((depth - fogStart) / (fogEnd - fogStart)).coerceIn(0f, 1f) * fog
+        return mix(color, lit(fogColor, 1f) and 0xFFFFFF or (color and 0xFF000000.toInt()), t)
+    }
+
+    /** A top-face color with snow on it. */
+    fun snowy(color: Int, amount: Float = 1f): Int = if (snow <= 0f) color else mix(color, SNOW_WHITE, snow * amount)
+
     fun lit(color: Int, f: Float): Int {
         val a = color ushr 24
         val r = min(255f, ((color shr 16) and 255) * f * ambR).toInt()
@@ -218,6 +252,7 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         if (zc < proj.near) return
         val rr = r * proj.focal / zc
         if (rr < .4f) return
+        val fc = fogged(color, zc)
         val px = proj.centerX + proj.focal * proj.camXOf(x, y, z) / zc + dxFrac * rr
         val py = proj.centerY - proj.focal * proj.camYOf(x, y, z) / zc + dyFrac * rr
         if (px + rr < 0 || px - rr > proj.screenW || py + rr < 0 || py - rr > proj.screenH) return
@@ -227,7 +262,7 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
             sx[i] = px + cos(a) * rr
             sy[i] = py + sin(a) * rr * squash
         }
-        batch.poly(sx, sy, n, color)
+        batch.poly(sx, sy, n, fc)
     }
 
     /** Emits a world polygon. Color is used as-is (apply [lit] beforehand). */
@@ -269,7 +304,9 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
             if (sy[i] < minY) minY = sy[i]; if (sy[i] > maxY) maxY = sy[i]
         }
         if (maxX < 0 || minX > proj.screenW || maxY < 0 || minY > proj.screenH) return
-        batch.poly(sx, sy, m, color)
+        var depth = 0f
+        if (fog > 0f) { for (i in 0 until m) depth += pz[i]; depth /= m }
+        batch.poly(sx, sy, m, if (fog > 0f) fogged(color, depth) else color)
     }
 
     fun quad(x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float, x2: Float, y2: Float, z2: Float, x3: Float, y3: Float, z3: Float, color: Int) {
@@ -307,7 +344,7 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         if (cyp > y1) quad(x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1, col(side, sideShade(0f, 1f)))
         if (cxp < x0) quad(x0, y0, z0, x0, y1, z0, x0, y1, z1, x0, y0, z1, col(side, sideShade(-1f, 0f)))
         if (cxp > x1) quad(x1, y0, z0, x1, y1, z0, x1, y1, z1, x1, y0, z1, col(side, sideShade(1f, 0f)))
-        if (czp > z1) quad(x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1, col(top, 1f))
+        if (czp > z1) quad(x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1, col(snowy(top), 1f))
         else if (czp < z0) quad(x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0, col(top, .5f))
     }
 
@@ -343,7 +380,7 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
             wx[1] = ax[1]; wy[1] = ay[1]; wz[1] = z1
             wx[2] = ax[2]; wy[2] = ay[2]; wz[2] = z1
             wx[3] = ax[3]; wy[3] = ay[3]; wz[3] = z1
-            poly(4, wx, wy, wz, lit(top, 1f))
+            poly(4, wx, wy, wz, lit(snowy(top), 1f))
         }
     }
 

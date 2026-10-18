@@ -273,6 +273,15 @@ private fun InsightTab(e: GameEngine, biz: Business) {
                 KeyValue("Customers today", "${biz.customersToday}")
                 KeyValue("Lost customers today", "${biz.lostToday}", HC.Red)
                 KeyValue("Sales today", e.money(biz.revenueToday), HC.Green)
+                // weather and security
+                val sky = e.weather.sky()
+                val wf = e.weather.demandFactor(biz.type)
+                KeyValue("Weather now", "${sky.icon} ${sky.label}, ${e.weather.temperature().toInt()}°C · " + (if (wf >= 1.005) "+${((wf - 1) * 100).toInt()}%" else if (wf <= .995) "−${((1 - wf) * 100).toInt()}%" else "±0%") + " customers",
+                    if (wf < .95) HC.Red else if (wf > 1.05) HC.Green else HC.Ink)
+                if (biz.type.theftRisk > 0) {
+                    val stolen = biz.history.lastOrNull()?.stolen ?: 0.0
+                    KeyValue("Shoplifting yesterday", e.money(stolen) + " (security ${(BizCalc.security(biz) * 100).toInt()}%)", if (stolen > 0) HC.Red else HC.Ink)
+                }
             }
         }
     }

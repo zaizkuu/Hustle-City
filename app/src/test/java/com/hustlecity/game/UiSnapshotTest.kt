@@ -297,7 +297,7 @@ class UiSnapshotTest {
         val biz = e.startBusiness(b.id, type, "Venue")!!
         biz.furniture += items
         biz.tempClosed = false
-        for ((n, r) in roles.withIndex()) e.state.employees += com.hustlecity.game.model.Employee(e.state.newId(), "S$n", r, .6, 20.0, 20.0, 30, businessId = biz.id, shiftStart = 0, shiftEnd = 0, days = 127)
+        for ((n, r) in roles.withIndex()) e.state.employees += com.hustlecity.game.model.Employee(e.state.newId(), "S$n", r, .6, 20.0, 20.0, 30, businessId = biz.id, shiftStart = 0, shiftEnd = 23, days = 127)
         e.state.player.x = b.doorX; e.state.player.y = b.doorY
         e.enterBuilding(b)
         e.economy.servedRate[biz.id] = 120.0
@@ -323,5 +323,67 @@ class UiSnapshotTest {
             PlacedItem("cinema_seats", 2, 5, 0), PlacedItem("cinema_seats", 6, 5, 0), PlacedItem("cash_register", 10, 7, 0), PlacedItem("concession_stand", 1, 7, 0)),
             listOf(com.hustlecity.game.data.StaffRole.CUSTOMER_SERVICE, com.hustlecity.game.data.StaffRole.PROJECTIONIST))
         shoot(e, "ui_cinema.png")
+    }
+
+    private fun weather(e: GameEngine, sky: com.hustlecity.game.model.Sky) {
+        e.state.weather.clear()
+        e.state.weather += com.hustlecity.game.model.WeatherSpan(e.state.minute - 60, e.state.minute + 3 * 1440L, sky)
+        e.weather.ensure()
+    }
+
+    @Test
+    fun streetRain() {
+        val e = game()
+        e.ui.tip = null
+        weather(e, com.hustlecity.game.model.Sky.RAIN)
+        e.skyVis.rain = .75f; e.skyVis.cloud = .9f; e.skyVis.wet = 1f
+        e.camera.dist = 38f; e.camera.zoom = 38f
+        repeat(30) { e.frame(1 / 30f) }
+        shoot(e, "street_rain.png")
+    }
+
+    @Test
+    fun streetSnow() {
+        val e = game()
+        e.ui.tip = null
+        weather(e, com.hustlecity.game.model.Sky.SNOW)
+        e.state.snowCover = 1.0
+        e.skyVis.snow = .85f; e.skyVis.cloud = .8f
+        e.camera.dist = 60f; e.camera.zoom = 60f
+        repeat(30) { e.frame(1 / 30f) }
+        shoot(e, "street_snow.png")
+    }
+
+    @Test
+    fun dirtyCafe() {
+        val e = game()
+        e.ui.tip = null
+        weather(e, com.hustlecity.game.model.Sky.RAIN)
+        e.state.minute = (e.state.minute / 1440) * 1440 + 9 * 60
+        val b = venue(e, "coffee", listOf(PlacedItem("cash_register", 4, 1, 0), PlacedItem("coffee_machine", 0, 0, 0), PlacedItem("pastry_case", 8, 0, 0),
+            PlacedItem("table_set", 1, 4, 0), PlacedItem("table_set", 5, 4, 0), PlacedItem("table_set", 9, 4, 0), PlacedItem("trash_can", 12, 0, 0),
+            PlacedItem("barstool", 1, 8, 0), PlacedItem("barstool", 2, 8, 0)),
+            listOf(com.hustlecity.game.data.StaffRole.CUSTOMER_SERVICE))
+        val biz = e.state.businessAt(b.id)!!
+        repeat(400) { e.economy.dirt.onCustomer(biz, b.area) }
+        shoot(e, "ui_dirty_cafe.png")
+    }
+
+    @Test
+    fun streetCloseup() {
+        val e = game()
+        e.ui.tip = null
+        e.ui.phoneOpen = false
+        e.ui.objectivesOpen = false
+        weather(e, com.hustlecity.game.model.Sky.RAIN)
+        e.skyVis.rain = .5f; e.skyVis.cloud = .6f; e.skyVis.wet = .6f
+        val x = com.hustlecity.game.world.City.avenueX(2) + 14f
+        val y = com.hustlecity.game.world.City.streetY(6) + 10f
+        e.state.player.x = x; e.state.player.y = y
+        e.camera.tx = x; e.camera.ty = y; e.camera.dist = 16f; e.camera.zoom = 16f
+        e.traffic.ensure(30, 120)
+        e.traffic.update(0f, x, y, 60f, -9999f, -9999f, initial = true)
+        repeat(240) { e.frame(1 / 30f); e.camera.tx = x; e.camera.ty = y; e.camera.dist = 16f; e.camera.zoom = 16f }
+        shoot(e, "street_people.png")
     }
 }
