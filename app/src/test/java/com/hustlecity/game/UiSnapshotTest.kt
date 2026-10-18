@@ -386,4 +386,44 @@ class UiSnapshotTest {
         repeat(240) { e.frame(1 / 30f); e.camera.tx = x; e.camera.ty = y; e.camera.dist = 16f; e.camera.zoom = 16f }
         shoot(e, "street_people.png")
     }
+
+    @Test
+    fun drivingWithGps() {
+        val e = game()
+        e.ui.tip = null
+        weather(e, com.hustlecity.game.model.Sky.CLEAR)
+        val v = e.state.vehicles.first()
+        e.enterVehicle(v)
+        e.ui.tip = null
+        e.ui.phoneOpen = false
+        val target = e.city.placeBuilding("metro")!!
+        e.state.player.waypoint = target.id
+        e.input.gas = true
+        repeat(60) { e.frame(1 / 30f) }
+        e.input.gas = false
+        shoot(e, "ui_driving.png")
+    }
+
+    @Test
+    fun walkingMinimap() {
+        val e = game()
+        e.ui.tip = null
+        e.ui.phoneOpen = true
+        val target = e.city.placeBuilding("essentials")!!
+        e.state.player.waypoint = target.id
+        repeat(10) { e.frame(1 / 30f) }
+        shoot(e, "ui_minimap.png")
+    }
+
+    @Test
+    fun mapsWithRoute() {
+        val e = game()
+        e.ui.tip = null
+        val target = e.city.placeBuilding("metro")!!
+        e.state.player.waypoint = target.id
+        repeat(10) { e.frame(1 / 30f) }
+        e.ui.app = AppId.MAPS
+        e.camera.mapX = (e.state.player.x + target.doorX) / 2; e.camera.mapY = (e.state.player.y + target.doorY) / 2; e.camera.mapDist = 900f
+        shoot(e, "ui_maps_route.png")
+    }
 }

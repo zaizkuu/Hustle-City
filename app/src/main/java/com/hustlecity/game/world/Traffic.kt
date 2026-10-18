@@ -123,7 +123,8 @@ class Traffic(private val rnd: Random = Random(7)) {
         a.length = when (a.style) { 0 -> 4.2f + rnd.nextFloat() * .6f; 1 -> 5.2f; else -> 5.8f }
         a.width = if (a.style == 2) 2.1f else 1.85f
         a.height = when (a.style) { 0 -> 1.45f; 1 -> 1.8f; else -> 2.5f }
-        a.cruise = (if (a.axis == 0) 12f else 9f) + rnd.nextFloat() * 3f
+        // city speeds: about 30-38 km/h on avenues, 25-32 km/h on side streets
+        a.cruise = (if (a.axis == 0) 8.5f else 7f) + rnd.nextFloat() * 2f
         a.speed = a.cruise * .6f
         a.plan = -1
     }

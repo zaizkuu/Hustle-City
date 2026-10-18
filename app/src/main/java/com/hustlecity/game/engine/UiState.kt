@@ -52,6 +52,8 @@ class UiState {
     var info by mutableStateOf<Pair<String, String>?>(null)
     /** "bankrupt" or "victory" while an ending screen is shown. */
     var ending by mutableStateOf<String?>(null)
+    /** Time of the last rendered frame, for widgets that redraw every frame (minimap). */
+    var frameTime by mutableStateOf(0L)
     /** One-time tip (title, text). */
     var tip by mutableStateOf<Pair<String, String>?>(null)
 }

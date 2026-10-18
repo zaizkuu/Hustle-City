@@ -121,7 +121,8 @@ class WorldRenderer(private val e: GameEngine) {
             proj.pitch = Math.toRadians(PITCH_STREET.toDouble()).toFloat(); proj.yaw = cam.yaw
         }
         proj.near = .8f
-        proj.update(w.toFloat(), h.toFloat(), if (mapMode) .5f else .56f)
+        // while driving, keep the car above the dashboard
+        proj.update(w.toFloat(), h.toFloat(), if (mapMode) .5f else if (e.hasGame && e.state.player.driving >= 0) .42f else .56f)
     }
 
     fun draw(canvas: Canvas, w: Int, h: Int, density: Float) {
@@ -231,6 +232,43 @@ class WorldRenderer(private val e: GameEngine) {
 
     // ------------------------------------------------------------------ ground
 
+    private val triX = FloatArray(3); private val triY = FloatArray(3); private val triZ = FloatArray(3)
+
+    /** The GPS route as a blue band along the roads with white arrows pointing the way. */
+    private fun drawRoute() {
+        val gps = e.gps
+        if (!gps.active) return
+        val r = gps.route
+        val wide = if (mapMode) max(7f, proj.dist / 60f) else 2.6f
+        val col = scene.withAlpha(c(0xFF2F80ED), if (mapMode) .92f else .62f)
+        val arrow = scene.withAlpha(0xFFFFFFFF.toInt(), .9f)
+        for (q in 0 until gps.points - 1) {
+            val x0 = r[q * 2]; val y0 = r[q * 2 + 1]; val x1 = r[q * 2 + 2]; val y1 = r[q * 2 + 3]
+            if (max(x0, x1) < bbox[0] - wide || min(x0, x1) > bbox[2] + wide || max(y0, y1) < bbox[1] - wide || min(y0, y1) > bbox[3] + wide) continue
+            val dx = x1 - x0; val dy = y1 - y0
+            val len = sqrt(dx * dx + dy * dy)
+            if (len < .1f) continue
+            val ux = dx / len; val uy = dy / len
+            val nx = -uy * wide / 2; val ny = ux * wide / 2
+            scene.quad(x0 + nx, y0 + ny, .08f, x1 + nx, y1 + ny, .08f, x1 - nx, y1 - ny, .08f, x0 - nx, y0 - ny, .08f, col)
+            scene.disc(x1, y1, .08f, wide / 2, wide / 2, 10, col)
+            if (!mapMode && proj.dist < 300) {
+                var t = 5f
+                while (t < len - 2f) {
+                    val cx = x0 + ux * t; val cy = y0 + uy * t
+                    if (cx in bbox[0]..bbox[2] && cy in bbox[1]..bbox[3]) {
+                        triX[0] = cx + ux * .9f; triY[0] = cy + uy * .9f
+                        triX[1] = cx - ux * .5f - uy * .8f; triY[1] = cy - uy * .5f + ux * .8f
+                        triX[2] = cx - ux * .5f + uy * .8f; triY[2] = cy - uy * .5f - ux * .8f
+                        triZ[0] = .1f; triZ[1] = .1f; triZ[2] = .1f
+                        scene.poly(3, triX, triY, triZ, arrow)
+                    }
+                    t += 9f
+                }
+            }
+        }
+    }
+
     private fun clipRect(x0: Float, y0: Float, x1: Float, y1: Float, z: Float, color: Int) {
         val a = max(x0, bbox[0]); val b = max(y0, bbox[1]); val cc = min(x1, bbox[2]); val d = min(y1, bbox[3])
         if (a >= cc || b >= d) return
@@ -298,6 +336,7 @@ class WorldRenderer(private val e: GameEngine) {
             }
         }
         if (proj.dist < 420) drawMarkings()
+        drawRoute()
         // night street lights
         if (scene.daylight < .6f && !mapMode) {
             val glow = scene.withAlpha(c(0xFFFFD27A), .10f * (1f - scene.daylight))
@@ -810,9 +849,11 @@ class WorldRenderer(private val e: GameEngine) {
         }
         // waypoint
         val wp = e.city.building(s.player.waypoint)
-        if (wp != null) {
+        // with GPS on, the banner shows the way; the label marks the place only once it's in view
+        val inView = wp != null && proj.project(wp.doorX, wp.doorY, wp.height + 4f, tmp) && tmp[0] in 0f..w.toFloat() && tmp[1] in 0f..h.toFloat()
+        if (wp != null && (!e.gps.active || mapMode || inView)) {
             val (fx, fy) = e.focusPoint()
-            val d = dist(fx, fy, wp.doorX, wp.doorY).roundToInt()
+            val d = (if (e.gps.active) e.gps.distance else dist(fx, fy, wp.doorX, wp.doorY)).roundToInt()
             val text = "${e.buildingName(wp)} (${d} m)"
             val onScreen = proj.project(wp.doorX, wp.doorY, wp.height + 4f, tmp)
             var sx = if (onScreen) tmp[0] else w / 2f

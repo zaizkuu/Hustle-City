@@ -20,6 +20,9 @@ class Settings(context: Context?) {
     var sfxVolume by mutableStateOf(prefs?.getFloat("sfxVolume", .8f) ?: .8f)
     var radioOn by mutableStateOf(prefs?.getBoolean("radioOn", true) ?: true)
     var station by mutableIntStateOf(prefs?.getInt("station", 0) ?: 0)
+    /** Car controls: 0 = steering wheel and pedals, 1 = joystick. */
+    var carControls by mutableIntStateOf(prefs?.getInt("carControls", 0) ?: 0)
+    var minimap by mutableStateOf(prefs?.getBoolean("minimap", true) ?: true)
 
     /** Pushes the audio preferences to the mixer. */
     fun applyAudio() {
@@ -40,6 +43,8 @@ class Settings(context: Context?) {
             ?.putFloat("sfxVolume", sfxVolume)
             ?.putBoolean("radioOn", radioOn)
             ?.putInt("station", station)
+            ?.putInt("carControls", carControls)
+            ?.putBoolean("minimap", minimap)
             ?.apply()
     }
 

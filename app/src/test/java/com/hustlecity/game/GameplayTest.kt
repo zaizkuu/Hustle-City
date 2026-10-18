@@ -169,6 +169,7 @@ class GameplayTest {
         e.newGame("Test", 0, 0, 1)
         val v = e.state.vehicles.first()
         e.state.player.x = v.x; e.state.player.y = v.y
+        e.settings.carControls = 1 // the joystick option
         e.enterVehicle(v)
         val x0 = v.x; val y0 = v.y
         e.input.jx = 1f // steer east (car starts facing east)

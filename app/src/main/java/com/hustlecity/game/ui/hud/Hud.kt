@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QuestionMark
 import androidx.compose.material.icons.filled.Restaurant
@@ -304,7 +305,7 @@ private fun CheckBox(done: Boolean) {
 // ------------------------------------------------------------------ phone
 
 @Composable
-fun PhonePanel(e: GameEngine, modifier: Modifier = Modifier) {
+fun PhonePanel(e: GameEngine, modifier: Modifier = Modifier, reserveTop: Int = 0) {
     val unread = e.state.messages.count { !it.read }
     val candidates = e.state.candidates.size
     if (!e.ui.phoneOpen) {
@@ -319,7 +320,7 @@ fun PhonePanel(e: GameEngine, modifier: Modifier = Modifier) {
     }
     val screenH = LocalConfiguration.current.screenHeightDp
     Column(
-        modifier.width(168.dp).heightIn(max = (screenH - 66).dp).shadow(6.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp))
+        modifier.width(168.dp).heightIn(max = (screenH - 66 - reserveTop).coerceAtLeast(150).dp).shadow(6.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF232830)).padding(5.dp),
     ) {
         Row(Modifier.fillMaxWidth().padding(bottom = 3.dp), horizontalArrangement = Arrangement.Center) {
@@ -437,31 +438,7 @@ fun Joystick(e: GameEngine, modifier: Modifier = Modifier) {
 fun ActionButtons(e: GameEngine, modifier: Modifier = Modifier) {
     val p = e.state.player
     if (e.skip != null) return
-    if (p.driving >= 0) {
-        Box(Modifier.fillMaxSize()) {
-            // brake / reverse pedal
-            Box(
-                Modifier.align(if (e.settings.leftHanded) Alignment.BottomStart else Alignment.BottomEnd).padding(end = 76.dp, start = 76.dp, bottom = 18.dp)
-                    .size(86.dp).clip(CircleShape).background(Color(0xAAC94040)).border(2.dp, Color(0x88FFFFFF), CircleShape)
-                    .pointerInput(Unit) {
-                        awaitEachGesture {
-                            try {
-                                awaitFirstDown().consume()
-                                e.input.brake = true
-                                while (true) {
-                                    val ev = awaitPointerEvent()
-                                    if (ev.changes.none { it.pressed }) break
-                                }
-                            } finally {
-                                e.input.brake = false
-                            }
-                        }
-                    },
-                contentAlignment = Alignment.Center,
-            ) { Text("BRAKE\nREVERSE", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
-        }
-        return
-    }
+    if (p.driving >= 0) return
     Row(modifier.padding(bottom = 22.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         e.nearDoor?.let { b ->
             val label = if (b.kind == BKind.GAS) "Fuel Up" else e.buildingName(b)
@@ -469,32 +446,6 @@ fun ActionButtons(e: GameEngine, modifier: Modifier = Modifier) {
         }
         e.nearVehicle?.let { v ->
             HButton("Get in ${v.def.name}", icon = Icons.Filled.DirectionsCar) { e.enterVehicle(v); e.ui.phoneOpen = false }
-        }
-    }
-}
-
-@Composable
-fun VehiclePanel(e: GameEngine, modifier: Modifier = Modifier) {
-    val p = e.state.player
-    val v = e.state.vehicle(p.driving) ?: return
-    GlassPanel(modifier.padding(bottom = 4.dp).widthIn(max = 430.dp)) {
-        Row(Modifier.fillMaxWidth().background(HC.Header).padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(v.def.name.uppercase(), style = HT.label, color = HC.HeaderText, modifier = Modifier.weight(1f))
-            Text("${(kotlin.math.abs(e.carSpeed) * 3.6f).roundToInt()} km/h", style = HT.label, color = HC.HeaderText)
-            Spacer(Modifier.width(10.dp))
-            Icon(Icons.Filled.Inventory2, null, tint = HC.HeaderText, modifier = Modifier.size(13.dp))
-            Text(" ${v.cargo.size}/${v.def.cargo}", style = HT.label, color = HC.HeaderText)
-            Spacer(Modifier.width(10.dp))
-            Icon(Icons.Filled.LocalGasStation, null, tint = if (v.fuel < .15) HC.Red else HC.HeaderText, modifier = Modifier.size(13.dp))
-            Text(" ${(v.fuel * 100).roundToInt()}%", style = HT.label, color = if (v.fuel < .15) HC.Red else HC.HeaderText)
-            Spacer(Modifier.width(10.dp))
-            Icon(Icons.Filled.Build, null, tint = HC.HeaderText, modifier = Modifier.size(13.dp))
-            Text(" ${(v.condition * 100).roundToInt()}%", style = HT.label, color = HC.HeaderText)
-        }
-        Row(Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (e.atGasStation) HButton("Refuel ${e.money((1 - v.fuel) * 45 * 1.4)}", color = HC.Orange, small = true) { e.refuel(v) }
-            if (v.fuel <= 0.0) HButton("Roadside \$150", color = HC.Red, small = true) { e.roadside(v) }
-            HButton("Park & exit", small = true) { e.exitVehicle(); e.ui.phoneOpen = true }
         }
     }
 }
@@ -575,7 +526,7 @@ fun BuildingCard(e: GameEngine, modifier: Modifier = Modifier, avoidPhone: Boole
             val near = s.player.driving < 0 && (b.distToDoor(s.player.x, s.player.y) < 8f || (b.kind == BKind.GAS && dist(s.player.x, s.player.y, b.cx, b.cy) < 18f))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (near && b.kind != BKind.PARK && b.kind != BKind.PARKING) HButton("Enter", color = HC.Green, small = true) { e.enterBuilding(b) }
-                HButton(if (s.player.waypoint == b.id) "Clear pin" else "Waypoint", small = true) { e.setWaypoint(b.id) }
+                HButton(if (s.player.waypoint == b.id) "Stop GPS" else "Navigate", small = true, icon = Icons.Filled.Place) { e.setWaypoint(b.id) }
                 if (d > 60f) HButton("Taxi ${e.money(taxiFare(d))}", color = HC.Yellow, textColor = HC.Ink, small = true) { e.taxiTo(b.id) }
             }
             Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

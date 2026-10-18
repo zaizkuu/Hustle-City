@@ -13,8 +13,8 @@ android {
         applicationId = "com.hustlecity.game"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.2.0"
+        versionCode = 5
+        versionName = "1.3.0"
     }
 
     buildTypes {
@@ -40,6 +40,12 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
+}
+
+// The HUD reads plain (non-snapshot) game state and refreshes on the engine's UI tick, so composables that take the
+// engine must recompose with their parent instead of being skipped because the engine instance didn't change.
+composeCompiler {
+    featureFlags.add(org.jetbrains.kotlin.compose.compiler.gradle.ComposeFeatureFlag.StrongSkipping.disabled())
 }
 
 kotlin {

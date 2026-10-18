@@ -11,6 +11,8 @@ Native Kotlin + Jetpack Compose. The 3D city is rendered with a small custom eng
 - 2.5D perspective rendering with windows, storefronts, awnings, rooftop units, sun-tracking shadows, a day/night cycle with lit windows and street lamps.
 - Traffic with traffic lights: cars plan their turns and take smooth arcs, keep their distance and give way to pedestrians. Pedestrians cross on the walk signal, step aside for each other and walk into open shops. Buildings turn see-through when they block your view.
 - Walk with the on-screen joystick, or drive your own car with fuel, condition and cargo space. Taxis are available from any building card.
+- Car controls with a steering wheel and gas/brake pedals (or a joystick), a speedometer dashboard, and Park (pulls over to the curb) and Get out buttons.
+- A minimap that turns with the camera, a full city map, and GPS navigation: a blue route line on the road and the maps, plus turn-by-turn directions with the distance and time left.
 - 3D people built from boxes, with walking, sitting, dancing and treadmill-running animations. Pedestrians carry umbrellas in the rain.
 - Dynamic weather that follows the seasons (the game starts in April): clear, cloudy, rain, thunderstorms with lightning and thunder, snow that settles on roofs and sidewalks, and fog. Streets look wet after rain, and the top bar shows a three-day forecast.
 
@@ -53,8 +55,10 @@ Native Kotlin + Jetpack Compose. The 3D city is rendered with a small custom eng
 
 | Action | Touch |
 | --- | --- |
-| Walk / drive | Left joystick (a car steers toward the stick direction) |
-| Brake / reverse | Red pedal while driving |
+| Walk | Left joystick |
+| Drive | Steering wheel (drag left/right), GAS and BRAKE pedals; hold BRAKE when stopped to reverse |
+| Park / get out | PARK and GET OUT buttons on the dashboard |
+| Navigate | Navigate on a building card, then follow the blue GPS line |
 | Look around | Drag the city |
 | Zoom | Pinch |
 | Rotate camera | Two-finger twist (also works inside buildings) |

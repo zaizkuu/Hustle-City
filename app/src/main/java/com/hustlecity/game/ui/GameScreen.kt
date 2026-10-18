@@ -42,7 +42,7 @@ import com.hustlecity.game.ui.hud.PhonePanel
 import com.hustlecity.game.ui.hud.SkipOverlay
 import com.hustlecity.game.ui.hud.Toasts
 import com.hustlecity.game.ui.hud.TopBar
-import com.hustlecity.game.ui.hud.VehiclePanel
+import com.hustlecity.game.ui.hud.DrivingControls
 import com.hustlecity.game.ui.places.PanelHost
 import kotlinx.coroutines.isActive
 import kotlin.math.atan2
@@ -77,6 +77,7 @@ fun GameScreen(e: GameEngine) {
                     Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(top = 56.dp, start = leftGap, end = rightGap),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    if (!inside) com.hustlecity.game.ui.hud.GpsBanner(e, Modifier.padding(bottom = 4.dp))
                     TipCard(e)
                     Toasts(e)
                 }
@@ -84,13 +85,19 @@ fun GameScreen(e: GameEngine) {
                     if (e.ui.designer) DesignerBar(e, Modifier.align(Alignment.BottomCenter))
                     else InteriorPanel(e, Modifier.align(Alignment.TopEnd).padding(top = 58.dp, end = 8.dp))
                 } else {
-                    Joystick(e, Modifier.align(if (e.settings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart).padding(18.dp))
-                    LocationLabel(e, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
-                    VehiclePanel(e, Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp))
-                    ActionButtons(e, Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp))
+                    if (e.state.player.driving >= 0) {
+                        DrivingControls(e)
+                    } else {
+                        Joystick(e, Modifier.align(if (e.settings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart).padding(18.dp))
+                        LocationLabel(e, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
+                        ActionButtons(e, Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp))
+                    }
                     BuildingCard(e, Modifier.align(Alignment.TopEnd).padding(top = 58.dp, end = 8.dp))
                 }
-                if (!e.ui.designer) PhonePanel(e, Modifier.align(if (e.settings.leftHanded) Alignment.BottomStart else Alignment.BottomEnd).padding(8.dp))
+                val minimap = e.settings.minimap && !inside && e.ui.selected < 0 && e.skip == null
+                if (minimap) com.hustlecity.game.ui.hud.MiniMap(e, Modifier.align(if (e.settings.leftHanded) Alignment.TopStart else Alignment.TopEnd)
+                    .padding(top = 58.dp, end = 10.dp, start = if (e.settings.leftHanded) 250.dp else 0.dp))
+                if (!e.ui.designer) PhonePanel(e, Modifier.align(if (e.settings.leftHanded) Alignment.BottomStart else Alignment.BottomEnd).padding(8.dp), reserveTop = if (minimap) 138 else 0)
             }
         }
         e.ui.panel?.let { PanelHost(e, it) }
@@ -119,6 +126,7 @@ fun WorldCanvas(e: GameEngine, r: Renderers, interactive: Boolean) {
                     e.frame(acc)
                     acc = 0f
                     frame.longValue = t
+                    if (interactive) e.ui.frameTime = t
                 }
             }
         }

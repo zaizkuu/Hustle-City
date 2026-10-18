@@ -39,6 +39,9 @@ class Input {
     var jx = 0f
     var jy = 0f
     var brake = false
+    /** Steering wheel -1 (full left) .. 1 (full right) and the gas pedal, for wheel-and-pedal driving. */
+    var steer = 0f
+    var gas = false
 }
 
 class CameraRig {
@@ -63,6 +66,7 @@ class GameEngine(context: Context?) {
     val traffic = Traffic()
     val economy = Economy(this)
     val weather = WeatherSystem(this)
+    val gps = Gps(this)
     val camera = CameraRig()
     val input = Input()
     var interior: InteriorScene? = null
@@ -81,6 +85,9 @@ class GameEngine(context: Context?) {
     var summaryShownAt = -100f
     private var publishAcc = 0f
     var carSpeed = 0f
+    private var objectivesWereOpen = true
+    /** Seconds the brake has been held at a standstill (reverse kicks in after a moment). */
+    private var stoppedFor = 0f
     var fps = 0f
     private var fpsAcc = 0f
     private var fpsFrames = 0
@@ -447,6 +454,7 @@ class GameEngine(context: Context?) {
             traffic.update(dt, camera.tx, camera.ty, 230f, bx, by)
         }
         interior?.update(dt, !simPaused() || skip != null)
+        gps.update(dt)
         refreshHints()
 
         publishAcc += dt
@@ -686,7 +694,14 @@ class GameEngine(context: Context?) {
         val def = v.def
         var throttle = 0f
         var steer = 0f
-        if (v.fuel <= 0.0) {
+        var wheel = Float.NaN
+        if (settings.carControls == 0) {
+            // steering wheel and pedals: gas accelerates, brake slows down and, once stopped, reverses
+            if (v.fuel <= 0.0) {
+                if (crashCooldown <= 0f && input.gas) { toast("Out of fuel! Call roadside assistance from the dashboard.", ToastKind.BAD); crashCooldown = 4f }
+            } else if (input.gas) throttle = 1f
+            wheel = input.steer.coerceIn(-1f, 1f)
+        } else if (v.fuel <= 0.0) {
             if (crashCooldown <= 0f && mag > .2f) { toast("Out of fuel! Call roadside assistance from the vehicle panel.", ToastKind.BAD); crashCooldown = 4f }
         } else if (mag > .15f) {
             val desired = atan2(wx, -wy)
@@ -702,20 +717,31 @@ class GameEngine(context: Context?) {
             }
         }
         if (input.brake) {
-            if (carSpeed > .4f) { carSpeed = max(0f, carSpeed - 18f * dt); throttle = 0f }
-            else if (v.fuel > 0.0) { throttle = -.8f; steer = 0f }
-            else throttle = 0f
-        }
+            // brake to a stop; keep holding a moment longer to reverse
+            if (carSpeed > .4f) { carSpeed = max(0f, carSpeed - 12f * dt); throttle = 0f; stoppedFor = 0f }
+            else {
+                stoppedFor += dt
+                throttle = if (v.fuel > 0.0 && stoppedFor > .6f) -.6f else 0f
+                if (throttle == 0f) carSpeed = 0f
+                if (wheel.isNaN()) steer = 0f
+            }
+        } else stoppedFor = 0f
         val maxSpeed = def.maxSpeed * (.75f + .25f * v.condition.toFloat())
         if (throttle != 0f) {
             carSpeed += throttle * def.accel * dt
         } else {
-            val drag = 4f * dt
+            val drag = 3f * dt
             carSpeed = if (carSpeed > 0) max(0f, carSpeed - drag) else min(0f, carSpeed + drag)
         }
-        carSpeed = carSpeed.coerceIn(-6f, maxSpeed)
-        val turnRate = 2.3f * min(1f, abs(carSpeed) / 5f) * dt
-        v.heading = wrap(v.heading + steer.coerceIn(-turnRate, turnRate) * (if (carSpeed >= 0) 1f else -1f).let { if (throttle < 0) 1f else it })
+        carSpeed = carSpeed.coerceIn(-4.5f, maxSpeed)
+        if (!wheel.isNaN()) {
+            // the wheel turns the car like a real one: harder at low speed, and the other way in reverse
+            val grip = min(1f, abs(carSpeed) / 3f) * (1f - .35f * min(1f, abs(carSpeed) / maxSpeed))
+            v.heading = wrap(v.heading + wheel * 1.9f * grip * dt * (if (carSpeed >= 0) 1f else -1f))
+        } else {
+            val turnRate = 2.3f * min(1f, abs(carSpeed) / 5f) * dt
+            v.heading = wrap(v.heading + steer.coerceIn(-turnRate, turnRate) * (if (carSpeed >= 0) 1f else -1f).let { if (throttle < 0) 1f else it })
+        }
         val ox = v.x; val oy = v.y
         val nx = v.x + sin(v.heading) * carSpeed * dt
         val ny = v.y - cos(v.heading) * carSpeed * dt
@@ -760,7 +786,66 @@ class GameEngine(context: Context?) {
     // ------------------------------------------------------------------ vehicles
 
     fun resetInput() {
-        input.jx = 0f; input.jy = 0f; input.brake = false
+        input.jx = 0f; input.jy = 0f; input.brake = false; input.steer = 0f; input.gas = false
+    }
+
+    /** Gets out where the car stands (it has to be stopped). */
+    fun getOutOfCar(): Boolean {
+        if (abs(carSpeed) > 1.5f) { toast("Stop the car first (hold the brake)", ToastKind.BAD); return false }
+        exitVehicle()
+        return true
+    }
+
+    /**
+     * Pulls over and parks: in a parking lot or gas station the car is lined up where it is,
+     * on a road it moves to the curb on its side, clear of intersections and other parked cars.
+     */
+    fun parkVehicle(): Boolean {
+        val v = state.vehicle(state.player.driving) ?: return false
+        if (abs(carSpeed) > 4f) { toast("Slow down to park", ToastKind.BAD); return false }
+        val lot = city.buildings.firstOrNull { (it.kind == BKind.PARKING || it.kind == BKind.GAS) && it.contains(v.x, v.y) }
+        if (lot != null) {
+            v.heading = (Math.round(v.heading / (Math.PI / 2)) * (Math.PI / 2)).toFloat()
+            exitVehicle()
+            toast("Parked")
+            return true
+        }
+        val i = (v.x / City.AV_SPACING).roundToInt().coerceIn(0, City.AVENUES - 1)
+        val k = (v.y / City.ST_SPACING).roundToInt().coerceIn(0, City.STREETS - 1)
+        val dA = abs(v.x - City.avenueX(i)); val dS = abs(v.y - City.streetY(k))
+        var px: Float; var py: Float; var heading: Float
+        if (dA <= City.AV_HALF + 2f && dA <= dS) {
+            // on an avenue: right-hand curb for the way we're facing
+            val side = if (abs(v.x - City.avenueX(i)) > .5f) Math.signum(v.x - City.avenueX(i)) else (if (cos(v.heading) > 0) 1f else -1f)
+            px = City.avenueX(i) + side * (City.AV_HALF - 1.1f)
+            py = v.y
+            heading = if (side > 0) 0f else Math.PI.toFloat()
+            // not in the middle of a crossing
+            val near = (py / City.ST_SPACING).roundToInt()
+            val gap = py - City.streetY(near)
+            if (abs(gap) < City.ST_HALF + 7f) py = City.streetY(near) + (if (gap >= 0) 1 else -1) * (City.ST_HALF + 7f)
+        } else if (dS <= City.ST_HALF + 2f) {
+            val side = if (abs(v.y - City.streetY(k)) > .5f) Math.signum(v.y - City.streetY(k)) else (if (sin(v.heading) > 0) 1f else -1f)
+            py = City.streetY(k) + side * (City.ST_HALF - 1.1f)
+            px = v.x
+            heading = (if (side > 0) Math.PI / 2 else -Math.PI / 2).toFloat()
+            val near = (px / City.AV_SPACING).roundToInt()
+            val gap = px - City.avenueX(near)
+            if (abs(gap) < City.AV_HALF + 7f) px = City.avenueX(near) + (if (gap >= 0) 1 else -1) * (City.AV_HALF + 7f)
+        } else {
+            // off the road (a plaza or a lot): just switch off
+            exitVehicle()
+            toast("Parked")
+            return true
+        }
+        // leave room for the other cars you own
+        val ax = -sin(heading); val ay = cos(heading)
+        var tries = 0
+        while (tries++ < 6 && state.vehicles.any { it.id != v.id && dist(it.x, it.y, px, py) < 5.5f }) { px += ax * 6f; py += ay * 6f }
+        v.x = px; v.y = py; v.heading = heading
+        exitVehicle()
+        toast("Parked at the curb")
+        return true
     }
 
     fun enterVehicle(v: OwnedVehicle) {
@@ -768,10 +853,13 @@ class GameEngine(context: Context?) {
         if (p.inBuilding >= 0) return
         resetInput()
         Audio.play(Sfx.CAR_DOOR)
-        tip("drive", "Driving", "The joystick steers: push it the way you want to go and the car turns and accelerates. Hold the red pedal to brake, and keep holding to reverse. Watch your fuel; Fuel Up stations are on the map.")
+        tip("drive", "Driving", if (settings.carControls == 0) "Turn the steering wheel on the left; hold GAS to accelerate and BRAKE to slow down (keep holding to reverse). PARK pulls over to the curb and gets you out. Set a destination on the map and follow the blue GPS line. Watch your fuel: Fuel Up stations are on the map."
+            else "The joystick steers: push it the way you want to go and the car turns and accelerates. Hold the red pedal to brake, and keep holding to reverse. Watch your fuel; Fuel Up stations are on the map.")
         p.driving = v.id
         p.x = v.x; p.y = v.y
         carSpeed = 0f
+        objectivesWereOpen = ui.objectivesOpen
+        ui.objectivesOpen = false
         // move hand-carried goods into the trunk
         val free = v.def.cargo - v.cargo.size
         if (p.hand.isNotEmpty() && free > 0) {
@@ -788,6 +876,7 @@ class GameEngine(context: Context?) {
         p.driving = -1
         carSpeed = 0f
         resetInput()
+        if (objectivesWereOpen) ui.objectivesOpen = true
         Audio.play(Sfx.CAR_DOOR)
         // step out on the driver's side, avoiding buildings
         val sx = v.x + cos(v.heading) * -2.2f

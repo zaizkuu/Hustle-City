@@ -807,11 +807,11 @@ object Catalog {
 
     // ---------------------------------------------------------------- vehicles
     val vehicles = listOf(
-        VehicleDef("tico", "Tico Compact", 6800.0, 6, 19f, 6f, 3.8f, 1.7f, 1.45f, c(0xFFC0392B), 0, 0),
-        VehicleDef("volta", "Volta Sedan", 15500.0, 8, 23f, 7f, 4.6f, 1.85f, 1.45f, c(0xFF2C3E50), 4, 0),
-        VehicleDef("bulldog", "Bulldog Pickup", 24000.0, 14, 21f, 6.5f, 5.3f, 2.0f, 1.8f, c(0xFFE0E0E0), 4, 1),
-        VehicleDef("freighter", "Freighter Van", 31000.0, 24, 18f, 5f, 5.6f, 2.1f, 2.4f, c(0xFFF5F5F5), 2, 2),
-        VehicleDef("stellar", "Stellar GT", 78000.0, 2, 33f, 12f, 4.5f, 1.95f, 1.2f, c(0xFFF2C94C), 15, 3),
+        VehicleDef("tico", "Tico Compact", 6800.0, 6, 13.5f, 4.2f, 3.8f, 1.7f, 1.45f, c(0xFFC0392B), 0, 0),
+        VehicleDef("volta", "Volta Sedan", 15500.0, 8, 15.5f, 4.8f, 4.6f, 1.85f, 1.45f, c(0xFF2C3E50), 4, 0),
+        VehicleDef("bulldog", "Bulldog Pickup", 24000.0, 14, 14.5f, 4.3f, 5.3f, 2.0f, 1.8f, c(0xFFE0E0E0), 4, 1),
+        VehicleDef("freighter", "Freighter Van", 31000.0, 24, 12.5f, 3.5f, 5.6f, 2.1f, 2.4f, c(0xFFF5F5F5), 2, 2),
+        VehicleDef("stellar", "Stellar GT", 78000.0, 2, 21f, 7.5f, 4.5f, 1.95f, 1.2f, c(0xFFF2C94C), 15, 3),
     )
     fun vehicle(id: String) = vehicles.first { it.id == id }
 

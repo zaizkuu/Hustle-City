@@ -759,6 +759,12 @@ fun SettingsPanel(e: GameEngine) {
             ToggleRow("Show FPS counter", st.showFps) { st.showFps = it }
             ToggleRow("Pause the clock while menus are open", st.pauseInMenus) { st.pauseInMenus = it }
             ToggleRow("Left-handed controls", st.leftHanded) { st.leftHanded = it }
+            ToggleRow("Show the minimap", st.minimap) { st.minimap = it }
+            Text("CAR CONTROLS", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
+            Row {
+                Chip("Steering wheel & pedals", st.carControls == 0) { st.carControls = 0 }
+                Chip("Joystick", st.carControls == 1) { st.carControls = 1 }
+            }
             Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 HButton("Save game", color = HC.Green) { e.save(showToast = true) }
                 HButton("Main menu", color = HC.Orange) {
@@ -813,6 +819,8 @@ private val HELP = listOf(
     "Nightlife and shows" to "Nightclubs need a Cocktail Bar, a Dance Floor and a DJ Booth, and a DJ on shift. Cinemas need a screen, seat rows, a concession stand and a projectionist; theaters need a stage, seats and actors. Cinemas and theaters pay a daily licence fee, but sell tickets all evening.",
     "Office firms" to "Office buildings can host a Law Firm, Web Development Agency, Graphic Designer, Travel Agency or Event Planning Agency. Each professional needs an Office Desk and bills clients by the hour. Clients come from reputation and advertising, not foot traffic, and firms compete across the whole city.",
     "Rivals" to "Rival companies run their own chains. They open stores where the money is, renovate busy ones, advertise, buy their buildings and close losers. Aggressive rivals open next to your best stores and start price wars, which makes them tougher competition. Watch their moves in the Rivals app.",
+    "Driving" to "Get in next to your car. Drag the steering wheel left or right, hold GAS to go and BRAKE to slow down; keep holding BRAKE at a standstill to reverse. PARK pulls over to the curb (or lines up in a parking lot) and gets you out; GET OUT leaves the car where it stands. You can switch to joystick driving in Settings.",
+    "GPS and maps" to "Tap Navigate on any building (in the street or in the Maps app) to set a destination. A blue line on the road and on the minimap shows the way, and the banner at the top gives the next turn and the distance. Tap the minimap to open the full map.",
     "Weather" to "The weather follows the seasons (the game starts in April). Rain, storms and snow keep walk-in shoppers at home but fill cinemas, cafés and bookstores. Umbrellas sell in the rain, ice cream and cold drinks in the heat, coffee and coat checks in the cold. Tap the weather in the top bar for a three-day forecast.",
     "Cleaning" to "Every customer tracks a little dirt along the routes people walk, more near the door when it's wet, and now and then spills something. Trash cans catch litter nearby. Cleaners scrub the dirtiest spots first, and a cleaning station makes them faster.",
     "Security" to "Shoplifters target jewelry, electronics, clothing and liquor stores. Security cameras stop about 30% of thefts each and anti-theft gates about 55%. BizHub Insight shows what was stolen yesterday.",

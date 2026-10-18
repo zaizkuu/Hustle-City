@@ -25,6 +25,7 @@ class TrafficTest {
         val px = FloatArray(t.cars.size); val py = FloatArray(t.cars.size)
         val qx = FloatArray(t.peds.size); val qy = FloatArray(t.peds.size)
         var carJumps = 0; var pedJumps = 0; var overlaps = 0; var frames = 0
+        var maxSpeed = 0f
         var movingSum = 0.0; var jaywalk = 0; var pedFrames = 0; var entered = 0
         val stuck = IntArray(t.cars.size)
         var maxStuck = 0
@@ -38,6 +39,7 @@ class TrafficTest {
                 // a respawn far away is fine; a short hop is a glitch
                 if (d > 1.5f && d < 60f) carJumps++
                 movingSum += a.speed
+                maxSpeed = maxOf(maxSpeed, a.speed)
                 if (a.speed < .2f) { stuck[i]++; maxStuck = maxOf(maxStuck, stuck[i]) } else stuck[i] = 0
                 if (stuck[i] == 30 * 45) {
                     println("STUCK car $i at (%.1f,%.1f) axis=${a.axis} line=${a.line} dir=${a.dir} off=${a.offset} plan=${a.plan}/${a.planCross} heading=%.2f light=${t.light(a.axis)}".format(a.x, a.y, a.heading))
@@ -68,7 +70,8 @@ class TrafficTest {
         assertTrue("cars teleport ($carJumps)", carJumps < 20)
         assertTrue("pedestrians teleport ($pedJumps)", pedJumps < 40)
         assertTrue("cars drive through each other ($overlaps)", overlaps < frames / 20)
-        assertTrue("traffic is gridlocked (avg $avgSpeed)", avgSpeed > 4.0)
+        assertTrue("traffic is gridlocked (avg $avgSpeed)", avgSpeed > 2.5)
+        assertTrue("cars drive at city speeds (max $maxSpeed m/s)", maxSpeed < 11.5f)
         assertTrue("a car waited too long (${maxStuck / 30} s)", maxStuck < 30 * 60)
         assertTrue("pedestrians walk down the middle of the street", jaywalk < pedFrames / 50)
     }
