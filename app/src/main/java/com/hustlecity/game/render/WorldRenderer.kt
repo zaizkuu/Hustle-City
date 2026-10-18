@@ -131,9 +131,11 @@ class WorldRenderer(private val e: GameEngine) {
         proj.update(w.toFloat(), h.toFloat(), if (mapMode) .5f else if (e.hasGame && e.state.player.driving >= 0) .42f else .56f)
     }
 
-    fun draw(canvas: Canvas, w: Int, h: Int, density: Float) {
+    /** Draws the city; with [gpu] the 3D goes into that frame for the GPU renderer and [canvas] only gets the overlays. */
+    fun draw(canvas: Canvas, w: Int, h: Int, density: Float, gpu: com.hustlecity.game.render.gpu.GpuFrame? = null) {
         if (!e.ready) return
         this.density = density
+        scene.gpu = gpu
         setupCamera(w, h)
         val day = e.daylight()
         scene.applyDaylight(if (mapMode) max(day, .75f) else day)
@@ -151,11 +153,26 @@ class WorldRenderer(private val e: GameEngine) {
         val len = .45f + 1.3f * (1f - sin(ang))
         shadowDX = -scene.sunX * len; shadowDY = -scene.sunY * len
 
-        canvas.drawColor(scene.mix(scene.lit(WATER, 1f), scene.lit(scene.fogColor, 1f), scene.fog * .7f))
+        if (gpu != null) {
+            gpu.clear()
+            gpu.setCamera(proj)
+            com.hustlecity.game.render.gpu.GpuLighting.city(gpu, hour, scene.daylight, if (mapMode) 0f else v.cloud, if (mapMode) 0f else v.rain,
+                if (mapMode) 0f else v.storm, if (mapMode) 0f else v.flash, if (mapMode) 0f else v.wet, scene.snow, scene.fogColor, scene.fog,
+                scene.fogStart, scene.fogEnd, mapMode)
+            if (mapMode) gpu.clearColor = WATER
+        } else canvas.drawColor(scene.mix(scene.lit(WATER, 1f), scene.lit(scene.fogColor, 1f), scene.fog * .7f))
         rebuildLookups()
         if (e.hasGame) { val f = e.focusPoint(); focusX = f.first; focusY = f.second }
         proj.visibleGround(bbox, 30f)
-        batch.begin(canvas)
+        if (gpu != null) {
+            gpu.time = e.realTime
+            // real sun shadows replace the painted ones when the view is small enough for a sharp shadow map
+            val overcast = (v.cloud * .7f + v.rain * .25f + v.storm * .3f).coerceIn(0f, .85f)
+            val wide = mapMode || bbox[2] - bbox[0] > 1200f || bbox[3] - bbox[1] > 1200f || e.settings.quality == 0
+            val strength = if (wide) 0f else ((scene.daylight - .12f) / .88f).coerceIn(0f, 1f) * (1f - .8f * overcast) * .82f
+            gpu.setShadow(bbox[0], bbox[1], bbox[2], bbox[3], min(e.city.maxHeight, 140f), if (e.settings.quality >= 2) 2048 else 1536, strength)
+        }
+        if (gpu == null) batch.begin(canvas)
         for (l in labels) labelPool += l
         labels.clear()
 
@@ -186,7 +203,8 @@ class WorldRenderer(private val e: GameEngine) {
                 8 -> props.draw(scene, dIdx[i], dKey[i] < 55f * 55f, e.realTime)
             }
         }
-        batch.flush()
+        if (gpu == null) batch.flush()
+        scene.gpu = null
         if (!mapMode) drawWeather(canvas, w, h)
         drawOverlays(canvas, w, h)
     }
@@ -299,7 +317,15 @@ class WorldRenderer(private val e: GameEngine) {
         val asphalt = scene.mix(scene.mix(scene.lit(ASPHALT, 1f), white, snow * .45f), dark, wet * .3f)
         val grass = scene.mix(scene.lit(GRASS, 1f), white, snow * .95f)
         val pathC = scene.mix(scene.lit(PATH, 1f), white, snow * .9f)
+        scene.groundPass = true
+        // the GPU draws a sky, so the sea around the city is real geometry there
+        if (scene.gpu != null) {
+            scene.material = Mat.WATER
+            scene.groundRect(bbox[0] - 400f, bbox[1] - 400f, bbox[2] + 400f, bbox[3] + 400f, -.05f, WATER)
+        }
+        scene.material = Mat.SIDEWALK
         clipRect(-City.AV_HALF - City.SIDEWALK, -City.ST_HALF - City.SIDEWALK, City.WIDTH + City.AV_HALF + City.SIDEWALK, City.HEIGHT + City.ST_HALF + City.SIDEWALK, 0f, sidewalk)
+        scene.material = Mat.ASPHALT
         for (i in 0 until City.AVENUES) {
             val x = City.avenueX(i)
             clipRect(x - City.AV_HALF, -City.ST_HALF, x + City.AV_HALF, City.HEIGHT + City.ST_HALF, 0f, asphalt)
@@ -328,11 +354,15 @@ class WorldRenderer(private val e: GameEngine) {
             for (b in e.city.blocks[row * City.COLS + col]) {
                 when (b.kind) {
                     BKind.PARK -> {
+                        scene.material = Mat.GRASS
                         clipRect(b.minX, b.minY, b.maxX, b.maxY, .02f, grass)
+                        scene.material = Mat.ROOF
                         clipRect(b.cx - 1.5f, b.minY, b.cx + 1.5f, b.maxY, .04f, pathC)
                         clipRect(b.minX, b.cy - 1.5f, b.maxX, b.cy + 1.5f, .04f, pathC)
+                        scene.material = Mat.PLAIN
                     }
                     BKind.PARKING -> {
+                        scene.material = Mat.ASPHALT
                         clipRect(b.minX, b.minY, b.maxX, b.maxY, .02f, scene.mix(scene.mix(scene.lit(c(0xFF55585E), 1f), white, snow * .6f), dark, wet * .3f))
                         if (!mapMode && proj.dist < 300) {
                             var x = b.minX + 3f
@@ -349,6 +379,7 @@ class WorldRenderer(private val e: GameEngine) {
                 }
             }
         }
+        scene.material = Mat.PLAIN
         if (proj.dist < 420) drawMarkings()
         drawRoute()
         // night street lights
@@ -373,7 +404,7 @@ class WorldRenderer(private val e: GameEngine) {
             }
         }
         // shadows
-        if (e.settings.shadows && !mapMode && scene.daylight > .15f && proj.dist < 400) {
+        if (e.settings.shadows && !mapMode && scene.daylight > .15f && proj.dist < 400 && scene.gpu?.shadowOn != true) {
             val shadowColor = scene.withAlpha(0xFF000000.toInt(), .22f * scene.daylight)
             val expand = 60f
             for (row in row0..row1) for (col in col0..col1) {
@@ -387,6 +418,7 @@ class WorldRenderer(private val e: GameEngine) {
                 scene.disc(t.x + shadowDX * t.h * .8f, t.y + shadowDY * t.h * .8f, .03f, t.r, t.r * .85f, 8, shadowColor)
             }
         }
+        scene.groundPass = false
     }
 
     private val hx = FloatArray(8)
@@ -702,6 +734,7 @@ class WorldRenderer(private val e: GameEngine) {
         val t = e.city.trees[i]
         val kind = pr.treeKind[i]
         val near = keyFor(t.x, t.y) < 70f * 70f
+        scene.sphereDetail = if (near) 2 else 1
         val month = e.weather.month()
         val white = scene.lit(0xFFF2F5F8.toInt(), 1f)
         // street trees grow out of a pit with a low iron guard
@@ -715,11 +748,13 @@ class WorldRenderer(private val e: GameEngine) {
         }
         if (kind == 2) {
             // conifer: stacked cones, green all year
+            scene.material = Mat.FOLIAGE
             scene.box(t.x - .14f, t.y - .14f, 0f, t.x + .14f, t.y + .14f, t.h * .3f, TRUNK, TRUNK)
             val g = TREE[2]
             scene.cone(t.x, t.y, t.r * .95f, t.h * .25f, t.h * .75f, 7, scene.mix(g, c(0xFF2E5E36), .3f), .5f)
             scene.cone(t.x, t.y, t.r * .72f, t.h * .55f, t.h * 1.05f, 7, g, .6f)
             scene.cone(t.x, t.y, t.r * .45f, t.h * .85f, t.h * 1.3f, 6, scene.mix(g, c(0xFF7FB069), .2f), .7f)
+            scene.material = Mat.PLAIN
             return
         }
         // deciduous trees follow the seasons: blossom and fresh leaves in spring, deep green in summer,
@@ -736,9 +771,11 @@ class WorldRenderer(private val e: GameEngine) {
                 scene.quad(t.x, t.y - .06f, z0, t.x, t.y + .06f, z0, bx, by + .03f, z1, bx, by - .03f, z1, scene.lit(TRUNK, .8f))
             }
         }
+        scene.material = Mat.FOLIAGE
         if (bare) {
             // a haze of twigs, dusted with snow
             scene.blob(t.x, t.y, t.h * .78f, t.r * .9f, scene.withAlpha(scene.mix(scene.lit(c(0xFF6B5444), 1f), white, scene.snow * .5f), .35f), 10)
+            scene.material = Mat.PLAIN
             return
         }
         val base = when {
@@ -754,6 +791,7 @@ class WorldRenderer(private val e: GameEngine) {
             scene.blob(t.x, t.y, z + t.r * .2f, t.r * .45f, scene.mix(scene.lit(base, 1.12f), white, scene.snow * .7f), 9, -.35f * scene.sunX, -.55f)
             scene.blob(t.x, t.y, z, t.r * .35f, scene.mix(scene.lit(base, .88f), white, scene.snow * .4f), 8, .55f, -.05f)
         }
+        scene.material = Mat.PLAIN
     }
 
     private fun drawCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int, owned: Boolean,

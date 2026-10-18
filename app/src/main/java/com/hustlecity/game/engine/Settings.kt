@@ -23,6 +23,10 @@ class Settings(context: Context?) {
     /** Car controls: 0 = steering wheel and pedals, 1 = joystick, 2 = arrow keys. */
     var carControls by mutableIntStateOf(prefs?.getInt("carControls", 0) ?: 0)
     var minimap by mutableStateOf(prefs?.getBoolean("minimap", true) ?: true)
+    /** HD graphics: the GPU renderer (lighting, depth, anti-aliasing) instead of the classic Canvas renderer. */
+    var hd by mutableStateOf(prefs?.getBoolean("hd", true) ?: true)
+    /** Set when the GPU renderer couldn't start on this device. */
+    var gpuFailed by mutableStateOf(false)
 
     /** Pushes the audio preferences to the mixer. */
     fun applyAudio() {
@@ -45,6 +49,7 @@ class Settings(context: Context?) {
             ?.putInt("station", station)
             ?.putInt("carControls", carControls)
             ?.putBoolean("minimap", minimap)
+            ?.putBoolean("hd", hd)
             ?.apply()
     }
 

@@ -2,13 +2,15 @@
 
 A business life-simulation game for Android, inspired by *Big Ambitions*. Start with a small apartment, a beat-up car and $5,000. Rent a storefront, furnish it, stock it, hire staff, and grow a business empire in a living 3D city.
 
-Native Kotlin + Jetpack Compose. The 3D city is rendered with a small custom engine on Android `Canvas`, so the whole game is a 1.4 MB release APK that runs on mid-range phones.
+Native Kotlin + Jetpack Compose with a custom 3D engine. In HD mode the world is drawn by an OpenGL ES 3 renderer with per-pixel lighting, real-time sun shadows, procedural materials (brick, stone, glass that reflects the sky, asphalt, sidewalk slabs, grass, water, wood) and 4x anti-aliasing; a lightweight Canvas renderer is the fallback for older devices.
 
 ## Features
 
 **The city**
 - Procedural Manhattan-style grid: 6 neighborhoods (Garment District, Hell's Kitchen, Midtown, Murray Hill, Lower Manhattan, Industry City), about 600 buildings with addresses, parks, parking lots and gas stations.
-- 2.5D perspective rendering with windows, storefronts, awnings, rooftop units, sun-tracking shadows, a day/night cycle with lit windows and street lamps.
+- Buildings with personality: brick walk-ups with fire escapes and water towers, brownstones with stoops and bay windows, art deco towers with setbacks and spires, glass skyscrapers, stone offices, modern blocks with balconies and industrial sheds with sawtooth roofs. Storefronts dress up for their business (striped awnings, neon, cinema marquees, window displays, sidewalk tables) and close their shutters at night.
+- Street life in detail: lamp posts that light the street, hydrants, benches, bus shelters, newspaper boxes, bike racks and planters; parks with fountains; trees that blossom in spring, turn red and gold in autumn and stand bare in winter. Cars have wheels, lights and brake lights, and taxis cruise the avenues.
+- A day/night cycle with sun-tracking shadows, lit windows and glowing street lamps.
 - Traffic with traffic lights: cars plan their turns and take smooth arcs, keep their distance and give way to pedestrians. Pedestrians cross on the walk signal, step aside for each other and walk into open shops. Buildings turn see-through when they block your view.
 - Walk with the on-screen joystick, or drive your own car with fuel, condition and cargo space. Taxis are available from any building card.
 - Car controls with a steering wheel and gas/brake pedals (or a joystick), a speedometer dashboard, and Park (pulls over to the curb) and Get out buttons.
@@ -65,7 +67,7 @@ Native Kotlin + Jetpack Compose. The 3D city is rendered with a small custom eng
 | Select a building | Tap it |
 | Enter a building / get in a car | Context buttons at the bottom of the screen |
 
-Settings include Low/Medium/High graphics quality, a 30/60 FPS cap, music and effects volume, the radio station, an FPS counter, pausing while menus are open, and a left-handed layout.
+Settings include HD (GPU) or classic rendering, Low/Medium/High graphics quality, a 30/60 FPS cap, music and effects volume, the radio station, an FPS counter, pausing while menus are open, and a left-handed layout.
 
 ## Building
 

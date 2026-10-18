@@ -182,11 +182,22 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         val h = b.height
         val q = e.settings.quality
         val near = detail && d0 < (when (q) { 0 -> 80f; 1 -> 125f; else -> 170f })
+        scene.material = when (st) {
+            Arch.WALKUP -> Mat.BRICK
+            Arch.BROWNSTONE, Arch.DECO, Arch.CLASSIC -> Mat.STONE
+            Arch.GLASS -> Mat.GLASS
+            Arch.MODERN -> Mat.CONCRETE
+            Arch.INDUSTRIAL -> if (facadeColor(b, b.facade) != b.facade) Mat.METAL else Mat.BRICK
+            Arch.SHOP -> if (b.id % 3 == 0) Mat.PLASTER else Mat.BRICK
+        }
+        scene.topMaterial = Mat.ROOF
         when {
             st == Arch.DECO && detail && h > 30f -> decoMassing(b, roof, facade, d0, near)
             st == Arch.INDUSTRIAL && detail && d0 < 260f && b.width > 10f -> industrialMassing(b, roof, facade, d0, near)
             else -> scene.box(b.minX, b.minY, 0f, b.maxX, b.maxY, h, roof, facade)
         }
+        scene.material = Mat.PLAIN
+        scene.topMaterial = -1
         if (!detail) return
         if (st != Arch.DECO && st != Arch.INDUSTRIAL) roofline(b, st, d0, near)
         if (d0 > 330f) return
@@ -285,8 +296,9 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
             Arch.WALKUP, Arch.BROWNSTONE, Arch.CLASSIC -> {
                 // cornice sticking out over the street-facing walls
                 val o = if (st == Arch.CLASSIC) .45f else .32f
-                scene.box(b.minX, b.minY - o, h - .7f, b.maxX, b.maxY + o, h, tr, tr)
-                if (st == Arch.CLASSIC) scene.box(b.minX, b.minY - .1f, 0f, b.maxX, b.maxY + .1f, min(7f, h * .3f), tr, tr) // stone base
+                // the cornice caps the roof edge; it stands a little proud so it never shares a plane with the roof or walls
+                scene.box(b.minX - o * .3f, b.minY - o, h - .7f, b.maxX + o * .3f, b.maxY + o, h + .06f, tr, tr)
+                if (st == Arch.CLASSIC) scene.box(b.minX - .1f, b.minY - .1f, 0f, b.maxX + .1f, b.maxY + .1f, min(7f, h * .3f), tr, tr) // stone base
             }
             Arch.SHOP, Arch.MODERN -> {
                 // parapet around the roof

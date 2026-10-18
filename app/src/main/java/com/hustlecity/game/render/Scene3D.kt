@@ -32,6 +32,10 @@ class Projector {
     private var rX = 1f; private var rY = 0f
     private var uX = 0f; private var uY = 0f; private var uZ = 1f
     private var fX = 0f; private var fY = 0f; private var fZ = -1f
+    // camera axes for the GPU renderer: right, up and forward
+    val rightX get() = rX; val rightY get() = rY
+    val upX get() = uX; val upY get() = uY; val upZ get() = uZ
+    val fwdX get() = fX; val fwdY get() = fY; val fwdZ get() = fZ
     /** Horizontal unit vector pointing from target towards the camera. */
     var backX = 0f; var backY = 1f
 
@@ -178,6 +182,34 @@ class RenderBatch(private val maxVerts: Int = 60000) {
  * World-space polygon helpers with near plane clipping, lighting and night tinting.
  */
 class Scene3D(val proj: Projector, val batch: RenderBatch) {
+    /**
+     * When set, polygons go to this GPU frame in world space instead of being projected for the Canvas: lighting,
+     * fog and depth are then done per pixel by the shaders, so [lit] and [sideShade] become neutral.
+     */
+    var gpu: com.hustlecity.game.render.gpu.GpuFrame? = null
+    /** Flat layers painted in order on the ground (roads, markings, floor tiles, shadows): they never hide anything. */
+    var groundPass = false
+    /** Forces the next polygons to be emissive (self-lit) on the GPU. */
+    var glow = false
+    /** Level of detail for GPU spheres: 0 far .. 2 near. */
+    var sphereDetail = 1
+    /** Surface material for the GPU shaders (see [Mat]); [topMaterial] overrides it on box tops (roofs) when set. */
+    var material = Mat.PLAIN
+    var topMaterial = -1
+
+    /** Colors that always read as a material, whoever draws them (glass panes). */
+    private val glassRgb = intArrayOf(0x3C5266, 0x1E2A36, 0x26313D, 0x4F7FA6, 0x3E6E8E, 0x5B8DA8, 0x46647E, 0x6A90A8, 0x9FC4DD, 0x9FC6E6)
+
+    /** Wood tones used by furniture models. */
+    private val woodRgb = intArrayOf(0x8B5A3C, 0xB07A52, 0x9C6B43, 0x8B6A4E, 0x5D4037, 0x3E2723)
+
+    private fun materialFor(color: Int): Int {
+        val rgb = color and 0xFFFFFF
+        for (c in glassRgb) if (c == rgb) return Mat.GLASS
+        if (material == Mat.PLAIN) for (c in woodRgb) if (c == rgb) return Mat.WOOD
+        return material
+    }
+
     private val cx = FloatArray(24); private val cy = FloatArray(24); private val cz = FloatArray(24)
     private val ox = FloatArray(24); private val oy = FloatArray(24); private val oz = FloatArray(24)
     private val sx = FloatArray(24); private val sy = FloatArray(24)
@@ -230,6 +262,7 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     fun snowy(color: Int, amount: Float = 1f): Int = if (snow <= 0f) color else mix(color, SNOW_WHITE, snow * amount)
 
     fun lit(color: Int, f: Float): Int {
+        if (gpu != null) return color
         val a = color ushr 24
         val r = min(255f, ((color shr 16) and 255) * f * ambR).toInt()
         val g = min(255f, ((color shr 8) and 255) * f * ambG).toInt()
@@ -244,10 +277,33 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     var sunY = .89f
 
     /** Shade for a vertical face with horizontal outward normal (nx, ny). */
-    fun sideShade(nx: Float, ny: Float): Float = .6f + .34f * max(0f, nx * sunX + ny * sunY)
+    fun sideShade(nx: Float, ny: Float): Float = if (gpu != null) 1f else .6f + .34f * max(0f, nx * sunX + ny * sunY)
+
+    /** Light sources keep their own color in the GPU renderer: lit windows, lamps, neon, signals, headlights. */
+    private val emissiveRgb = intArrayOf(
+        0xFFE3A0, 0xFFE6A8, 0xFFD27A, 0xFFF3C4, 0xFFF4D6, 0xFFEBA8, 0xFF5FD8, 0x5FE3FF, 0xFFE680, 0x2EE87A, 0xFFD34D,
+        0xFF4D4D, 0xFFF1C9, 0xFFF0C2, 0xFFF2B0, 0xFFD98A, 0xFF2E2E, 0xFFF4D6,
+    )
+
+    fun isEmissive(color: Int): Boolean {
+        if (glow) return true
+        val rgb = color and 0xFFFFFF
+        for (c in emissiveRgb) if (c == rgb) return true
+        return false
+    }
 
     /** Screen-space circle centred on a projected world point; radius in meters. */
     fun blob(x: Float, y: Float, z: Float, r: Float, color: Int, segments: Int = 10, dxFrac: Float = 0f, dyFrac: Float = 0f, squash: Float = .9f) {
+        val g = gpu
+        if (g != null) {
+            // screen-space offsets become offsets along the camera's right and up axes; flat discs become ellipsoids
+            val ox = proj.rightX * dxFrac * r - proj.upX * dyFrac * r
+            val oy = proj.rightY * dxFrac * r - proj.upY * dyFrac * r
+            val oz = -proj.upZ * dyFrac * r
+            if (proj.camZOf(x + ox, y + oy, z + oz) < -r) return
+            g.ellipsoid(streamFor(color), x + ox, y + oy, z + oz, r, squash, color, isEmissive(color), sphereDetail, material)
+            return
+        }
         val zc = proj.camZOf(x, y, z)
         if (zc < proj.near) return
         val rr = r * proj.focal / zc
@@ -266,7 +322,31 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     }
 
     /** Emits a world polygon. Color is used as-is (apply [lit] beforehand). */
+    private fun streamFor(color: Int) = when {
+        groundPass -> com.hustlecity.game.render.gpu.GpuFrame.GROUND
+        (color ushr 24) < 250 -> com.hustlecity.game.render.gpu.GpuFrame.TRANSPARENT
+        else -> com.hustlecity.game.render.gpu.GpuFrame.OPAQUE
+    }
+
     fun poly(n: Int, xs: FloatArray, ys: FloatArray, zs: FloatArray, color: Int) {
+        val g = gpu
+        if (g != null) {
+            // cull polygons entirely behind the camera or off one side of the screen; the GPU clips the rest
+            var behind = 0
+            var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+            for (i in 0 until n) {
+                val zc = proj.camZOf(xs[i], ys[i], zs[i])
+                if (zc < proj.near) { behind++; continue }
+                val px = proj.centerX + proj.focal * proj.camXOf(xs[i], ys[i], zs[i]) / zc
+                val py = proj.centerY - proj.focal * proj.camYOf(xs[i], ys[i], zs[i]) / zc
+                if (px < minX) minX = px; if (px > maxX) maxX = px
+                if (py < minY) minY = py; if (py > maxY) maxY = py
+            }
+            if (behind == n) return
+            if (behind == 0 && (maxX < 0 || minX > proj.screenW || maxY < 0 || minY > proj.screenH)) return
+            g.poly(streamFor(color), n, xs, ys, zs, color, isEmissive(color), materialFor(color))
+            return
+        }
         var allIn = true
         for (i in 0 until n) {
             cx[i] = proj.camXOf(xs[i], ys[i], zs[i])
@@ -340,6 +420,17 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     fun box(x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float, top: Int, side: Int, alpha: Float = 1f) {
         val cxp = proj.camX; val cyp = proj.camY; val czp = proj.camZ
         fun col(c: Int, f: Float): Int { val l = lit(c, f); return if (alpha < 1f) withAlpha(l, alpha) else l }
+        if (gpu != null && alpha >= 1f) {
+            quad(x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1, side)
+            quad(x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1, side)
+            quad(x0, y0, z0, x0, y1, z0, x0, y1, z1, x0, y0, z1, side)
+            quad(x1, y0, z0, x1, y1, z0, x1, y1, z1, x1, y0, z1, side)
+            val m = material
+            if (topMaterial >= 0) material = topMaterial
+            quad(x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1, snowy(top))
+            material = m
+            return
+        }
         if (cyp < y0) quad(x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1, col(side, sideShade(0f, -1f)))
         if (cyp > y1) quad(x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1, col(side, sideShade(0f, 1f)))
         if (cxp < x0) quad(x0, y0, z0, x0, y1, z0, x0, y1, z1, x0, y0, z1, col(side, sideShade(-1f, 0f)))
@@ -390,4 +481,25 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         val rx = cos(proj.yaw) * halfWidth; val ry = -sin(proj.yaw) * halfWidth
         quad(x - rx, y - ry, z0, x + rx, y + ry, z0, x + rx, y + ry, z1, x - rx, y - ry, z1, color)
     }
+}
+
+/** GPU surface materials: procedural patterns in the world shader. */
+object Mat {
+    const val PLAIN = 0
+    const val BRICK = 1
+    const val STONE = 2
+    const val GLASS = 3
+    const val ASPHALT = 4
+    const val SIDEWALK = 5
+    const val GRASS = 6
+    const val WOOD = 7
+    const val TILE = 8
+    const val METAL = 9
+    const val ROOF = 10
+    const val WATER = 11
+    const val PLASTER = 12
+    const val FOLIAGE = 13
+    const val CONCRETE = 14
+    const val FABRIC = 15
+    const val PAINT = 16
 }

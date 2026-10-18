@@ -47,13 +47,26 @@ class InteriorRenderer(private val e: GameEngine) {
         proj.update(w.toFloat(), h.toFloat(), .55f)
     }
 
-    fun draw(canvas: Canvas, w: Int, h: Int) {
+    /** Draws the current interior; with [gpu] the 3D goes into that frame for the GPU renderer. */
+    fun draw(canvas: Canvas, w: Int, h: Int, gpu: com.hustlecity.game.render.gpu.GpuFrame? = null) {
         val sc = e.interior ?: return
+        scene.gpu = gpu
         setupCamera(sc, w, h)
         scene.applyDaylight(1f)
         scene.sunX = .45f; scene.sunY = .89f
-        canvas.drawColor(BG)
-        batch.begin(canvas)
+        if (gpu != null) {
+            gpu.clear()
+            gpu.setCamera(proj)
+            com.hustlecity.game.render.gpu.GpuLighting.interior(gpu, BG)
+            gpu.time = e.realTime
+            // furniture and people cast soft shadows from the ceiling light
+            gpu.setShadow(-1f, -1f, sc.w + 1f, sc.d + 1f, 3.2f, 1024, if (e.settings.quality > 0) .5f else 0f)
+            scene.material = Mat.TILE
+        } else {
+            canvas.drawColor(BG)
+            batch.begin(canvas)
+        }
+        scene.groundPass = true
 
         // floor (checker tiles)
         val fa = sc.floorColor
@@ -78,6 +91,8 @@ class InteriorRenderer(private val e: GameEngine) {
             for (y in 0..sc.d) scene.groundRect(0f, y - .02f, sc.w.toFloat(), y + .02f, .015f, line)
         }
 
+        scene.groundPass = false
+        scene.material = Mat.PLASTER
         // walls: back walls first, front (cut-away) walls last
         val camX = proj.camX; val camY = proj.camY
         val backN = camY > 0; val backS = camY < sc.d; val backW = camX > 0; val backE = camX < sc.w
@@ -88,6 +103,7 @@ class InteriorRenderer(private val e: GameEngine) {
         if (backE) wallE(sc, wall, tall)
         if (backS) wallS(sc, wall, tall)
 
+        scene.material = Mat.PLAIN
         // drawables: items, people, cars
         dCount = 0
         val items = sc.items
@@ -152,11 +168,14 @@ class InteriorRenderer(private val e: GameEngine) {
                 }
             }
         }
+        scene.material = Mat.PLASTER
         if (!backN) wallN(sc, wall, .35f)
         if (!backW) wallW(sc, wall, .35f)
         if (!backE) wallE(sc, wall, .35f)
         if (!backS) wallS(sc, wall, .35f)
-        batch.flush()
+        scene.material = Mat.PLAIN
+        if (gpu == null) batch.flush()
+        scene.gpu = null
     }
 
     private fun key(x: Float, y: Float): Float { val dx = x - proj.camX; val dy = y - proj.camY; return dx * dx + dy * dy }

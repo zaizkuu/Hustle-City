@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
@@ -25,6 +26,8 @@ import com.hustlecity.game.engine.AppId
 import com.hustlecity.game.engine.GameEngine
 import com.hustlecity.game.render.InteriorRenderer
 import com.hustlecity.game.render.WorldRenderer
+import com.hustlecity.game.render.gpu.GlWorldView
+import androidx.compose.ui.viewinterop.AndroidView
 import com.hustlecity.game.ui.apps.MapsOverlay
 import com.hustlecity.game.ui.apps.PhoneAppScreen
 import com.hustlecity.game.ui.hud.ActionButtons
@@ -134,16 +137,42 @@ fun WorldCanvas(e: GameEngine, r: Renderers, interactive: Boolean) {
     }
     var mod = Modifier.fillMaxSize()
     if (interactive) mod = mod.pointerInput(Unit) { worldGestures(e, r) }
-    androidx.compose.foundation.layout.Spacer(
-        mod.drawBehind {
-            frame.longValue
-            drawIntoCanvas { c ->
-                val w = size.width.toInt(); val h = size.height.toInt()
-                if (e.interior != null && e.state.player.inBuilding >= 0) r.interior.draw(c.nativeCanvas, w, h)
-                else r.world.draw(c.nativeCanvas, w, h, density)
+    // HD graphics: a GL view underneath draws the 3D world; this layer keeps drawing labels, pins and weather
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val canGpu = remember { android.os.Build.FINGERPRINT != "robolectric" && GlWorldView.supported(context) }
+    val gpuOn = canGpu && e.settings.hd && e.settings.quality > 0 && !e.settings.gpuFailed
+    val glView = remember { arrayOfNulls<GlWorldView>(1) }
+    Box(Modifier.fillMaxSize()) {
+        if (gpuOn) {
+            AndroidView(factory = { ctx -> GlWorldView(ctx) { e.settings.gpuFailed = true }.also { glView[0] = it } }, modifier = Modifier.fillMaxSize(),
+                onRelease = { glView[0] = null })
+            val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+            DisposableEffect(lifecycle) {
+                val obs = androidx.lifecycle.LifecycleEventObserver { _, ev ->
+                    when (ev) {
+                        androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> glView[0]?.onPause()
+                        androidx.lifecycle.Lifecycle.Event.ON_RESUME -> glView[0]?.onResume()
+                        else -> {}
+                    }
+                }
+                lifecycle.addObserver(obs)
+                onDispose { lifecycle.removeObserver(obs) }
             }
-        },
-    )
+        }
+        androidx.compose.foundation.layout.Spacer(
+            mod.drawBehind {
+                frame.longValue
+                drawIntoCanvas { c ->
+                    val w = size.width.toInt(); val h = size.height.toInt()
+                    val view = if (gpuOn) glView[0] else null
+                    val g = view?.acquire()
+                    if (e.interior != null && e.state.player.inBuilding >= 0) r.interior.draw(c.nativeCanvas, w, h, g)
+                    else r.world.draw(c.nativeCanvas, w, h, density, g)
+                    if (g != null) view.submit()
+                }
+            },
+        )
+    }
 }
 
 private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.worldGestures(e: GameEngine, r: Renderers) {

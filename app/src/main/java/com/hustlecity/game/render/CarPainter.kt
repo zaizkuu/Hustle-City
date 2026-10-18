@@ -49,6 +49,7 @@ class CarPainter(private val scene: Scene3D) {
         // contact shadow
         quadFlat(-hl - .15f, -hw - .1f, hl + .15f, hw + .1f, .03f, scene.withAlpha(0xFF000000.toInt(), .28f))
         val body = color
+        scene.material = Mat.PAINT
         val camF = (proj.camX - x) * fx + (proj.camY - y) * fy
         val camL = (proj.camX - x) * rx + (proj.camY - y) * ry
         val nearSide = if (camL >= 0f) 1 else -1
@@ -95,6 +96,7 @@ class CarPainter(private val scene: Scene3D) {
         }
         if (camF > 0f) frontParts(hl, hw, hgt, night) else rearParts(hl, hw, hgt, style, night, braking, body)
         wheels(len, wid, style, nearSide)
+        scene.material = Mat.PLAIN
         if (night) headGlow(x, y, heading, len)
         if (braking) {
             val bx = x - fx * (hl + .6f); val by = y - fy * (hl + .6f)

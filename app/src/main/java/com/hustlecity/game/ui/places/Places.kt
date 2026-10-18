@@ -749,6 +749,12 @@ fun SettingsPanel(e: GameEngine) {
                 Chip("Medium", st.quality == 1) { st.quality = 1; e.traffic.ensure(st.carCount, st.pedCount) }
                 Chip("High", st.quality == 2) { st.quality = 2; e.traffic.ensure(st.carCount, st.pedCount) }
             }
+            Text("RENDERER", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
+            FlowRow {
+                Chip("HD (GPU lighting, smooth edges)", st.hd && st.quality > 0) { st.hd = true; if (st.quality == 0) st.quality = 1 }
+                Chip("Classic (fastest)", !st.hd || st.quality == 0) { st.hd = false }
+            }
+            if (st.gpuFailed) Text("HD graphics aren't supported on this device, so the classic renderer is used.", style = HT.small, color = HC.Red)
             Text("FRAME RATE", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
             FlowRow {
                 Chip("30 FPS (battery saver)", st.fpsCap == 30) { st.fpsCap = 30 }
