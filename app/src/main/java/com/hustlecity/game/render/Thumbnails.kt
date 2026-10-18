@@ -12,6 +12,8 @@ object Thumbnails {
     private val proj = Projector()
     private val batch = RenderBatch(4000)
     private val scene = Scene3D(proj, batch)
+    private val parts = PartSorter(scene)
+    private val cars = CarPainter(scene)
 
     private fun begin(size: Int, cx: Float, cy: Float, dist: Float, yawDeg: Double): Pair<Bitmap, Canvas> {
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
@@ -36,7 +38,7 @@ object Thumbnails {
         val (bmp, _) = begin(size, w / 2, d / 2, ext * 2.2f, -30.0)
         proj.update(size.toFloat(), size.toFloat(), .5f + (h / ext) * .18f)
         if (def != null) {
-            for (p in def.parts) scene.box(p.x0, p.y0, p.z0, p.x1, p.y1, p.z1, p.color, p.color)
+            parts.draw(def, 0f, 0f, 0)
         }
         batch.flush()
         bmp
@@ -46,25 +48,7 @@ object Thumbnails {
         val def = Catalog.vehicle(id)
         val (bmp, _) = begin(size, 0f, 0f, def.length * 2.1f, -35.0)
         proj.update(size.toFloat(), size.toFloat(), .58f)
-        val glass = c(0xFF26313D)
-        val hgt = def.height; val len = def.length; val wid = def.width
-        val heading = (Math.PI / 2).toFloat()
-        // wheels first so the body is painted over the far ones
-        val wheel = c(0xFF1E1F22)
-        for (sx in floatArrayOf(-len * .32f, len * .32f)) for (sy in floatArrayOf(-wid * .5f, wid * .5f - .2f)) {
-            scene.box(sx - .35f, sy, 0f, sx + .35f, sy + .2f, .6f, wheel, wheel)
-        }
-        when (def.style) {
-            2 -> scene.orientedBox(0f, 0f, heading, len, wid, .3f, hgt, def.color, def.color, glass)
-            1 -> {
-                scene.orientedBox(0f, 0f, heading, len, wid, .32f, hgt * .55f, def.color, def.color)
-                scene.orientedBox(0f, 0f, heading, len * .36f, wid * .9f, hgt * .55f, hgt, def.color, glass, glass, len * .14f)
-            }
-            else -> {
-                scene.orientedBox(0f, 0f, heading, len, wid, .25f, hgt * .55f, def.color, def.color)
-                scene.orientedBox(0f, 0f, heading, len * .5f, wid * .85f, hgt * .55f, hgt, def.color, glass, glass, -len * .05f)
-            }
-        }
+        cars.draw(0f, 0f, (Math.PI / 2).toFloat(), def.length, def.width, def.height, def.color, def.style, true)
         batch.flush()
         bmp
     }

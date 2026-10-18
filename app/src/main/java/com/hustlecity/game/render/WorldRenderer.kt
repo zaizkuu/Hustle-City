@@ -51,6 +51,11 @@ class WorldRenderer(private val e: GameEngine) {
     private val path = Path()
     private val rect = RectF()
     private val people = PersonPainter(scene)
+    private val painter = BuildingPainter(this, e)
+    private val cars = CarPainter(scene)
+    private var propsCache: StreetProps? = null
+    private val props: StreetProps
+        get() = propsCache?.takeIf { it.city === e.city } ?: StreetProps(e.city).also { propsCache = it }
 
     // weather particles in screen space: x, y, speed, size
     private val pX = FloatArray(420); private val pY = FloatArray(420); private val pV = FloatArray(420); private val pS = FloatArray(420)
@@ -99,6 +104,7 @@ class WorldRenderer(private val e: GameEngine) {
         val GLASS_DARK = c(0xFF26313D)
         val TRUNK = c(0xFF6B4A32)
         val TREE = intArrayOf(c(0xFF4C8C3F), c(0xFF5E9E45), c(0xFF3F7A3A))
+        val AUTUMN = intArrayOf(c(0xFFD9822B), c(0xFFC0392B), c(0xFFE6B422), c(0xFFB5651D), c(0xFFD35400))
         val PANTS = c(0xFF34383F)
         const val PITCH_STREET = 58f
         const val PITCH_MAP = 62f
@@ -161,15 +167,23 @@ class WorldRenderer(private val e: GameEngine) {
             when (dType[i]) {
                 0 -> drawBuilding(e.city.buildings[dIdx[i]])
                 1 -> drawTree(dIdx[i])
-                2 -> e.traffic.cars.getOrNull(dIdx[i])?.let { drawCar(it.x, it.y, it.heading, it.length, it.width, it.height, it.color, it.style, false) }
+                2 -> e.traffic.cars.getOrNull(dIdx[i])?.let {
+                    // every sixth sedan is a cab
+                    val taxi = it.style == 0 && dIdx[i] % 6 == 0
+                    drawCar(it.x, it.y, it.heading, it.length, it.width, it.height, if (taxi) CarPainter.TAXI else it.color, it.style, false,
+                        taxi = taxi, braking = it.speed < it.cruise * .45f)
+                }
                 3 -> e.traffic.peds.getOrNull(dIdx[i])?.let { drawPed(it, dIdx[i]) }
                 4 -> drawPlayer()
                 5 -> e.state.vehicle(dIdx[i])?.let { v ->
                     if (e.state.player.driving != v.id && !mapMode) scene.disc(v.x, v.y, .03f, 2.6f, 2.6f, 14, scene.withAlpha(c(0xFF27AE60), .35f))
-                    drawCar(v.x, v.y, v.heading, v.def.length, v.def.width, v.def.height, if (v.color != 0) v.color else v.def.color, v.def.style, true)
+                    val driving = e.state.player.driving == v.id
+                    drawCar(v.x, v.y, v.heading, v.def.length, v.def.width, v.def.height, if (v.color != 0) v.color else v.def.color, v.def.style, true,
+                        braking = driving && e.input.brake)
                 }
                 6 -> drawTrafficLight(dIdx[i])
                 7 -> drawParkedCar(dIdx[i])
+                8 -> props.draw(scene, dIdx[i], dKey[i] < 55f * 55f, e.realTime)
             }
         }
         batch.flush()
@@ -341,6 +355,16 @@ class WorldRenderer(private val e: GameEngine) {
         if (scene.daylight < .6f && !mapMode) {
             val glow = scene.withAlpha(c(0xFFFFD27A), .10f * (1f - scene.daylight))
             val core = scene.withAlpha(c(0xFFFFE6A8), .12f * (1f - scene.daylight))
+            if (proj.dist < 260) {
+                val pr = props
+                for (row in row0..row1) for (col in col0..col1) for (pi in pr.byBlock[row * City.COLS + col]) {
+                    if (!pr.isLamp(pi)) continue
+                    val lx = pr.lightX(pi); val ly = pr.lightY(pi)
+                    if (lx < bbox[0] - 6f || lx > bbox[2] + 6f || ly < bbox[1] - 6f || ly > bbox[3] + 6f) continue
+                    scene.disc(lx, ly, .05f, 4.5f, 4.5f, 12, glow)
+                    scene.disc(lx, ly, .06f, 2f, 2f, 10, core)
+                }
+            }
             forIntersections { x, y, _, _ ->
                 scene.disc(x - 12f, y - 8f, .05f, 5f, 5f, 14, glow)
                 scene.disc(x - 12f, y - 8f, .06f, 2.2f, 2.2f, 10, core)
@@ -452,6 +476,28 @@ class WorldRenderer(private val e: GameEngine) {
             }
         }
         if (!near) return
+        // manhole covers and storm drains
+        val iron = scene.lit(c(0xFF3B3E43), 1f)
+        val rim = scene.lit(c(0xFF5A5E64), 1f)
+        for (k in 0 until City.STREETS) {
+            val y = City.streetY(k)
+            if (y + City.ST_HALF < bbox[1] || y - City.ST_HALF > bbox[3]) continue
+            for (i in 0 until City.AVENUES - 1) {
+                val x0 = City.avenueX(i) + City.AV_HALF; val x1 = City.avenueX(i + 1) - City.AV_HALF
+                for (q in 1..2) {
+                    val mx = x0 + (x1 - x0) * q / 3f + ((i * 7 + k * 3) % 5) * 2f
+                    if (mx < bbox[0] || mx > bbox[2]) continue
+                    val my = y + (if ((i + k + q) % 2 == 0) 2.4f else -2.4f)
+                    scene.disc(mx, my, .035f, .55f, .55f, 10, rim)
+                    scene.disc(mx, my, .04f, .45f, .45f, 10, iron)
+                }
+                for (side in intArrayOf(-1, 1)) {
+                    val dx = x0 + 6f
+                    if (dx < bbox[0] || dx > bbox[2]) continue
+                    clipRect(dx, y + side * (City.ST_HALF - .1f) - .25f, dx + 1.2f, y + side * (City.ST_HALF - .1f) + .25f, .035f, iron)
+                }
+            }
+        }
         // crosswalks
         forIntersections { x, y, _, _ ->
             var sx = x - City.AV_HALF + .4f
@@ -523,6 +569,18 @@ class WorldRenderer(private val e: GameEngine) {
         if (!mapMode) {
             for ((i, a) in e.traffic.cars.withIndex()) if (a.x in bbox[0]..bbox[2] && a.y in bbox[1]..bbox[3]) add(2, i, keyFor(a.x, a.y))
             if (proj.dist < 260) for ((i, a) in e.traffic.peds.withIndex()) if (!a.hidden && a.x in bbox[0]..bbox[2] && a.y in bbox[1]..bbox[3]) add(3, i, keyFor(a.x, a.y))
+            if (proj.dist < 230) {
+                val pr = props
+                val col0 = floor((bbox[0] - 4f) / City.AV_SPACING).toInt().coerceAtLeast(0)
+                val col1 = floor((bbox[2] + 4f) / City.AV_SPACING).toInt().coerceAtMost(City.COLS - 1)
+                val row0 = floor((bbox[1] - 4f) / City.ST_SPACING).toInt().coerceAtLeast(0)
+                val row1 = floor((bbox[3] + 4f) / City.ST_SPACING).toInt().coerceAtMost(City.ROWS - 1)
+                for (row in row0..row1) for (col in col0..col1) for (pi in pr.byBlock[row * City.COLS + col]) {
+                    val x = pr.x[pi]; val y = pr.y[pi]
+                    if (x < bbox[0] - 3f || x > bbox[2] + 3f || y < bbox[1] - 6f || y > bbox[3] + 3f) continue
+                    add(8, pi, keyFor(x, y))
+                }
+            }
             if (proj.dist < 240) forIntersections { x, y, i, k ->
                 add(6, (i * 32 + k) * 4 + 0, keyFor(x - 11f, y - 7.5f))
                 add(6, (i * 32 + k) * 4 + 1, keyFor(x + 11f, y + 7.5f))
@@ -571,7 +629,7 @@ class WorldRenderer(private val e: GameEngine) {
     }
 
     private fun drawBuilding(b: Building) {
-        if (b.kind == BKind.GAS) { drawGasStation(b); return }
+        if (b.kind == BKind.GAS) { painter.draw(b, b.roof, b.facade, sqrt(keyFor(b.cx, b.cy)), !mapMode); return }
         val s = e.state
         val p = s.player
         var alpha = 1f
@@ -579,7 +637,7 @@ class WorldRenderer(private val e: GameEngine) {
             if (e.occludes(proj, b, focusX, focusY, 1.2f)) alpha = .3f
         }
         var roof = b.roof
-        var facade = b.facade
+        var facade = if (mapMode) b.facade else painter.facadeColor(b, b.facade)
         if (mapMode) {
             facade = c(0xFFC9CED6); roof = c(0xFFE4E7EC)
             val rented = b.id in rentedBuildings
@@ -589,21 +647,11 @@ class WorldRenderer(private val e: GameEngine) {
         } else if (b.id == e.ui.selected) {
             roof = brighten(roof, 1.25f); facade = brighten(facade, 1.15f)
         }
-        val h = b.height
-        scene.box(b.minX, b.minY, 0f, b.maxX, b.maxY, h, roof, facade, alpha)
-        if (alpha < 1f || mapMode) return
-        val d0 = sqrt(keyFor(b.cx, b.cy))
-        // roof units
-        if (d0 < 320 && e.settings.quality >= 1) {
-            for (r in b.roofBoxes) scene.box(r.x0, r.y0, h, r.x1, r.y1, h + r.h, c(0xFFA7ABB0), c(0xFF8C9095))
+        if (alpha < 1f || mapMode) {
+            scene.box(b.minX, b.minY, 0f, b.maxX, b.maxY, b.height, roof, facade, alpha)
+            return
         }
-        if (d0 > 330) return
-        // faces: 0 north, 1 south, 2 west, 3 east
-        val cam = proj
-        if (cam.camY > b.maxY) facadeDetail(b, 1, d0)
-        if (cam.camY < b.minY) facadeDetail(b, 0, d0)
-        if (cam.camX < b.minX) facadeDetail(b, 2, d0)
-        if (cam.camX > b.maxX) facadeDetail(b, 3, d0)
+        painter.draw(b, roof, facade, sqrt(keyFor(b.cx, b.cy)), true)
     }
 
     private fun brighten(color: Int, f: Float): Int {
@@ -611,161 +659,108 @@ class WorldRenderer(private val e: GameEngine) {
         return (color and 0xFF000000.toInt()) or (r shl 16) or (g shl 8) or bb
     }
 
-    /** Emits a rectangle lying on a building face. u in meters along the face, z up. */
-    private fun faceQuad(b: Building, face: Int, u0: Float, u1: Float, z0: Float, z1: Float, color: Int, out: Float = .04f) {
-        when (face) {
-            0 -> { val y = b.minY - out; scene.quad(b.maxX - u0, y, z0, b.maxX - u1, y, z0, b.maxX - u1, y, z1, b.maxX - u0, y, z1, color) }
-            1 -> { val y = b.maxY + out; scene.quad(b.minX + u0, y, z0, b.minX + u1, y, z0, b.minX + u1, y, z1, b.minX + u0, y, z1, color) }
-            2 -> { val x = b.minX - out; scene.quad(x, b.minY + u0, z0, x, b.minY + u1, z0, x, b.minY + u1, z1, x, b.minY + u0, z1, color) }
-            else -> { val x = b.maxX + out; scene.quad(x, b.maxY - u0, z0, x, b.maxY - u1, z0, x, b.maxY - u1, z1, x, b.maxY - u0, z1, color) }
+    // helpers for [BuildingPainter]
+
+    internal fun bizAt(buildingId: Int) = bizByBuilding[buildingId]
+    internal fun rivalAt(buildingId: Int) = rivalByBuilding[buildingId]
+    internal fun isVacant(b: Building) = vacant(b)
+    internal fun car(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int) =
+        drawCar(x, y, heading, len, wid, hgt, color, style, false)
+
+    /** The shop name floating in front of the sign band. */
+    internal fun shopLabel(b: Building, face: Int, name: String) {
+        val ox = when (face) { 2 -> -1f; 3 -> 1f; else -> 0f }
+        val oy = when (face) { 0 -> -1f; 1 -> 1f; else -> 0f }
+        val cxp = if (face <= 1) b.cx else (if (face == 2) b.minX else b.maxX)
+        val cyp = if (face >= 2) b.cy else (if (face == 0) b.minY else b.maxY)
+        if (proj.project(cxp + ox * .2f, cyp + oy * .2f, 3.8f, tmp)) {
+            val size = (proj.focal * .75f / tmp[2]).coerceAtMost(15f * density)
+            if (size > 6.5f * density * .6f) label(name, tmp[0], tmp[1] + size * .35f, size, 0xFFFFFFFF.toInt())
         }
     }
 
-    private fun facadeDetail(b: Building, face: Int, d0: Float) {
-        val faceLen = if (face <= 1) b.width else b.depth
-        val shade = when (face) { 0 -> scene.sideShade(0f, -1f); 1 -> scene.sideShade(0f, 1f); 2 -> scene.sideShade(-1f, 0f); else -> scene.sideShade(1f, 0f) }
-        val night = scene.daylight < .5f
-        val front = (face == 0 && b.facesNorth) || (face == 1 && !b.facesNorth)
-        val s = e.state
-        val biz = bizByBuilding[b.id]
-        val rival = if (biz == null) rivalByBuilding[b.id] else null
-        val hasShop = b.kind == BKind.RETAIL || b.kind == BKind.SPECIAL || biz != null || rival != null
-        val baseZ = if (hasShop) 4.2f else 1.2f
-        val glass = scene.lit(GLASS, shade)
-        val floors = ((b.height - baseZ - .6f) / 3.3f).toInt()
-        val detailed = e.settings.detailedWindows && d0 < 150f && floors <= 14 && b.windowStyle == 1
-        if (b.windowStyle == 2) {
-            // warehouse: high strip windows and a roller door
-            if (b.height > 6f) faceQuad(b, face, 1.5f, faceLen - 1.5f, b.height - 2.6f, b.height - 1.6f, glass)
-            if (front) faceQuad(b, face, faceLen / 2 - 2.5f, faceLen / 2 + 2.5f, 0f, 4f, scene.lit(c(0xFF9EA4AA), shade))
-        } else if (floors > 0) {
-            for (f in 0 until floors) {
-                val z0 = baseZ + f * 3.3f + .9f
-                val z1 = z0 + 1.7f
-                if (detailed) {
-                    val cols = ((faceLen - 2f) / 3f).toInt().coerceAtLeast(1)
-                    val start = (faceLen - cols * 3f) / 2f
-                    for (cIdx in 0 until cols) {
-                        val u0 = start + cIdx * 3f + .7f
-                        val col = if (night) (if (hash(b.id, f * 64 + cIdx, face) % 100 < 42) LIT else scene.lit(GLASS_NIGHT, 1f)) else glass
-                        faceQuad(b, face, u0, u0 + 1.6f, z0, z1, col)
-                    }
-                } else {
-                    val col = if (night) (if (hash(b.id, f, face) % 3 == 0) LIT else scene.lit(GLASS_NIGHT, 1f)) else glass
-                    faceQuad(b, face, .7f, faceLen - .7f, z0, z1, col)
-                }
-            }
-        }
-        if (!front || !hasShop) return
-        // storefront
-        val open = biz?.let { !it.tempClosed } ?: true
-        val shopGlass = if (night && open) LIT else scene.lit(GLASS_DARK, shade)
-        faceQuad(b, face, .8f, faceLen - .8f, .3f, 3.1f, shopGlass)
-        faceQuad(b, face, faceLen / 2 - .8f, faceLen / 2 + .8f, 0f, 2.5f, scene.lit(c(0xFF1C2229), shade), .06f)
-        val brand = when {
-            b.placeId != null -> Catalog.place(b.placeId!!).color
-            biz != null -> biz.type.color
-            rival != null -> Catalog.type(rival.typeId).color
-            else -> 0
-        }
-        if (brand != 0) {
-            // sign band
-            faceQuad(b, face, .5f, faceLen - .5f, 3.3f, 4.3f, scene.lit(brand, shade), .06f)
-            // awning
-            val u0 = faceLen * .15f; val u1 = faceLen * .85f
-            awning(b, face, u0, u1, scene.lit(brand, 1f), scene.lit(brand, shade * .8f))
-            if (d0 < 140f) {
-                val name = when {
-                    b.placeId != null -> Catalog.place(b.placeId!!).name
-                    biz != null -> biz.name
-                    else -> rival!!.name
-                }
-                val ox = when (face) { 2 -> -1f; 3 -> 1f; else -> 0f }
-                val oy = when (face) { 0 -> -1f; 1 -> 1f; else -> 0f }
-                val cxp = if (face <= 1) b.cx else (if (face == 2) b.minX else b.maxX)
-                val cyp = if (face >= 2) b.cy else (if (face == 0) b.minY else b.maxY)
-                if (proj.project(cxp + ox * .2f, cyp + oy * .2f, 3.8f, tmp)) {
-                    val size = (proj.focal * .75f / tmp[2]).coerceAtMost(15f * density)
-                    if (size > 6.5f * density * .6f) label(name, tmp[0], tmp[1] + size * .35f, size, 0xFFFFFFFF.toInt())
-                }
-            }
-        } else if (b.kind == BKind.RETAIL && vacant(b) && d0 < 160f) {
-            if (proj.project(b.doorX, if (face == 0) b.minY else b.maxY, 3.6f, tmp)) {
-                val size = (proj.focal * .6f / tmp[2]).coerceAtMost(12f * density)
-                if (size > 4f * density) label("FOR RENT", tmp[0], tmp[1], size, c(0xFF27AE60), 0xEEFFFFFF.toInt())
-            }
+    internal fun forRentLabel(b: Building, face: Int) {
+        if (proj.project(b.doorX, if (face == 0) b.minY else b.maxY, 3.6f, tmp)) {
+            val size = (proj.focal * .6f / tmp[2]).coerceAtMost(12f * density)
+            if (size > 4f * density) label("FOR RENT", tmp[0], tmp[1], size, c(0xFF27AE60), 0xEEFFFFFF.toInt())
         }
     }
 
-    private fun awning(b: Building, face: Int, u0: Float, u1: Float, top: Int, front: Int) {
-        val out = 1.4f
-        when (face) {
-            0 -> {
-                val y = b.minY
-                scene.quad(b.maxX - u0, y, 3.2f, b.maxX - u1, y, 3.2f, b.maxX - u1, y - out, 2.7f, b.maxX - u0, y - out, 2.7f, top)
-                scene.quad(b.maxX - u0, y - out, 2.7f, b.maxX - u1, y - out, 2.7f, b.maxX - u1, y - out, 2.35f, b.maxX - u0, y - out, 2.35f, front)
-            }
-            1 -> {
-                val y = b.maxY
-                scene.quad(b.minX + u0, y, 3.2f, b.minX + u1, y, 3.2f, b.minX + u1, y + out, 2.7f, b.minX + u0, y + out, 2.7f, top)
-                scene.quad(b.minX + u0, y + out, 2.7f, b.minX + u1, y + out, 2.7f, b.minX + u1, y + out, 2.35f, b.minX + u0, y + out, 2.35f, front)
-            }
-            else -> {}
-        }
-    }
-
-    private fun drawGasStation(b: Building) {
-        val color = Catalog.place("fuel").color
-        val x0 = b.minX + 3f; val x1 = b.maxX - 3f; val y0 = b.minY + 5f; val y1 = b.maxY - 5f
-        val pillar = c(0xFFE0E0E0)
-        scene.box(x0 + .5f, y0 + .5f, 0f, x0 + .9f, y0 + .9f, 5f, pillar, pillar)
-        scene.box(x1 - .9f, y0 + .5f, 0f, x1 - .5f, y0 + .9f, 5f, pillar, pillar)
-        scene.box(x0 + .5f, y1 - .9f, 0f, x0 + .9f, y1 - .5f, 5f, pillar, pillar)
-        scene.box(x1 - .9f, y1 - .9f, 0f, x1 - .5f, y1 - .5f, 5f, pillar, pillar)
-        val mx = (x0 + x1) / 2
-        scene.box(mx - 3f, b.cy - .6f, 0f, mx - 2f, b.cy + .6f, 1.6f, c(0xFFD32F2F), c(0xFFD32F2F))
-        scene.box(mx + 2f, b.cy - .6f, 0f, mx + 3f, b.cy + .6f, 1.6f, c(0xFFD32F2F), c(0xFFD32F2F))
-        scene.box(x0, y0, 5f, x1, y1, 5.7f, c(0xFFF5F5F5), color)
+    internal fun gasLabel(b: Building, y0: Float, y1: Float) {
+        if (mapMode) return
         if (proj.project(b.cx, if (b.facesNorth) y0 else y1, 6.3f, tmp)) {
             val size = (proj.focal * .8f / tmp[2]).coerceAtMost(14f * density)
-            if (size > 4f * density && !mapMode) label("⛽ Fuel Up", tmp[0], tmp[1], size, 0xFFFFFFFF.toInt())
+            if (size > 4f * density) label("⛽ Fuel Up", tmp[0], tmp[1], size, 0xFFFFFFFF.toInt())
         }
     }
 
     // ------------------------------------------------------------------ props
 
     private fun drawTree(i: Int) {
+        val pr = props
+        if (pr.hiddenTree[i]) return
         val t = e.city.trees[i]
-        scene.box(t.x - .15f, t.y - .15f, 0f, t.x + .15f, t.y + .15f, t.h * .55f, TRUNK, TRUNK)
-        val base = TREE[t.tone]
+        val kind = pr.treeKind[i]
+        val near = keyFor(t.x, t.y) < 70f * 70f
+        val month = e.weather.month()
         val white = scene.lit(0xFFF2F5F8.toInt(), 1f)
-        scene.blob(t.x, t.y, t.h * .75f, t.r, scene.mix(scene.lit(base, .82f), white, scene.snow * .35f), 10)
-        scene.blob(t.x, t.y, t.h * .75f, t.r * .7f, scene.mix(scene.lit(base, 1.05f), white, scene.snow * .65f), 9, -.18f, -.25f)
+        // street trees grow out of a pit with a low iron guard
+        if (kind == 0 || kind == 3) {
+            scene.groundRect(t.x - .7f, t.y - .7f, t.x + .7f, t.y + .7f, .025f, scene.mix(scene.lit(c(0xFF4A3A2C), 1f), white, scene.snow * .8f))
+            if (near) {
+                val g = c(0xFF2A2D31)
+                scene.box(t.x - .72f, t.y - .72f, 0f, t.x + .72f, t.y - .66f, .35f, g, g)
+                scene.box(t.x - .72f, t.y + .66f, 0f, t.x + .72f, t.y + .72f, .35f, g, g)
+            }
+        }
+        if (kind == 2) {
+            // conifer: stacked cones, green all year
+            scene.box(t.x - .14f, t.y - .14f, 0f, t.x + .14f, t.y + .14f, t.h * .3f, TRUNK, TRUNK)
+            val g = TREE[2]
+            scene.cone(t.x, t.y, t.r * .95f, t.h * .25f, t.h * .75f, 7, scene.mix(g, c(0xFF2E5E36), .3f), .5f)
+            scene.cone(t.x, t.y, t.r * .72f, t.h * .55f, t.h * 1.05f, 7, g, .6f)
+            scene.cone(t.x, t.y, t.r * .45f, t.h * .85f, t.h * 1.3f, 6, scene.mix(g, c(0xFF7FB069), .2f), .7f)
+            return
+        }
+        // deciduous trees follow the seasons: blossom and fresh leaves in spring, deep green in summer,
+        // reds and golds in autumn and bare branches in winter
+        val bare = month == 11 || month == 0 || month == 1 || (month == 2 && i % 3 != 0)
+        scene.box(t.x - .15f, t.y - .15f, 0f, t.x + .15f, t.y + .15f, t.h * .55f, TRUNK, TRUNK)
+        if (near || bare) {
+            // a few branches fork out of the trunk
+            for (k in 0 until 4) {
+                val a = (k * 1.5708f + i * .7f)
+                val bx = t.x + cos(a) * t.r * .6f; val by = t.y + sin(a) * t.r * .6f
+                val z0 = t.h * .45f; val z1 = t.h * (.78f + (k % 2) * .12f)
+                scene.quad(t.x - .06f, t.y, z0, t.x + .06f, t.y, z0, bx + .03f, by, z1, bx - .03f, by, z1, scene.lit(TRUNK, .9f))
+                scene.quad(t.x, t.y - .06f, z0, t.x, t.y + .06f, z0, bx, by + .03f, z1, bx, by - .03f, z1, scene.lit(TRUNK, .8f))
+            }
+        }
+        if (bare) {
+            // a haze of twigs, dusted with snow
+            scene.blob(t.x, t.y, t.h * .78f, t.r * .9f, scene.withAlpha(scene.mix(scene.lit(c(0xFF6B5444), 1f), white, scene.snow * .5f), .35f), 10)
+            return
+        }
+        val base = when {
+            kind == 3 && (month == 3 || month == 2) -> if (i % 2 == 0) c(0xFFF4B6C8) else c(0xFFF7E1E8) // cherry blossom
+            month == 3 || month == 4 -> scene.mix(TREE[t.tone], c(0xFF9CCB5A), .35f)
+            month in 8..10 -> AUTUMN[(i + t.tone) % AUTUMN.size].let { if (month == 8) scene.mix(TREE[t.tone], it, .45f) else it }
+            else -> TREE[t.tone]
+        }
+        val z = t.h * .75f
+        scene.blob(t.x, t.y, z - t.r * .15f, t.r, scene.mix(scene.lit(base, .78f), white, scene.snow * .35f), 12)
+        scene.blob(t.x, t.y, z, t.r * .78f, scene.mix(scene.lit(base, .95f), white, scene.snow * .5f), 11, -.12f, -.2f)
+        if (near) {
+            scene.blob(t.x, t.y, z + t.r * .2f, t.r * .45f, scene.mix(scene.lit(base, 1.12f), white, scene.snow * .7f), 9, -.35f * scene.sunX, -.55f)
+            scene.blob(t.x, t.y, z, t.r * .35f, scene.mix(scene.lit(base, .88f), white, scene.snow * .4f), 8, .55f, -.05f)
+        }
     }
 
-    private fun drawCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int, owned: Boolean) {
-        val glass = GLASS_DARK
-        when (style) {
-            0 -> {
-                scene.orientedBox(x, y, heading, len, wid, .28f, hgt * .55f, color, color)
-                scene.orientedBox(x, y, heading, len * .52f, wid * .86f, hgt * .55f, hgt, color, glass, glass, -len * .06f)
-            }
-            1 -> {
-                scene.orientedBox(x, y, heading, len, wid, .32f, hgt * .55f, color, color)
-                scene.orientedBox(x, y, heading, len * .36f, wid * .9f, hgt * .55f, hgt, color, glass, glass, len * .14f)
-            }
-            2 -> {
-                scene.orientedBox(x, y, heading, len, wid, .3f, hgt, color, color, glass)
-            }
-            else -> {
-                scene.orientedBox(x, y, heading, len, wid, .2f, hgt * .55f, color, color)
-                scene.orientedBox(x, y, heading, len * .42f, wid * .82f, hgt * .55f, hgt, color, glass, glass, -len * .05f)
-            }
-        }
-        if (scene.daylight < .5f) {
-            val fx = sin(heading); val fy = -cos(heading)
-            scene.disc(x + fx * (len * .5f + 3f), y + fy * (len * .5f + 3f), .05f, 2.4f, 2.4f, 10, scene.withAlpha(c(0xFFFFEBA8), .2f * (1f - scene.daylight)))
-        }
+    private fun drawCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int, owned: Boolean,
+                        taxi: Boolean = false, braking: Boolean = false) {
+        val lod = when (e.settings.quality) { 0 -> 45f; 1 -> 80f; else -> 120f }
+        val near = !mapMode && keyFor(x, y) < lod * lod
+        cars.draw(x, y, heading, len, wid, hgt, color, style, near, taxi, braking)
     }
 
     private fun drawParkedCar(code: Int) {

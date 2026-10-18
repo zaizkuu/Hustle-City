@@ -78,6 +78,59 @@ class RenderSnapshotTest {
         renderWorld(e, "midtown.png")
     }
 
+    /** One close-up per architectural style, by day and by night, to check the buildings' personality. */
+    @Test
+    fun architectureGallery() {
+        for (night in listOf(false, true)) for (st in com.hustlecity.game.render.Arch.entries) {
+            val e = engine()
+            e.ui.tip = null
+            val painter = com.hustlecity.game.render.BuildingPainter(WorldRenderer(e), e)
+            val b = e.city.buildings.filter { it.solid && painter.style(it) == st && it.placeId == null }
+                .maxByOrNull { if (st == com.hustlecity.game.render.Arch.DECO || st == com.hustlecity.game.render.Arch.GLASS) it.height else it.width } ?: continue
+            val far = (b.height * .7f).coerceIn(28f, 80f)
+            e.state.player.x = b.doorX; e.state.player.y = b.doorY + (if (b.facesNorth) -6f else 6f)
+            e.state.minute = (if (night) 21L else 15L) * 60
+            repeat(20) {
+                e.frame(1 / 30f)
+                e.camera.tx = b.doorX; e.camera.ty = b.doorY; e.camera.zoom = far; e.camera.dist = far
+                e.camera.yaw = if (b.facesNorth) Math.PI.toFloat() + .5f else .5f
+            }
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            WorldRenderer(e).draw(Canvas(bmp), w, h, 2f)
+            save(bmp, "arch_${st.name.lowercase()}${if (night) "_night" else ""}.png")
+        }
+    }
+
+    /** Every vehicle body style plus a taxi, close up, by day and by night. */
+    @Test
+    fun vehicleGallery() {
+        for (night in listOf(false, true)) {
+            val proj = com.hustlecity.game.render.Projector()
+            val batch = com.hustlecity.game.render.RenderBatch()
+            val scene = com.hustlecity.game.render.Scene3D(proj, batch)
+            val painter = com.hustlecity.game.render.CarPainter(scene)
+            proj.tx = 0f; proj.ty = 0f; proj.dist = 22f
+            proj.pitch = Math.toRadians(40.0).toFloat(); proj.yaw = .6f; proj.near = .5f
+            proj.update(w.toFloat(), h.toFloat())
+            scene.applyDaylight(if (night) .2f else 1f)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            canvas.drawColor(scene.lit(0xFF4A4D53.toInt(), 1f))
+            batch.begin(canvas)
+            val defs = listOf(Triple(0, 0xFFC0392B.toInt(), false), Triple(1, 0xFF2C3E50.toInt(), false), Triple(2, 0xFFF5F5F5.toInt(), false),
+                Triple(3, 0xFFF2994A.toInt(), false), Triple(0, com.hustlecity.game.render.CarPainter.TAXI, true))
+            for ((k, d) in defs.withIndex()) {
+                val (style, color, taxi) = d
+                val len = when (style) { 1 -> 5.2f; 2 -> 5.8f; 3 -> 4.4f; else -> 4.5f }
+                val hgt = when (style) { 1 -> 1.8f; 2 -> 2.5f; 3 -> 1.2f; else -> 1.45f }
+                val wid = if (style == 2) 2.1f else 1.85f
+                painter.draw(-10f + k * 5f, if (k % 2 == 0) -2f else 2f, if (k % 2 == 0) 1.2f else 4.3f, len, wid, hgt, color, style, true, taxi, braking = k == 1)
+            }
+            batch.flush()
+            save(bmp, if (night) "vehicles_night.png" else "vehicles.png")
+        }
+    }
+
     @Test
     fun mapMode() {
         val e = engine()

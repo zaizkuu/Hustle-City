@@ -27,6 +27,8 @@ class InteriorRenderer(private val e: GameEngine) {
     private val dKey = FloatArray(maxDraw)
     private val order = IntArray(maxDraw)
     private val people = PersonPainter(scene)
+    private val parts = PartSorter(scene)
+    private val cars = CarPainter(scene)
     private val px = FloatArray(10); private val py = FloatArray(10); private val pz = FloatArray(10)
 
     companion object {
@@ -178,20 +180,7 @@ class InteriorRenderer(private val e: GameEngine) {
     private fun wallE(sc: InteriorScene, color: Int, h: Float) = scene.box(sc.w.toFloat(), -.2f, 0f, sc.w + .2f, sc.d + .2f, h, WALL_TOP, color)
 
     /** Draws a furniture model at grid position (x, y) with rotation. */
-    fun drawItem(def: FurnitureDef, x: Float, y: Float, rot: Int, alpha: Float) {
-        val w = def.w.toFloat(); val d = def.d.toFloat()
-        for (p in def.parts) {
-            // rotate both corners into room space
-            val ax: Float; val ay: Float; val bx: Float; val by: Float
-            when (rot % 4) {
-                0 -> { ax = p.x0; ay = p.y0; bx = p.x1; by = p.y1 }
-                1 -> { ax = d - p.y0; ay = p.x0; bx = d - p.y1; by = p.x1 }
-                2 -> { ax = w - p.x0; ay = d - p.y0; bx = w - p.x1; by = d - p.y1 }
-                else -> { ax = p.y0; ay = w - p.x0; bx = p.y1; by = w - p.x1 }
-            }
-            scene.box(x + min(ax, bx), y + min(ay, by), p.z0, x + max(ax, bx), y + max(ay, by), p.z1, p.color, p.color, alpha)
-        }
-    }
+    fun drawItem(def: FurnitureDef, x: Float, y: Float, rot: Int, alpha: Float) = parts.draw(def, x, y, rot, alpha)
 
     private fun person(v: com.hustlecity.game.engine.Person, staff: Boolean) {
         people.draw(v.x, v.y, v.z, v.heading, v.phase, v.moving, v.shirt, PersonPainter.PANTS[v.pants % PersonPainter.PANTS.size], v.skin,
@@ -254,18 +243,6 @@ class InteriorRenderer(private val e: GameEngine) {
         }
     }
 
-    private fun drawCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int) {
-        val glass = c(0xFF26313D)
-        when (style) {
-            2 -> scene.orientedBox(x, y, heading, len, wid, .3f, hgt, color, color, glass)
-            1 -> {
-                scene.orientedBox(x, y, heading, len, wid, .32f, hgt * .55f, color, color)
-                scene.orientedBox(x, y, heading, len * .36f, wid * .9f, hgt * .55f, hgt, color, glass, glass, len * .14f)
-            }
-            else -> {
-                scene.orientedBox(x, y, heading, len, wid, .25f, hgt * .55f, color, color)
-                scene.orientedBox(x, y, heading, len * .5f, wid * .85f, hgt * .55f, hgt, color, glass, glass, -len * .05f)
-            }
-        }
-    }
+    private fun drawCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int) =
+        cars.draw(x, y, heading, len, wid, hgt, color, style, true)
 }
