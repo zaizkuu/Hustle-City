@@ -5,30 +5,12 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-
-      # Keep the same debug key between runs so a new release installs over the previous one.
-      - uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: android-debug-keystore
-
-      - name: Release signing key (optional)
-        env:
-          KEYSTORE_BASE64: ${{ secrets.HUSTLE_KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-            echo "HUSTLE_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          fi
 
       - uses: actions/setup-java@v4
         with:
@@ -41,10 +23,6 @@ jobs:
         run: ./gradlew testDebugUnitTest --stacktrace
 
       - name: Build APKs
-        env:
-          HUSTLE_KEYSTORE_PASSWORD: ${{ secrets.HUSTLE_KEYSTORE_PASSWORD }}
-          HUSTLE_KEY_ALIAS: ${{ secrets.HUSTLE_KEY_ALIAS }}
-          HUSTLE_KEY_PASSWORD: ${{ secrets.HUSTLE_KEY_PASSWORD }}
         run: ./gradlew assembleDebug assembleRelease --stacktrace
 
       - name: Upload APKs
@@ -54,26 +32,6 @@ jobs:
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/release/app-release.apk
-
-      # Each push replaces the release for the current versionName, so the Releases page always
-      # has the newest APK. Pull requests don't publish.
-      - name: Publish GitHub release
-        if: github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
-          tag="v$version"
-          apk="HustleCity-$tag.apk"
-          cp app/build/outputs/apk/release/app-release.apk "$apk"
-          {
-            echo "Download **$apk** below and open it on your Android phone (Android 8.0 or newer)."
-            echo "If asked, allow installing apps from your browser or file manager."
-            echo
-            echo "Built from ${GITHUB_SHA::7} on ${GITHUB_REF_NAME}."
-          } > notes.md
-          gh release delete "$tag" --yes --cleanup-tag || true
-          gh release create "$tag" "$apk" --target "$GITHUB_SHA" --title "Hustle City $tag" --notes-file notes.md --latest
 
       - name: Upload render snapshots
         if: always()

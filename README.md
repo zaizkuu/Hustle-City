@@ -64,11 +64,7 @@ Requirements: JDK 17 or newer and the Android SDK (API 35).
 ./gradlew testDebugUnitTest      # simulation tests + offscreen render snapshots
 ```
 
-## Download
-
-Grab the latest `HustleCity-v*.apk` from the repository's **Releases** page and open it on an Android 8.0+ phone (allow installing from your browser or file manager if asked). Every push rebuilds the release for the current version on GitHub Actions; the debug and release APKs are also attached to each run under **Artifacts**.
-
-Release builds are signed with the CI debug key by default. To sign with your own key, add the repository secrets `HUSTLE_KEYSTORE_BASE64` (the keystore file, base64-encoded), `HUSTLE_KEYSTORE_PASSWORD`, `HUSTLE_KEY_ALIAS` and `HUSTLE_KEY_PASSWORD`.
+Every push also builds both APKs on GitHub Actions. Download them from the run's **Artifacts** section.
 
 The unit tests use Robolectric's native graphics to render the city, interiors and every main UI screen to PNG files in `app/build/snapshots/`. `AudioTest` renders each radio station to WAV files in `app/build/audio/`. `BalanceReportTest` writes a per-business-type profit report to `app/build/balance.txt`.
 
