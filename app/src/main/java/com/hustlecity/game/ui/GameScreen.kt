@@ -90,6 +90,7 @@ fun GameScreen(e: GameEngine) {
                     } else {
                         Joystick(e, Modifier.align(if (e.settings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart).padding(18.dp))
                         LocationLabel(e, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
+                        com.hustlecity.game.ui.hud.CarryingChip(e, Modifier.align(if (e.settings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart).padding(start = 16.dp, end = 16.dp, bottom = 150.dp))
                         ActionButtons(e, Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp))
                     }
                     BuildingCard(e, Modifier.align(Alignment.TopEnd).padding(top = 58.dp, end = 8.dp))

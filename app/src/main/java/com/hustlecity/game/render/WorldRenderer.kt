@@ -842,8 +842,10 @@ class WorldRenderer(private val e: GameEngine) {
             for (v in s.vehicles) {
                 if (v.id == s.player.driving) continue
                 val d = dist(v.x, v.y, s.player.x, s.player.y)
-                if (d > 9f && d < 400f && proj.project(v.x, v.y, v.def.height + 2.5f, tmp)) {
-                    pin(canvas, tmp[0], tmp[1], "🚗", c(0xFF27AE60), 11f * density)
+                if (d < 400f && proj.project(v.x, v.y, v.def.height + 2.5f, tmp)) {
+                    // loaded cars show what's in the trunk
+                    if (v.cargo.isNotEmpty()) waypointPill(canvas, tmp[0], tmp[1] - 6f * density, "📦 ${v.cargo.size}/${v.def.cargo} in the trunk", c(0xFFF2994A))
+                    else if (d > 9f) pin(canvas, tmp[0], tmp[1], "🚗", c(0xFF27AE60), 11f * density)
                 }
             }
         }
@@ -910,14 +912,14 @@ class WorldRenderer(private val e: GameEngine) {
         canvas.drawText(emoji, x, y + r * .38f, textPaint)
     }
 
-    private fun waypointPill(canvas: Canvas, x: Float, y: Float, text: String) {
+    private fun waypointPill(canvas: Canvas, x: Float, y: Float, text: String, dot: Int = c(0xFF2F80ED)) {
         textPaint.textSize = 13f * density
         val tw = textPaint.measureText(text)
         val r = 14f * density
         rect.set(x - tw / 2 - r * 1.6f, y - r, x + tw / 2 + r * .8f, y + r)
         pillPaint.color = 0xE63A4250.toInt()
         canvas.drawRoundRect(rect, r, r, pillPaint)
-        pillPaint.color = c(0xFF2F80ED)
+        pillPaint.color = dot
         canvas.drawCircle(rect.left + r, y, r * .78f, pillPaint)
         textPaint.color = 0xFFFFFFFF.toInt()
         textPaint.textSize = 12f * density

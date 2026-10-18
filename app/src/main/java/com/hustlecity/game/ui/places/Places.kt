@@ -72,6 +72,12 @@ import com.hustlecity.game.engine.BizCalc
 import com.hustlecity.game.engine.CartLine
 import com.hustlecity.game.engine.Confirm
 import com.hustlecity.game.engine.GameEngine
+import com.hustlecity.game.ui.EmptyNote
+import com.hustlecity.game.engine.unloadDestination
+import com.hustlecity.game.engine.unloadInto
+import com.hustlecity.game.engine.stowInTrunk
+import com.hustlecity.game.engine.sellFromTrunk
+import com.hustlecity.game.engine.takeFromTrunk
 import com.hustlecity.game.engine.Panel
 import com.hustlecity.game.engine.Screen
 import com.hustlecity.game.engine.buyBuilding
@@ -140,6 +146,7 @@ fun PanelHost(e: GameEngine, panel: Panel) {
         Panel.Help -> HelpPanel(e)
         Panel.Sleep -> SleepPanel(e)
         is Panel.Warehouse -> WarehousePanel(e, panel.businessId)
+        is Panel.Trunk -> TrunkPanel(e, panel.vehicleId)
     }
 }
 
@@ -844,6 +851,48 @@ fun SleepPanel(e: GameEngine) {
 }
 
 // ------------------------------------------------------------------ warehouse loading
+
+/** What's in the trunk: unload into a nearby store or home, take items in hand, or sell them back. */
+@Composable
+private fun TrunkPanel(e: GameEngine, vehicleId: Int) {
+    val v = e.state.vehicle(vehicleId) ?: run { close(e); return }
+    val p = e.state.player
+    val dest = e.unloadDestination(v)
+    Modal("${v.def.name} — Trunk (${v.cargo.size}/${v.def.cargo})", { close(e) }, maxWidth = 620.dp) {
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (dest != null && (v.cargo.isNotEmpty() || p.hand.isNotEmpty())) {
+                WhiteCard(Modifier.fillMaxWidth(), padding = 10.dp) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Parked by ${e.buildingName(dest)}", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
+                        HButton("Unload all here", color = HC.Orange, small = true) { e.unloadInto(dest.id, true, v); if (v.cargo.isEmpty()) close(e) }
+                    }
+                    Text("Furniture goes into storage (place it with the Interior Designer); products go onto your shelves.", style = HT.small, color = HC.InkSoft)
+                }
+            } else if (v.cargo.isNotEmpty()) {
+                Text("To unload, park within 45 m of your store, warehouse or home and open the trunk, or go inside and tap Unload.", style = HT.small, color = HC.InkSoft)
+            }
+            if (v.cargo.isEmpty()) EmptyNote("The trunk is empty. Buy furniture or stock at a store and choose \"Load into ${v.def.name}\" at checkout.")
+            for ((i, item) in v.cargo.withIndex()) {
+                val name = if (item.isProduct) "${Catalog.product(item.id)?.name ?: item.id} (${item.qty} units)" else Catalog.item(item.id)?.name ?: item.id
+                WhiteCard(Modifier.fillMaxWidth(), padding = 8.dp) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(if (item.isProduct) "📦" else "🪑", fontSize = 18.sp)
+                        Text(name, style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
+                        HButton("Take", small = true, enabled = p.hand.size < 2) { e.takeFromTrunk(v, i) }
+                        HButton("Sell", small = true, color = HC.Red) { e.sellFromTrunk(v, i) }
+                    }
+                }
+            }
+            if (p.hand.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("In your hands: " + p.hand.joinToString { if (it.isProduct) Catalog.product(it.id)?.name ?: it.id else Catalog.item(it.id)?.name ?: it.id },
+                        style = HT.small, color = HC.InkSoft, modifier = Modifier.weight(1f))
+                    HButton("Put in trunk", small = true, color = HC.Teal) { e.stowInTrunk(v) }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun WarehousePanel(e: GameEngine, businessId: Int) {

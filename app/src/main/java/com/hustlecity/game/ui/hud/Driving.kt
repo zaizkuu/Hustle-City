@@ -117,6 +117,7 @@ private fun Dashboard(e: GameEngine) {
         Box(Modifier.padding(start = 6.dp).clip(RoundedCornerShape(3.dp)).background(if (gear == "R") HC.Red else Color(0x33FFFFFF)).padding(horizontal = 5.dp)) {
             Text(gear, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
+        if (v.cargo.isNotEmpty()) Text("📦${v.cargo.size}/${v.def.cargo}", color = HC.Orange, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp))
         Column(Modifier.padding(start = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("⛽", fontSize = 8.sp)

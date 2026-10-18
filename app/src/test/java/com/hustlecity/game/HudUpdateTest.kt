@@ -77,4 +77,20 @@ class HudUpdateTest {
         assertTrue(count("LEFT") > 0 && count("RIGHT") > 0 && count("GAS") > 0 && count("BRAKE") > 0)
         assertEquals("no steering wheel in arrow mode", 0, count("STEER"))
     }
+
+    @Test
+    fun trunkButtonsShowWhenTheCarIsLoaded() {
+        val e = GameEngine(null)
+        e.newGame("T", 0, 0, 1)
+        e.ui.tip = null
+        rule.mainClock.autoAdvance = false
+        rule.setContent { HustleCityApp(e, onExit = {}) }
+        val v = e.state.vehicles.first()
+        e.state.player.x = v.x + 1.5f; e.state.player.y = v.y
+        v.cargo += com.hustlecity.game.model.CargoItem("shelf", false)
+        e.state.player.hand += com.hustlecity.game.model.CargoItem("plant_small", false)
+        step(e)
+        assertTrue("trunk button next to a loaded car", count("Trunk") > 0)
+        assertTrue("carrying indicator", count("Carrying") > 0)
+    }
 }

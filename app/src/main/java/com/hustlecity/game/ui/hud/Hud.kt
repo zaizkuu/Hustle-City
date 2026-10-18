@@ -113,6 +113,8 @@ import com.hustlecity.game.engine.taxiFare
 import com.hustlecity.game.engine.taxiTo
 import com.hustlecity.game.engine.toggleWork
 import com.hustlecity.game.engine.unloadHere
+import com.hustlecity.game.engine.unloadInto
+import com.hustlecity.game.engine.unloadDestination
 import com.hustlecity.game.engine.unloadableCount
 import com.hustlecity.game.engine.workUntilClosing
 import com.hustlecity.game.model.PlayerState
@@ -446,7 +448,31 @@ fun ActionButtons(e: GameEngine, modifier: Modifier = Modifier) {
         }
         e.nearVehicle?.let { v ->
             HButton("Get in ${v.def.name}", icon = Icons.Filled.DirectionsCar) { e.enterVehicle(v); e.ui.phoneOpen = false }
+            if (v.cargo.isNotEmpty() || p.hand.isNotEmpty()) {
+                // the trunk: unload into a store/home right here, take items in hand, or stow what you carry
+                val dest = e.unloadDestination(v)
+                HButton(if (dest != null && v.cargo.isNotEmpty()) "Unload ${v.cargo.size} into ${e.buildingName(dest)}" else "Trunk (${v.cargo.size}/${v.def.cargo})",
+                    color = HC.Orange, icon = Icons.Filled.Inventory2) {
+                    if (dest != null && v.cargo.isNotEmpty()) e.unloadInto(dest.id, true, v) else e.ui.panel = Panel.Trunk(v.id)
+                }
+                if (dest != null && v.cargo.isNotEmpty()) HButton("Trunk", color = HC.GlassLight, small = true) { e.ui.panel = Panel.Trunk(v.id) }
+            }
         }
+    }
+}
+
+/** What you're carrying in your hands (up to two items). */
+@Composable
+fun CarryingChip(e: GameEngine, modifier: Modifier = Modifier) {
+    val hand = e.state.player.hand
+    if (hand.isEmpty()) return
+    Row(
+        modifier.widthIn(max = 260.dp).shadow(4.dp, RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).background(HC.GlassDark).padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("🤲", fontSize = 14.sp)
+        Text(" Carrying ${hand.size}/2: " + hand.joinToString { if (it.isProduct) Catalog.product(it.id)?.name ?: it.id else Catalog.item(it.id)?.name ?: it.id },
+            color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 2)
     }
 }
 
@@ -554,6 +580,16 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val full = Modifier.fillMaxWidth()
             val unload = e.unloadableCount()
+            // cargo first: what can be brought in, or why not
+            val ownPlace = sc.mode == InteriorMode.BUSINESS || sc.mode == InteriorMode.HOME
+            if (ownPlace && unload > 0) {
+                HButton("Unload car & hands ($unload)", full, color = HC.Orange, icon = Icons.Filled.Inventory2) { e.unloadHere() }
+            } else if (ownPlace) {
+                e.state.vehicles.firstOrNull { it.cargo.isNotEmpty() }?.let { far ->
+                    Text("Your ${far.def.name} has ${far.cargo.size} item(s) but is parked too far away. Park within 45 m of the entrance to unload.",
+                        color = HC.Yellow, fontSize = 10.sp)
+                }
+            }
             when (sc.mode) {
                 InteriorMode.BUSINESS -> if (sc.business!!.type.facility) {
                     val biz = sc.business
@@ -567,7 +603,6 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                         Text("${BizCalc.warehouseBoxesUsed(biz)} / ${BizCalc.warehouseBoxes(biz)} boxes stored", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         HButton("Load vehicle", full, small = true, color = HC.Teal) { e.ui.panel = Panel.Warehouse(biz.id) }
                     }
-                    if (unload > 0) HButton("Unload ($unload)", full, small = true, color = HC.Orange) { e.unloadHere() }
                 } else {
                     val biz = sc.business
                     HButton("Open in BizHub", full, small = true) { e.ui.bizHubSel = biz.id; e.ui.app = AppId.BIZHUB }
@@ -587,7 +622,6 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                     HButton(if (working) "Stop working" else "Start working", full, small = true, color = if (working) HC.Red else HC.Green) { e.toggleWork(biz) }
                     HButton("Work until %02d:00".format(biz.closeHour), full, small = true, color = HC.Teal) { e.workUntilClosing(biz) }
                     HButton("Clean (${biz.cleanliness.roundToInt()}%)", full, small = true, color = HC.GlassLight) { e.cleanStore(biz) }
-                    if (unload > 0) HButton("Unload ($unload)", full, small = true, color = HC.Orange) { e.unloadHere() }
                 }
                 InteriorMode.HOME -> {
                     HButton("Sleep", full, small = true) { e.ui.panel = Panel.Sleep }
@@ -597,7 +631,6 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                         if (e.ui.designer) e.tip("designer", "Interior designer", "Tap an item from storage, then tap the floor to position it. Rotate it and press Place. Tap placed furniture to move, rotate, store or sell it. You can also repaint the floor and walls.")
                     }
                     HButton("Toggle walls", full, small = true, color = HC.GlassLight) { sc.showWalls = !sc.showWalls; e.bump() }
-                    if (unload > 0) HButton("Unload ($unload)", full, small = true, color = HC.Orange) { e.unloadHere() }
                 }
                 InteriorMode.EMPTY -> HButton("Start a business", full, small = true, color = HC.Green) { e.ui.panel = Panel.StartBusiness(b.id) }
                 InteriorMode.PLACE -> HButton("Shop / services", full, small = true, color = HC.Green) { e.ui.panel = Panel.Place(b.id, b.placeId!!) }

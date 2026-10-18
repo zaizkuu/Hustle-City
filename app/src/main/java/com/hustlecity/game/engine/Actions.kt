@@ -183,11 +183,55 @@ fun GameEngine.vehicleNear(buildingId: Int): OwnedVehicle? {
 fun GameEngine.unloadHere(): Int {
     val p = state.player
     val b = city.building(p.inBuilding) ?: return 0
+    return unloadInto(b.id, true, vehicleNear(b.id))
+}
+
+/** Your store, warehouse or home whose door is close enough to unload a vehicle from the street. */
+fun GameEngine.unloadDestination(v: OwnedVehicle): com.hustlecity.game.world.Building? {
+    val p = state.player
+    val ids = state.businesses.map { it.buildingId } + listOfNotNull(p.home.takeIf { it >= 0 })
+    return ids.mapNotNull { city.building(it) }.filter { dist(v.x, v.y, it.doorX, it.doorY) < 45f }.minByOrNull { dist(v.x, v.y, it.doorX, it.doorY) }
+}
+
+/** Moves one item from the trunk into your hands (you can carry two). */
+fun GameEngine.takeFromTrunk(v: OwnedVehicle, index: Int): Boolean {
+    val item = v.cargo.getOrNull(index) ?: return false
+    if (state.player.hand.size >= 2) { toast("Your hands are full (2 items)", ToastKind.BAD); return false }
+    v.cargo.removeAt(index)
+    state.player.hand += item
+    bump()
+    return true
+}
+
+/** Puts whatever you're carrying into the trunk. */
+fun GameEngine.stowInTrunk(v: OwnedVehicle): Int {
+    val p = state.player
+    val n = minOf(cargoSlotsFree(v), p.hand.size)
+    if (n <= 0) { toast(if (p.hand.isEmpty()) "You're not carrying anything" else "The ${v.def.name} is full", ToastKind.BAD); return 0 }
+    v.cargo += p.hand.take(n)
+    repeat(n) { p.hand.removeAt(0) }
+    bump()
+    return n
+}
+
+/** Sells an unwanted item from the trunk back for half its price. */
+fun GameEngine.sellFromTrunk(v: OwnedVehicle, index: Int) {
+    val item = v.cargo.getOrNull(index) ?: return
+    val value = if (item.isProduct) (Catalog.product(item.id)?.cost ?: 0.0) * item.qty * .5 else (Catalog.item(item.id)?.price ?: 0.0) * .5
+    v.cargo.removeAt(index)
+    earn(value, "Sold assets")
+    toast("Sold for ${money(value)}")
+    bump()
+}
+
+/** Unloads hand items and/or a vehicle's cargo into one of your buildings. Returns items moved. */
+fun GameEngine.unloadInto(buildingId: Int, fromHand: Boolean, v: OwnedVehicle?): Int {
+    val p = state.player
+    val b = city.building(buildingId) ?: return 0
     val biz = state.businessAt(b.id)
     val isHome = b.id == p.home
-    val v = vehicleNear(b.id)
     val sources = ArrayList<MutableList<CargoItem>>()
-    sources += p.hand
+    if (fromHand) sources += p.hand
     if (v != null) sources += v.cargo
     var moved = 0
     var skipped = 0
@@ -219,12 +263,14 @@ fun GameEngine.unloadHere(): Int {
     when {
         wrongProduct != null && moved == 0 -> toast("${biz?.name} doesn't sell $wrongProduct")
         moved == 0 && skipped == 0 -> toast(if (v == null) "Nothing to unload (park your vehicle within 45 m)" else "Your vehicle is empty")
-        skipped > 0 -> toast("Unloaded $moved item(s). $skipped didn't fit — place shelves/displays first", ToastKind.INFO)
-        else -> toast("Unloaded $moved item(s)", ToastKind.GOOD)
+        skipped > 0 -> toast("Unloaded $moved item(s) into ${e(b)}. $skipped didn't fit — place shelves/displays first", ToastKind.INFO)
+        else -> toast("Unloaded $moved item(s) into ${e(b)}" + (if (moved > 0 && state.businessAt(b.id) != null) ": furniture is in storage, place it with the Interior Designer" else ""), ToastKind.GOOD)
     }
     bump()
     return moved
 }
+
+private fun GameEngine.e(b: com.hustlecity.game.world.Building) = buildingName(b)
 
 fun GameEngine.unloadableCount(): Int {
     val p = state.player

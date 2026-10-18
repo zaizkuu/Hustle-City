@@ -984,6 +984,11 @@ class GameEngine(context: Context?) {
         p.x = b.doorX; p.y = b.doorY
         Audio.play(Sfx.DOOR)
         interior = InteriorScene(this, b, mode)
+        // a reminder when there's something to bring in
+        if (mode == InteriorMode.BUSINESS || mode == InteriorMode.HOME) {
+            val n = unloadableCount()
+            if (n > 0) toast("📦 Tap \"Unload car & hands\" to bring in $n item(s)", ToastKind.INFO)
+        }
         ui.designer = false
         ui.phoneOpen = false
         resetInput()
