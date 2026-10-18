@@ -25,10 +25,13 @@ import kotlin.math.roundToInt
 
 // ---------------------------------------------------------------------- real estate
 
+/** Monthly rent the landlord asks of you, after this game's rent setting. */
+fun GameEngine.rentOf(b: com.hustlecity.game.world.Building): Double = (b.baseRent * state.player.rules.rent / 10).roundToInt() * 10.0
+
 fun GameEngine.rentBuilding(buildingId: Int): Boolean {
     val b = city.building(buildingId) ?: return false
     if (!isVacant(buildingId)) { toast("This building is not available"); return false }
-    val rent = b.baseRent
+    val rent = rentOf(b)
     val deposit = rent / 2
     if (!spend(deposit, "Rent")) return false
     state.rentals += Rental(buildingId, rent, state.day)
@@ -505,7 +508,7 @@ fun GameEngine.takeCourse(courseId: String) {
 fun GameEngine.takeLoan(def: com.hustlecity.game.data.LoanDef) {
     if (state.loans.any { it.name == def.name }) { toast("You already have a ${def.name}"); return }
     if (netWorth() < def.minNetWorth) { toast("Requires a net worth of ${money(def.minNetWorth)}"); return }
-    state.loans += Loan(state.newId(), def.name, def.amount, def.amount / def.days, def.dailyRate, def.days)
+    state.loans += Loan(state.newId(), def.name, def.amount, def.amount / def.days, def.dailyRate * state.player.rules.interest, def.days)
     earn(def.amount, "Loans")
     state.objectivesDone += "loan"
     toast("${money(def.amount)} deposited to your account", ToastKind.GOOD)

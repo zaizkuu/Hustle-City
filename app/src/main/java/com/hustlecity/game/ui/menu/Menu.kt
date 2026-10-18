@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -51,6 +53,7 @@ import com.hustlecity.game.engine.GameEngine
 import com.hustlecity.game.engine.SHIRT_COLORS
 import com.hustlecity.game.engine.SKIN_TONES
 import com.hustlecity.game.engine.Screen
+import com.hustlecity.game.model.GameRules
 import com.hustlecity.game.model.PlayerState
 import com.hustlecity.game.ui.Chip
 import com.hustlecity.game.ui.GameScreen
@@ -143,6 +146,7 @@ fun NewGameScreen(e: GameEngine) {
     var difficulty by remember { mutableIntStateOf(1) }
     var seed by remember { mutableIntStateOf(1337) }
     var mapId by remember { mutableStateOf(Maps.CLASSIC) }
+    var rules by remember { mutableStateOf(GameRules.NORMAL) }
     val renderers = remember { Renderers(e) }
     Box(Modifier.fillMaxSize()) {
         WorldCanvas(e, renderers, interactive = false)
@@ -184,22 +188,55 @@ fun NewGameScreen(e: GameEngine) {
                             Chip("Classic layout", seed == 1337) { seed = 1337 }
                             Chip("Random city", seed != 1337) { seed = (1000..999_999).random() }
                         }
-                        Text("STARTING CASH", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 10.dp))
+                        Text("DIFFICULTY", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 10.dp))
                         Row(Modifier.padding(vertical = 6.dp)) {
-                            Chip("Easy · \$20,000", difficulty == 0, HC.Green) { difficulty = 0 }
-                            Chip("Normal · \$5,000", difficulty == 1) { difficulty = 1 }
-                            Chip("Hard · \$1,500", difficulty == 2, HC.Red) { difficulty = 2 }
+                            Chip("Easy · \$20,000", difficulty == 0, HC.Green) { difficulty = 0; rules = GameRules.EASY }
+                            Chip("Normal · \$5,000", difficulty == 1) { difficulty = 1; rules = GameRules.NORMAL }
+                            Chip("Hard · \$1,500", difficulty == 2, HC.Red) { difficulty = 2; rules = GameRules.HARD }
+                            Chip("Custom", difficulty == 3, HC.Purple) { difficulty = 3 }
+                        }
+                        Text(when (difficulty) {
+                            0 -> "More customers, cheaper rent and staff, softer loans and gentler rivals."
+                            2 -> "Fewer customers, dearer rent and staff, steep loans and hungry rivals."
+                            3 -> "Set every rule yourself."
+                            else -> "The city as it is."
+                        }, style = HT.small, color = HC.InkSoft)
+                        if (difficulty == 3) Column(Modifier.padding(top = 4.dp)) {
+                            RuleSlider("Starting cash", rules.startMoney, 0.0..50000.0, { "\$" + "%,d".format(it.toInt()) }) { rules = rules.copy(startMoney = Math.round(it / 500) * 500.0) }
+                            RuleSlider("Customers", rules.demand, .5..1.5, ::pct) { rules = rules.copy(demand = snap(it)) }
+                            RuleSlider("Rent", rules.rent, .5..1.5, ::pct) { rules = rules.copy(rent = snap(it)) }
+                            RuleSlider("Wages", rules.wages, .5..1.5, ::pct) { rules = rules.copy(wages = snap(it)) }
+                            RuleSlider("Loan interest", rules.interest, .25..2.0, ::pct) { rules = rules.copy(interest = snap(it)) }
+                            RuleSlider("Rivals", rules.rivals, 0.0..2.0, { if (it < .025) "Off" else pct(it) }) { rules = rules.copy(rivals = snap(it)) }
+                            RuleSlider("Tiredness", rules.needs, 0.0..1.5, { if (it < .025) "Off" else pct(it) }) { rules = rules.copy(needs = snap(it)) }
                         }
                     }
                     Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         HButton("Back", color = HC.GlassLight) { e.ui.screen = Screen.MENU }
                         HButton("Start your hustle", color = HC.Green, modifier = Modifier.weight(1f)) {
-                            e.newGame(name, skin, shirt, difficulty, if (mapId == Maps.CLASSIC) seed.toLong() else 1337L, mapId)
+                            e.newGame(name, skin, shirt, difficulty, if (mapId == Maps.CLASSIC) seed.toLong() else 1337L, mapId, rules)
                         }
                     }
                 }
             }
         }
+    }
+}
+
+private fun pct(v: Double) = "${Math.round(v * 100)}%"
+private fun snap(v: Double) = Math.round(v * 20) / 20.0
+
+/** One rule of a custom game: its name, a slider and the current value. */
+@Composable
+private fun RuleSlider(label: String, value: Double, range: ClosedFloatingPointRange<Double>, format: (Double) -> String, onChange: (Double) -> Unit) {
+    Row(Modifier.fillMaxWidth().height(30.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = HT.body, color = HC.Ink, modifier = Modifier.width(96.dp))
+        Slider(
+            value.toFloat(), { onChange(it.toDouble()) }, Modifier.weight(1f),
+            valueRange = range.start.toFloat()..range.endInclusive.toFloat(),
+            colors = SliderDefaults.colors(thumbColor = HC.Blue, activeTrackColor = HC.Blue, inactiveTrackColor = Color(0xFFD5DAE0)),
+        )
+        Text(format(value), style = HT.bodyBold, color = HC.Ink, modifier = Modifier.width(64.dp).padding(start = 8.dp))
     }
 }
 

@@ -68,6 +68,7 @@ import com.hustlecity.game.data.PlaceDef
 import com.hustlecity.game.data.PlaceKind
 import com.hustlecity.game.data.Source
 import com.hustlecity.game.data.StaffRole
+import com.hustlecity.game.engine.rentOf
 import com.hustlecity.game.engine.AppId
 import com.hustlecity.game.engine.BizCalc
 import com.hustlecity.game.engine.CartLine
@@ -692,8 +693,8 @@ private fun Listing(e: GameEngine, buildingId: Int) {
             }
             KeyValue("Parking", "${b.parking}")
             KeyValue("Landlord", b.landlord)
-            KeyValue("Rent", "${e.money(b.baseRent)}/month (charged daily)")
-            KeyValue("Deposit", e.money(b.baseRent / 2))
+            KeyValue("Rent", "${e.money(e.rentOf(b))}/month (charged daily)")
+            KeyValue("Deposit", e.money(e.rentOf(b) / 2))
             Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 HButton("Rent", color = HC.Green, enabled = e.isVacant(b.id)) { if (e.rentBuilding(b.id)) close(e) }
                 if (Catalog.COURSE_REAL_ESTATE in e.state.player.courses) HButton("Buy ${e.moneyShort(b.value)}", color = HC.Purple) { if (e.buyBuilding(b.id)) close(e) }

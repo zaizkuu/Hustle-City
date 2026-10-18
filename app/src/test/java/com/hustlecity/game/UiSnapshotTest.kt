@@ -19,6 +19,8 @@ import com.hustlecity.game.ui.menu.HustleCityApp
 import com.hustlecity.game.world.BKind
 import org.junit.Rule
 import org.junit.Test
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -35,10 +37,15 @@ class UiSnapshotTest {
 
     private val outDir = File("build/snapshots").apply { mkdirs() }
 
-    private fun shoot(e: GameEngine, name: String, frames: Int = 6) {
+    private fun shoot(e: GameEngine, name: String, frames: Int = 6, act: () -> Unit = {}) {
         rule.mainClock.autoAdvance = false
         rule.setContent { HustleCityApp(e, onExit = {}) }
         repeat(frames) {
+            e.frame(1 / 30f)
+            rule.mainClock.advanceTimeBy(34)
+        }
+        act()
+        repeat(4) {
             e.frame(1 / 30f)
             rule.mainClock.advanceTimeBy(34)
         }
@@ -79,6 +86,18 @@ class UiSnapshotTest {
         // draw the city thumbnails up front so the picker shows them
         for (m in com.hustlecity.game.world.Maps.all) com.hustlecity.game.ui.menu.CityThumbs.get(m.id)
         shoot(e, "ui_newgame.png")
+    }
+
+    @Test
+    fun newGameCustom() {
+        val e = GameEngine(null)
+        e.ui.screen = Screen.NEW_GAME
+        e.prepareMenuBackground()
+        for (m in com.hustlecity.game.world.Maps.all) com.hustlecity.game.ui.menu.CityThumbs.get(m.id)
+        shoot(e, "ui_newgame_custom.png") {
+            rule.onNodeWithText("Custom").performClick()
+            rule.onNodeWithText("Tokyo").performClick()
+        }
     }
 
     @Test
