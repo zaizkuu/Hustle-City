@@ -28,6 +28,7 @@ import com.hustlecity.game.render.InteriorRenderer
 import com.hustlecity.game.render.WorldRenderer
 import com.hustlecity.game.render.gpu.GlWorldView
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.runtime.key
 import com.hustlecity.game.ui.apps.MapsOverlay
 import com.hustlecity.game.ui.apps.PhoneAppScreen
 import com.hustlecity.game.ui.hud.ActionButtons
@@ -115,6 +116,43 @@ fun GameScreen(e: GameEngine) {
     }
 }
 
+/**
+ * Keeps the GPU frame rate up on slower phones: drops the 3D resolution when frames take too long on the GPU and
+ * raises it again when there's headroom. A fixed resolution in Settings turns it off.
+ */
+class ResolutionGovernor(private val e: GameEngine) {
+    private var slow = 0
+    private var fast = 0
+
+    companion object {
+        fun initialScale(e: GameEngine, w: Int, h: Int): Float {
+            val fixed = e.settings.resolution
+            if (fixed > 0) return fixed / 100f
+            val mp = (w.toFloat() * h) / 1e6f
+            return kotlin.math.sqrt(e.settings.pixelBudget / mp.coerceAtLeast(.1f)).coerceIn(.5f, 1f)
+        }
+    }
+
+    fun tick(v: GlWorldView) {
+        e.gpuFps = v.glFps
+        e.renderScale = v.renderScale
+        val fixed = e.settings.resolution
+        if (fixed > 0) { if (kotlin.math.abs(v.renderScale - fixed / 100f) > .01f) v.setRenderScale(fixed / 100f); return }
+        val target = if (e.settings.fpsCap <= 30) 30f else 60f
+        val gl = v.glFps
+        if (gl <= 0f || e.skip != null) return
+        // only the GPU being slow is fixed by fewer pixels: if the game loop itself is slow, leave the resolution be
+        val gpuBound = gl < target * .85f && e.fps > gl * 1.15f
+        when {
+            gpuBound -> { slow++; fast = 0 }
+            gl >= target * .95f -> { fast++; slow = 0 }
+            else -> { slow = 0; fast = 0 }
+        }
+        if (slow >= 3 && v.renderScale > .45f) { v.setRenderScale(v.renderScale - .08f); slow = 0 }
+        if (fast >= 16 && v.renderScale < 1f) { v.setRenderScale(v.renderScale + .05f); fast = 0 }
+    }
+}
+
 /** The 3D view: runs the frame loop and draws either the city or the current interior. */
 @Composable
 fun WorldCanvas(e: GameEngine, r: Renderers, interactive: Boolean) {
@@ -123,6 +161,7 @@ fun WorldCanvas(e: GameEngine, r: Renderers, interactive: Boolean) {
     LaunchedEffect(Unit) {
         var last = 0L
         var acc = 0f
+        var frames = 0
         while (isActive) {
             androidx.compose.runtime.withFrameNanos { t ->
                 val dt = if (last == 0L) 1 / 60f else (t - last) / 1e9f
@@ -133,7 +172,9 @@ fun WorldCanvas(e: GameEngine, r: Renderers, interactive: Boolean) {
                     e.frame(acc)
                     acc = 0f
                     frame.longValue = t
-                    if (interactive) e.ui.frameTime = t
+                    // the minimap redraws on every other frame
+                    frames++
+                    if (interactive && (frames % 2 == 0 || e.settings.fpsCap <= 30)) e.ui.frameTime = t
                 }
             }
         }
@@ -143,12 +184,27 @@ fun WorldCanvas(e: GameEngine, r: Renderers, interactive: Boolean) {
     // HD graphics: a GL view underneath draws the 3D world; this layer keeps drawing labels, pins and weather
     val context = androidx.compose.ui.platform.LocalContext.current
     val canGpu = remember { android.os.Build.FINGERPRINT != "robolectric" && GlWorldView.supported(context) }
-    val gpuOn = canGpu && e.settings.hd && e.settings.quality > 0 && !e.settings.gpuFailed
+    val gpuOn = canGpu && e.settings.hd && !e.settings.gpuFailed
     val glView = remember { arrayOfNulls<GlWorldView>(1) }
+    val quality = e.settings.quality
+    // automatic resolution: start from what this quality level can shade, then follow the frame rate
+    LaunchedEffect(gpuOn, quality, e.settings.resolution) {
+        if (!gpuOn) return@LaunchedEffect
+        val governor = ResolutionGovernor(e)
+        while (isActive) {
+            kotlinx.coroutines.delay(500)
+            glView[0]?.let { governor.tick(it) }
+        }
+    }
     Box(Modifier.fillMaxSize()) {
-        if (gpuOn) {
-            AndroidView(factory = { ctx -> GlWorldView(ctx) { e.settings.gpuFailed = true }.also { glView[0] = it } }, modifier = Modifier.fillMaxSize(),
-                onRelease = { glView[0] = null })
+        if (gpuOn) key(quality) {
+            AndroidView(factory = { ctx ->
+                GlWorldView(ctx, quality) { e.settings.gpuFailed = true }.also {
+                    glView[0] = it
+                    val dm = ctx.resources.displayMetrics
+                    it.setRenderScale(ResolutionGovernor.initialScale(e, dm.widthPixels, dm.heightPixels))
+                }
+            }, modifier = Modifier.fillMaxSize(), onRelease = { glView[0] = null })
             val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
             DisposableEffect(lifecycle) {
                 val obs = androidx.lifecycle.LifecycleEventObserver { _, ev ->

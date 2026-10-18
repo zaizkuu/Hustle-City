@@ -43,12 +43,31 @@ class GpuFrameDumpTest {
     private fun dump(name: String, frame: GpuFrame, overlay: Bitmap, canvasRender: Bitmap) {
         val dir = File(root, name).apply { mkdirs() }
         File(root, "world.vs").writeText(Shaders.WORLD_VS); File(root, "world.fs").writeText(Shaders.WORLD_FS)
+        File(root, "world_fast.fs").writeText(Shaders.worldFs(true))
         File(root, "sky.vs").writeText(Shaders.SKY_VS); File(root, "sky.fs").writeText(Shaders.SKY_FS)
         File(root, "shadow.vs").writeText(Shaders.SHADOW_VS); File(root, "shadow.fs").writeText(Shaders.SHADOW_FS)
+        // the cached layer draws first (minus skipped ranges), then the frame's own geometry, as on the GL thread
+        val st = frame.staticGeom
         for (i in 0 until 3) {
             val s = frame.streams[i]
-            writeInts(File(dir, "v$i.bin"), s.v, s.nv * GpuFrame.STRIDE)
-            writeInts(File(dir, "i$i.bin"), s.idx, s.ni)
+            val sv = st?.streams?.get(i)
+            val nvS = sv?.nv ?: 0
+            val verts = IntArray((nvS + s.nv) * GpuFrame.STRIDE)
+            if (sv != null) System.arraycopy(sv.v, 0, verts, 0, nvS * GpuFrame.STRIDE)
+            System.arraycopy(s.v, 0, verts, nvS * GpuFrame.STRIDE, s.nv * GpuFrame.STRIDE)
+            val idx = ArrayList<Int>()
+            fun staticRange(a: Int, b: Int) { for (k in a until b) idx += sv!!.idx[k] }
+            val dynamic = { for (k in 0 until s.ni) idx += s.idx[k] + nvS }
+            if (sv != null) {
+                if (i == GpuFrame.OPAQUE) {
+                    dynamic()
+                    var from = 0
+                    for (k in 0 until frame.skipCount) { staticRange(from, frame.skip[k * 2]); from = frame.skip[k * 2 + 1] }
+                    staticRange(from, sv.ni)
+                } else { staticRange(0, sv.ni); dynamic() }
+            } else dynamic()
+            writeInts(File(dir, "v$i.bin"), verts, verts.size)
+            writeInts(File(dir, "i$i.bin"), idx.toIntArray(), idx.size)
         }
         fun a(x: FloatArray) = x.joinToString(",", "[", "]")
         File(dir, "frame.json").writeText("""{"width":${frame.width},"height":${frame.height},"cam":${a(frame.cam)},"right":${a(frame.right)},"up":${a(frame.up)},"fwd":${a(frame.fwd)},
@@ -57,10 +76,10 @@ class GpuFrameDumpTest {
 "fogColor":${a(frame.fogColor)},"fog":[${frame.fogStart},${frame.fogEnd},${frame.fogAmount}],"skyTop":${a(frame.skyTop)},"skyHorizon":${a(frame.skyHorizon)},
 "misc":[${frame.daylight},${frame.wet},${frame.exposure},${frame.mode}],"clearColor":${frame.clearColor},"time":${frame.time},
 "light":${a(frame.lightMat)},"shadow":[${frame.shadowStrength},${frame.shadowOffset},${frame.shadowTexel},${if (frame.shadowOn) 1 else 0}],"shadowSize":${frame.shadowSize},
-"counts":[${frame.streams.joinToString(",") { "[${it.nv},${it.ni}]" }}],"triangles":${frame.triangleCount}}""")
+"counts":[${frame.streams.joinToString(",") { "[${it.nv},${it.ni}]" }}],"triangles":${frame.triangleCount + (frame.staticGeom?.triangleCount ?: 0)}}""")
         overlay.compress(Bitmap.CompressFormat.PNG, 100, FileOutputStream(File(dir, "overlay.png")))
         canvasRender.compress(Bitmap.CompressFormat.PNG, 100, FileOutputStream(File(dir, "canvas.png")))
-        assertTrue("$name produced no geometry", frame.triangleCount > 0)
+        assertTrue("$name produced no geometry", frame.triangleCount + (frame.staticGeom?.triangleCount ?: 0) > 0)
     }
 
     private fun writeInts(f: File, data: IntArray, n: Int) {

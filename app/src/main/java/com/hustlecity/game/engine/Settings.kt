@@ -25,6 +25,8 @@ class Settings(context: Context?) {
     var minimap by mutableStateOf(prefs?.getBoolean("minimap", true) ?: true)
     /** HD graphics: the GPU renderer (lighting, depth, anti-aliasing) instead of the classic Canvas renderer. */
     var hd by mutableStateOf(prefs?.getBoolean("hd", true) ?: true)
+    /** 3D render resolution in percent of the screen, or 0 for automatic (adapts to keep the frame rate up). */
+    var resolution by mutableIntStateOf(prefs?.getInt("resolution", 0) ?: 0)
     /** Set when the GPU renderer couldn't start on this device. */
     var gpuFailed by mutableStateOf(false)
 
@@ -50,11 +52,16 @@ class Settings(context: Context?) {
             ?.putInt("carControls", carControls)
             ?.putBoolean("minimap", minimap)
             ?.putBoolean("hd", hd)
+            ?.putInt("resolution", resolution)
             ?.apply()
     }
 
     val carCount get() = when (quality) { 0 -> 16; 1 -> 28; else -> 44 }
     val pedCount get() = when (quality) { 0 -> 18; 1 -> 36; else -> 64 }
     val shadows get() = quality >= 1
+    /** Sun shadow map size for the GPU renderer (0 = no real-time shadows). */
+    val shadowMapSize get() = when (quality) { 0 -> 0; 1 -> 1024; else -> 2048 }
+    /** Pixels (in millions) the automatic resolution starts from: about what a phone of this class can shade. */
+    val pixelBudget get() = when (quality) { 0 -> .7f; 1 -> 1.15f; else -> 2.1f }
     val detailedWindows get() = quality >= 1
 }

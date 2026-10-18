@@ -52,6 +52,15 @@ class GpuFrame {
     /** Set when the frame is published, so the GL thread re-uploads only new frames. */
     var version = 0L
 
+    /**
+     * Cached geometry that rarely changes (buildings, roads, trees), drawn before this frame's own streams. The GL
+     * thread uploads it only when its [version] changes. [skip] lists index ranges (start, end pairs, sorted) of
+     * its opaque stream to leave out this frame: buildings hiding the player, which this frame draws see-through.
+     */
+    @Volatile var staticGeom: GpuFrame? = null
+    var skip = IntArray(16)
+    var skipCount = 0
+
     val streams = arrayOf(Stream(1 shl 14), Stream(1 shl 16), Stream(1 shl 13))
 
     // ---- uniforms
@@ -125,7 +134,7 @@ class GpuFrame {
         shadowOffset = maxOf(w, h) / size * 1.6f
     }
 
-    fun clear() { for (s in streams) s.clear() }
+    fun clear() { for (s in streams) s.clear(); staticGeom = null; skipCount = 0 }
 
     fun setCamera(p: Projector) {
         width = p.screenW; height = p.screenH
@@ -149,6 +158,9 @@ class GpuFrame {
         mode = o.mode; daylight = o.daylight; wet = o.wet; exposure = o.exposure; clearColor = o.clearColor; time = o.time
         o.lightMat.copyInto(lightMat); shadowOn = o.shadowOn; shadowStrength = o.shadowStrength; shadowSize = o.shadowSize
         shadowOffset = o.shadowOffset; shadowTexel = o.shadowTexel
+        staticGeom = o.staticGeom
+        if (skip.size < o.skipCount * 2) skip = IntArray(o.skipCount * 2)
+        System.arraycopy(o.skip, 0, skip, 0, o.skipCount * 2); skipCount = o.skipCount
     }
 
     private var nx = 0f; private var ny = 0f; private var nz = 1f

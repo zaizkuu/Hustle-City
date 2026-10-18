@@ -79,8 +79,14 @@ float noise(vec2 p) {
     vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
     return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
 }
+#ifdef FAST
+// one octave keeps the look (same average) at a quarter of the cost
+float fbm(vec2 p) { return noise(p) * 0.875; }
+float noise3(vec3 p) { return noise(p.xy + p.z * 1.7); }
+#else
 float fbm(vec2 p) { return noise(p) * 0.5 + noise(p * 2.03 + 7.1) * 0.25 + noise(p * 4.07 + 3.3) * 0.125; }
 float noise3(vec3 p) { return noise(p.xy + p.z * 1.7) * 0.6 + noise(p.yz * 1.3 - p.x * 0.9) * 0.4; }
+#endif
 
 // surface coordinates: horizontal faces use world xy, walls use (along the wall, height)
 vec2 planar(vec3 p, vec3 n) {
@@ -96,6 +102,10 @@ float shadowAt() {
     if (uShadow.w < 0.5) return 1.0;
     vec3 c = vLight.xyz / vLight.w * 0.5 + 0.5;
     if (c.x <= 0.001 || c.x >= 0.999 || c.y <= 0.001 || c.y >= 0.999 || c.z >= 1.0) return 1.0;
+#ifdef FAST
+    // a single tap: linear filtering on the depth compare already blends 2x2 texels
+    return mix(1.0, texture(uShadowMap, c), uShadow.x);
+#else
     float t = uShadow.z;
     float s = 0.0;
     s += texture(uShadowMap, vec3(c.xy + vec2(-t, -t), c.z));
@@ -107,6 +117,7 @@ float shadowAt() {
     s += texture(uShadowMap, vec3(c.xy + vec2(0.0, -1.6 * t), c.z));
     s /= 8.0;
     return mix(1.0, s, uShadow.x);
+#endif
 }
 
 void main() {
@@ -232,6 +243,9 @@ void main() {
     oColor = vec4(toDisplay(col), vColor.a);
 }
 """
+
+    /** The world fragment shader, optionally in its cheaper variant for mid-range GPUs. */
+    fun worldFs(fast: Boolean) = if (fast) WORLD_FS.replaceFirst("precision highp float;", "precision highp float;\n#define FAST 1") else WORLD_FS
 
     /** Depth-only pass from the sun for shadow mapping. */
     const val SHADOW_VS = """#version 300 es

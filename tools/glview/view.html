@@ -10,6 +10,7 @@ const q = new URLSearchParams(location.search);
 const base = q.get('f');          // frame directory (URL path)
 const shaders = q.get('s');       // directory holding world.vs/world.fs/sky.vs/sky.fs
 const noOverlay = q.get('nooverlay') === '1';
+const fast = q.get('fast') === '1';     // the cheaper shader variant used on mid-range phones
 async function bin(p) { const r = await fetch(p); if (!r.ok) throw new Error('missing ' + p); return new Int32Array(await r.arrayBuffer()); }
 async function txt(p) { const r = await fetch(p); if (!r.ok) throw new Error('missing ' + p); return r.text(); }
 function compile(gl, type, src) {
@@ -30,7 +31,7 @@ function program(gl, vs, fs) {
     const c = document.getElementById('gl');
     c.width = f.width; c.height = f.height;
     const gl = c.getContext('webgl2', { antialias: true, preserveDrawingBuffer: true });
-    const world = program(gl, await txt(shaders + '/world.vs'), await txt(shaders + '/world.fs'));
+    const world = program(gl, await txt(shaders + '/world.vs'), await txt(shaders + (fast ? '/world_fast.fs' : '/world.fs')));
     const sky = program(gl, await txt(shaders + '/sky.vs'), await txt(shaders + '/sky.fs'));
     const shadowProg = program(gl, await txt(shaders + '/shadow.vs'), await txt(shaders + '/shadow.fs'));
     const vbo = [], ibo = [], counts = [];

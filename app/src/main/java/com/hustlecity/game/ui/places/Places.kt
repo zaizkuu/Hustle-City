@@ -719,8 +719,13 @@ fun SettingsPanel(e: GameEngine) {
             }
             Text("RENDERER", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
             FlowRow {
-                Chip("HD (GPU lighting, smooth edges)", st.hd && st.quality > 0) { st.hd = true; if (st.quality == 0) st.quality = 1 }
-                Chip("Classic (fastest)", !st.hd || st.quality == 0) { st.hd = false }
+                Chip("HD (GPU lighting, smooth edges)", st.hd) { st.hd = true }
+                Chip("Classic (no GPU)", !st.hd) { st.hd = false }
+            }
+            Text("3D RESOLUTION", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
+            FlowRow {
+                Chip("Auto (keeps it smooth)", st.resolution == 0) { st.resolution = 0 }
+                for (pct in intArrayOf(100, 85, 70, 55)) Chip("$pct%", st.resolution == pct) { st.resolution = pct }
             }
             if (st.gpuFailed) Text("HD graphics aren't supported on this device, so the classic renderer is used.", style = HT.small, color = HC.Red)
             Text("FRAME RATE", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))

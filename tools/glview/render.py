@@ -19,12 +19,14 @@ server = socketserver.TCPServer(('127.0.0.1', 0), functools.partial(Quiet, direc
 PORT = server.server_address[1]
 threading.Thread(target=server.serve_forever, daemon=True).start()
 
+FAST = os.environ.get('FAST') == '1'
+
 def render(name, overlay=True):
     d = os.path.join(ROOT, name)
     f = json.load(open(os.path.join(d, 'frame.json')))
-    out = os.path.join(d, 'gpu.png' if overlay else 'gpu_raw.png')
+    out = os.path.join(d, ('gpu_fast' if FAST else 'gpu') + ('.png' if overlay else '_raw.png'))
     rel = lambda p: '/' + os.path.relpath(p, REPO)
-    url = f'http://127.0.0.1:{PORT}{rel(PAGE)}?f={rel(d)}&s={rel(ROOT)}' + ('' if overlay else '&nooverlay=1')
+    url = f'http://127.0.0.1:{PORT}{rel(PAGE)}?f={rel(d)}&s={rel(ROOT)}' + ('' if overlay else '&nooverlay=1') + ('&fast=1' if FAST else '')
     subprocess.run([SHELL, '--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
                     '--hide-scrollbars', '--virtual-time-budget=20000',
                     f'--window-size={int(f["width"])},{int(f["height"])}', f'--screenshot={out}', url],

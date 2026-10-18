@@ -327,6 +327,9 @@ class StreetProps(val city: City) {
     /** True for lamps that light the ground at night. */
     fun isLamp(i: Int) = kind[i] == LAMP || kind[i] == PARK_LAMP
 
+    /** Props that move (fountains) are drawn every frame instead of being cached. */
+    fun animated(i: Int) = kind[i] == FOUNTAIN
+
     /** Where the light falls: under the lamp head. */
     fun lightX(i: Int) = x[i] + (if (kind[i] == LAMP) when (face[i]) { 2 -> -1.6f; 3 -> 1.6f; else -> 0f } else 0f)
     fun lightY(i: Int) = y[i] + (if (kind[i] == LAMP) when (face[i]) { 0 -> -1.6f; 1 -> 1.6f; else -> 0f } else 0f)

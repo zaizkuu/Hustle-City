@@ -17,6 +17,7 @@ import com.hustlecity.game.world.BKind
 import com.hustlecity.game.world.Building
 import com.hustlecity.game.world.City
 import com.hustlecity.game.world.dist
+import com.hustlecity.game.render.gpu.GpuFrame
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.ceil
@@ -29,6 +30,13 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /** Draws the city exterior (street view and map view). */
+private fun wrapAngle(a: Float): Float {
+    var x = a
+    while (x > Math.PI) x -= (2 * Math.PI).toFloat()
+    while (x < -Math.PI) x += (2 * Math.PI).toFloat()
+    return x
+}
+
 class WorldRenderer(private val e: GameEngine) {
     val proj = Projector()
     private val batch = RenderBatch()
@@ -43,8 +51,17 @@ class WorldRenderer(private val e: GameEngine) {
     private val dKey = FloatArray(maxDraw)
     private val order = IntArray(maxDraw)
 
+    /**
+     * Signs over buildings, kept in world space and projected when the overlay is drawn, so cached buildings keep
+     * their signs. Size is focal × [k] / depth, capped at [max]; smaller than [min] and it's hidden.
+     */
+    private class Label(
+        var text: String, var x: Float, var y: Float, var z: Float, var k: Float, var max: Float, var min: Float, var shift: Float,
+        var color: Int, var bg: Int, var icon: String? = null,
+    )
     private val labels = ArrayList<Label>()
-    private class Label(var text: String, var x: Float, var y: Float, var size: Float, var color: Int, var bg: Int, var icon: String? = null)
+    private val staticLabels = ArrayList<Label>()
+    private var labelOut = labels
     private val labelPool = ArrayList<Label>()
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD); textAlign = Paint.Align.CENTER }
@@ -109,14 +126,19 @@ class WorldRenderer(private val e: GameEngine) {
         val AUTUMN = intArrayOf(c(0xFFD9822B), c(0xFFC0392B), c(0xFFE6B422), c(0xFFB5651D), c(0xFFD35400))
         val PANTS = c(0xFF34383F)
         const val PITCH_STREET = 58f
+        private const val ALL = 0
+        private const val STATIC = 1
+        private const val DYNAMIC = 2
         const val PITCH_MAP = 62f
     }
 
-    private fun label(text: String, x: Float, y: Float, size: Float, color: Int, bg: Int = 0, icon: String? = null) {
-        val l = if (labelPool.isNotEmpty()) labelPool.removeAt(labelPool.size - 1) else Label("", 0f, 0f, 0f, 0, 0)
-        l.text = text; l.x = x; l.y = y; l.size = size; l.color = color; l.bg = bg; l.icon = icon
-        labels += l
+    private fun label(text: String, x: Float, y: Float, z: Float, k: Float, max: Float, min: Float, shift: Float, color: Int, bg: Int = 0, icon: String? = null) {
+        val l = if (labelPool.isNotEmpty()) labelPool.removeAt(labelPool.size - 1) else Label("", 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0, 0)
+        l.text = text; l.x = x; l.y = y; l.z = z; l.k = k; l.max = max; l.min = min; l.shift = shift; l.color = color; l.bg = bg; l.icon = icon
+        labelOut += l
     }
+
+    private fun recycle(list: ArrayList<Label>) { labelPool += list; list.clear() }
 
     fun setupCamera(w: Int, h: Int) {
         val cam = e.camera
@@ -172,19 +194,226 @@ class WorldRenderer(private val e: GameEngine) {
             val overcast = (v.cloud * .7f + v.rain * .25f + v.storm * .3f).coerceIn(0f, .85f)
             val wide = mapMode || bbox[2] - bbox[0] > 1200f || bbox[3] - bbox[1] > 1200f || e.settings.quality == 0
             val strength = if (wide) 0f else ((scene.daylight - .12f) / .88f).coerceIn(0f, 1f) * (1f - .8f * overcast) * .82f
-            gpu.setShadow(bbox[0], bbox[1], bbox[2], bbox[3], min(e.city.maxHeight, 140f), if (e.settings.quality >= 2) 2048 else 1536, strength)
+            val size = e.settings.shadowMapSize
+            gpu.setShadow(bbox[0], bbox[1], bbox[2], bbox[3], min(e.city.maxHeight, 140f), size.coerceAtLeast(16), if (size == 0) 0f else strength)
         }
         if (gpu == null) batch.begin(canvas)
-        for (l in labels) labelPool += l
-        labels.clear()
-
-        drawGround()
-        collectDrawables()
+        recycle(labels)
+        labelOut = labels
+        if (e.hasGame) playerKey = keyFor(e.state.player.x, e.state.player.y)
+        if (gpu != null) {
+            // the city that doesn't move is cached on the GPU; only traffic, people and the route are built every frame
+            ensureStatic(gpu)
+            scene.gpu = gpu
+            labelOut = labels
+            scene.groundPass = true
+            drawRoute()
+            scene.groundPass = false
+            findOccluders(gpu)
+            collectDrawables(DYNAMIC)
+        } else {
+            recycle(staticLabels)
+            staticValid = false
+            drawGround(true)
+            collectDrawables(ALL)
+        }
         sortDrawables()
+        drawList()
+        if (gpu == null) batch.flush()
+        scene.gpu = null
+        if (!mapMode) drawWeather(canvas, w, h)
+        drawOverlays(canvas, w, h)
+    }
+
+    // ------------------------------------------------------------------ static cache (GPU)
+
+    private val staticFrames = arrayOf(GpuFrame(), GpuFrame())
+    private val rangeStart = arrayOf(IntArray(0), IntArray(0))
+    private val rangeEnd = arrayOf(IntArray(0), IntArray(0))
+    private val drawnIds = arrayOf(IntArray(0), IntArray(0))
+    private val drawnCount = IntArray(2)
+    private var building = 0
+    private var published = -1
+    private var staticValid = false
+    private var staticCity: City? = null
+    private var staticPass = false
+    private val staticBox = FloatArray(4)
+    private val viewBox = FloatArray(4)
+    private var sCamX = 0f; private var sCamY = 0f; private var sYaw = 0f; private var sDist = 1f
+    private var staticVersion = 0L
+    private val occl = ArrayList<Int>()
+    private val skipTmp = ArrayList<Long>()
+
+    /** What static geometry depends on that the player changes on purpose: rebuilt right away when it changes. */
+    private fun hardKey(): Long {
+        val st = e.state
+        var k = (if (mapMode) 1L else 0L) + e.settings.quality * 3
+        k = k * 31 + e.ui.selected
+        k = k * 31 + e.ui.mapFilters.hashCode()
+        if (e.hasGame) {
+            for (b in st.businesses) k = k * 31 + b.buildingId * 7 + (if (b.tempClosed) 1 else 0) + b.openHour * 3 + b.closeHour * 5 + b.typeId.hashCode()
+            for (r in st.rentals) k = k * 31 + r.buildingId
+            for (r in st.rivalBusinesses) k = k * 31 + r.buildingId * 3 + r.level
+        }
+        return k
+    }
+
+    /** What drifts with time (daylight, weather, season): rebuilt in the background. */
+    private fun softKey(gpu: GpuFrame): Long {
+        var k = (scene.daylight * 24f).roundToInt().toLong()
+        k = k * 31 + (scene.snow * 10f).roundToInt()
+        k = k * 31 + (if (mapMode) 0 else (e.skyVis.wet * 5f).roundToInt())
+        k = k * 31 + (if (e.hasGame) e.state.hour else 0)
+        k = k * 31 + e.weather.month()
+        k = k * 31 + (if (gpu.shadowOn) 1 else 0)
+        return k
+    }
+
+    private var sHard = 0L
+    private var sSoft = 0L
+    // a rebuild spread over several frames into the back buffer
+    private var stageActive = false
+    private var stageIdx = 0
+    private var stageCount = 0
+    private var stagePos = 0
+    private val stageType = IntArray(maxDraw)
+    private val stageId = IntArray(maxDraw)
+    private val stageKeyArr = FloatArray(maxDraw)
+    private var stageLabels = ArrayList<Label>()
+    private val stageBox = FloatArray(4)
+    private var stageCamX = 0f; private var stageCamY = 0f; private var stageYaw = 0f; private var stageDist = 1f
+    private var stageHard = 0L; private var stageSoft = 0L
+
+    private fun ensureStatic(gpu: GpuFrame) {
+        val hard = hardKey(); val soft = softKey(gpu)
+        val moved = dist(proj.camX, proj.camY, sCamX, sCamY)
+        val far = if (mapMode) proj.dist * .25f else 34f
+        val outside = bbox[0] < staticBox[0] || bbox[1] < staticBox[1] || bbox[2] > staticBox[2] || bbox[3] > staticBox[3]
+        val turn = abs(wrapAngle(proj.yaw - sYaw)); val zoom = abs(proj.dist / sDist - 1f)
+        val must = !staticValid || staticCity !== e.city || hard != sHard || moved > far || turn > .3f || zoom > .2f || outside
+        if (must) {
+            stageActive = false
+            startStage(hard, soft)
+            finishStage(Long.MAX_VALUE)
+        } else {
+            // close to needing one: start building the next cache now, a little each frame
+            val nearEdge = bbox[0] - staticBox[0] < 25f || bbox[1] - staticBox[1] < 25f || staticBox[2] - bbox[2] < 25f || staticBox[3] - bbox[3] < 25f
+            if (!stageActive && (soft != sSoft || moved > far * .5f || turn > .14f || zoom > .08f || nearEdge)) startStage(hard, soft)
+            if (stageActive) finishStage(2_500_000L)
+        }
+        gpu.staticGeom = staticFrames[published]
+    }
+
+    /** Starts building the cache for the current view into the back buffer: the ground right away, the rest queued. */
+    private fun startStage(hard: Long, soft: Long) {
+        val idx = if (published == 0) 1 else 0
+        val sf = staticFrames[idx]
+        stageIdx = idx
+        stageHard = hard; stageSoft = soft
+        stageCamX = proj.camX; stageCamY = proj.camY; stageYaw = proj.yaw; stageDist = proj.dist
+        // a margin around the view so small moves don't need a rebuild
+        val mx = max(70f, (bbox[2] - bbox[0]) * .3f); val my = max(70f, (bbox[3] - bbox[1]) * .3f)
+        stageBox[0] = bbox[0] - mx; stageBox[1] = bbox[1] - my; stageBox[2] = bbox[2] + mx; stageBox[3] = bbox[3] + my
+        val n = e.city.buildings.size
+        if (rangeStart[idx].size < n) { rangeStart[idx] = IntArray(n); rangeEnd[idx] = IntArray(n); drawnIds[idx] = IntArray(n) }
+        drawnCount[idx] = 0
+        recycle(stageLabels)
+        synchronized(sf) {
+            sf.clear()
+            bbox.copyInto(viewBox); stageBox.copyInto(bbox)
+            withStage { drawGround(false) }
+            collectDrawables(STATIC)
+            sortDrawables()
+            viewBox.copyInto(bbox)
+        }
+        stageCount = dCount
+        for (k in 0 until dCount) { val i = order[k]; stageType[k] = dType[i]; stageId[k] = dIdx[i]; stageKeyArr[k] = dKey[i] }
+        stagePos = 0
+        stageActive = true
+    }
+
+    /** Draws queued static items for up to [budgetNs], publishing the new cache when everything is in. */
+    private fun finishStage(budgetNs: Long) {
+        val sf = staticFrames[stageIdx]
+        val t0 = System.nanoTime()
+        synchronized(sf) {
+            withStage {
+                while (stagePos < stageCount) {
+                    dCount = 1
+                    dType[0] = stageType[stagePos]; dIdx[0] = stageId[stagePos]; dKey[0] = stageKeyArr[stagePos]; order[0] = 0
+                    drawList()
+                    stagePos++
+                    if ((stagePos and 7) == 0 && System.nanoTime() - t0 > budgetNs) break
+                }
+            }
+            if (stagePos < stageCount) return
+            sf.version = ++staticVersion
+        }
+        published = stageIdx
+        val t = staticLabels.toList()
+        staticLabels.clear(); staticLabels.addAll(stageLabels)
+        stageLabels.clear(); stageLabels.addAll(t); recycle(stageLabels)
+        stageBox.copyInto(staticBox)
+        sCamX = stageCamX; sCamY = stageCamY; sYaw = stageYaw; sDist = stageDist; sHard = stageHard; sSoft = stageSoft
+        staticValid = true
+        staticCity = e.city
+        stageActive = false
+        dCount = 0
+    }
+
+    /** Runs [block] drawing into the back buffer as part of the cache. */
+    private inline fun withStage(block: () -> Unit) {
+        val prevGpu = scene.gpu
+        building = stageIdx
+        scene.gpu = staticFrames[stageIdx]
+        labelOut = stageLabels
+        staticPass = true
+        try { block() } finally {
+            staticPass = false
+            labelOut = labels
+            scene.gpu = prevGpu
+        }
+    }
+
+    /** Cached buildings standing between the camera and the player: skipped in the cache and drawn see-through. */
+    private fun findOccluders(gpu: GpuFrame) {
+        occl.clear()
+        gpu.skipCount = 0
+        val p = e.state.player
+        if (mapMode || !e.hasGame || p.inBuilding >= 0 || published < 0) return
+        val sx0 = min(proj.camX, focusX) - 8f; val sx1 = max(proj.camX, focusX) + 8f
+        val sy0 = min(proj.camY, focusY) - 8f; val sy1 = max(proj.camY, focusY) + 8f
+        val ids = drawnIds[published]
+        skipTmp.clear()
+        for (i in 0 until drawnCount[published]) {
+            val b = e.city.buildings[ids[i]]
+            if (b.height <= 5f || b.maxX < sx0 || b.minX > sx1 || b.maxY < sy0 || b.minY > sy1) continue
+            if (keyForRect(b) >= playerKey || !e.occludes(proj, b, focusX, focusY, 1.2f)) continue
+            occl += b.id
+            val s0 = rangeStart[published][b.id]; val s1 = rangeEnd[published][b.id]
+            if (s1 > s0) skipTmp += (s0.toLong() shl 32) or s1.toLong()
+        }
+        skipTmp.sort()
+        if (gpu.skip.size < skipTmp.size * 2) gpu.skip = IntArray(skipTmp.size * 2 + 8)
+        for ((k, v) in skipTmp.withIndex()) { gpu.skip[k * 2] = (v ushr 32).toInt(); gpu.skip[k * 2 + 1] = (v and 0xffffffffL).toInt() }
+        gpu.skipCount = skipTmp.size
+    }
+
+    private fun drawList() {
         for (k in 0 until dCount) {
             val i = order[k]
             when (dType[i]) {
-                0 -> drawBuilding(e.city.buildings[dIdx[i]])
+                0 -> {
+                    val b = e.city.buildings[dIdx[i]]
+                    if (staticPass) {
+                        // remember where each building's solid geometry sits in the cache so it can be skipped later
+                        val st = scene.gpu!!.streams[GpuFrame.OPAQUE]
+                        rangeStart[building][b.id] = st.ni
+                        drawBuilding(b)
+                        rangeEnd[building][b.id] = st.ni
+                        drawnIds[building][drawnCount[building]++] = b.id
+                    } else drawBuilding(b)
+                }
                 1 -> drawTree(dIdx[i])
                 2 -> e.traffic.cars.getOrNull(dIdx[i])?.let {
                     // every sixth sedan is a cab
@@ -205,10 +434,6 @@ class WorldRenderer(private val e: GameEngine) {
                 8 -> props.draw(scene, dIdx[i], dKey[i] < 55f * 55f, e.realTime)
             }
         }
-        if (gpu == null) batch.flush()
-        scene.gpu = null
-        if (!mapMode) drawWeather(canvas, w, h)
-        drawOverlays(canvas, w, h)
     }
 
     /** Rain streaks with splashes, drifting snowflakes and lightning, drawn over the city. */
@@ -309,7 +534,7 @@ class WorldRenderer(private val e: GameEngine) {
         scene.groundRect(a, b, cc, d, z, color)
     }
 
-    private fun drawGround() {
+    private fun drawGround(withRoute: Boolean) {
         // snow lies on sidewalks and parks, roads turn to slush; rain darkens everything
         val snow = scene.snow
         val wet = if (mapMode) 0f else e.skyVis.wet
@@ -383,7 +608,7 @@ class WorldRenderer(private val e: GameEngine) {
         }
         scene.material = Mat.PLAIN
         if (proj.dist < 420) drawMarkings()
-        drawRoute()
+        if (withRoute) drawRoute()
         // night street lights
         if (scene.daylight < .6f && !mapMode) {
             val glow = scene.withAlpha(c(0xFFFFD27A), .10f * (1f - scene.daylight))
@@ -568,8 +793,10 @@ class WorldRenderer(private val e: GameEngine) {
         return keyFor(nx, ny)
     }
 
-    private fun collectDrawables() {
+    private fun collectDrawables(mode: Int) {
         dCount = 0
+        val stat = mode != DYNAMIC
+        val dyn = mode != STATIC
         val city = e.city
         val p = e.state.player
         val m = min(city.maxHeight, 130f) * .9f
@@ -578,13 +805,16 @@ class WorldRenderer(private val e: GameEngine) {
         val col1 = floor(bx1 / City.AV_SPACING).toInt().coerceAtMost(City.COLS - 1)
         val row0 = floor(by0 / City.ST_SPACING).toInt().coerceAtLeast(0)
         val row1 = floor(by1 / City.ST_SPACING).toInt().coerceAtMost(City.ROWS - 1)
-        for (row in row0..row1) for (col in col0..col1) {
+        if (mode == DYNAMIC) {
+            // only the buildings hiding the player, drawn see-through
+            for (id in occl) { val b = city.buildings[id]; add(0, b.id, keyForRect(b)) }
+        } else for (row in row0..row1) for (col in col0..col1) {
             for (b in city.blocks[row * City.COLS + col]) {
                 if (b.kind == BKind.PARK) continue
                 if (b.kind == BKind.PARKING) {
                     if (!mapMode && proj.dist < 300) {
                         val slots = ((b.width - 4f) / 2.8f).toInt()
-                        for (sIdx in 0 until min(slots, 12)) if ((b.id * 31 + sIdx * 17) % 10 < 6) {
+                        if (stat) for (sIdx in 0 until min(slots, 12)) if ((b.id * 31 + sIdx * 17) % 10 < 6) {
                             add(7, b.id * 32 + sIdx, keyFor(b.minX + 4.4f + sIdx * 2.8f, b.minY + 3.5f))
                         }
                     }
@@ -594,15 +824,15 @@ class WorldRenderer(private val e: GameEngine) {
             }
         }
         val farLod = mapMode || proj.dist > 450
-        if (!farLod) {
+        if (!farLod && stat) {
             for ((i, t) in city.trees.withIndex()) {
                 if (t.x < bbox[0] || t.x > bbox[2] || t.y < bbox[1] - 10f || t.y > bbox[3]) continue
                 add(1, i, keyFor(t.x, t.y))
             }
         }
         if (!mapMode) {
-            for ((i, a) in e.traffic.cars.withIndex()) if (a.x in bbox[0]..bbox[2] && a.y in bbox[1]..bbox[3]) add(2, i, keyFor(a.x, a.y))
-            if (proj.dist < 260) for ((i, a) in e.traffic.peds.withIndex()) if (!a.hidden && a.x in bbox[0]..bbox[2] && a.y in bbox[1]..bbox[3]) add(3, i, keyFor(a.x, a.y))
+            if (dyn) for ((i, a) in e.traffic.cars.withIndex()) if (a.x in bbox[0]..bbox[2] && a.y in bbox[1]..bbox[3]) add(2, i, keyFor(a.x, a.y))
+            if (dyn && proj.dist < 260) for ((i, a) in e.traffic.peds.withIndex()) if (!a.hidden && a.x in bbox[0]..bbox[2] && a.y in bbox[1]..bbox[3]) add(3, i, keyFor(a.x, a.y))
             if (proj.dist < 230) {
                 val pr = props
                 val col0 = floor((bbox[0] - 4f) / City.AV_SPACING).toInt().coerceAtLeast(0)
@@ -612,17 +842,17 @@ class WorldRenderer(private val e: GameEngine) {
                 for (row in row0..row1) for (col in col0..col1) for (pi in pr.byBlock[row * City.COLS + col]) {
                     val x = pr.x[pi]; val y = pr.y[pi]
                     if (x < bbox[0] - 3f || x > bbox[2] + 3f || y < bbox[1] - 6f || y > bbox[3] + 3f) continue
-                    add(8, pi, keyFor(x, y))
+                    // fountains move, so they're redrawn every frame; the rest is cached
+                    if (mode == ALL || (mode == STATIC) != pr.animated(pi)) add(8, pi, keyFor(x, y))
                 }
             }
-            if (proj.dist < 240) forIntersections { x, y, i, k ->
+            if (dyn && proj.dist < 240) forIntersections { x, y, i, k ->
                 add(6, (i * 32 + k) * 4 + 0, keyFor(x - 11f, y - 7.5f))
                 add(6, (i * 32 + k) * 4 + 1, keyFor(x + 11f, y + 7.5f))
             }
         }
-        for (v in e.state.vehicles) if (v.x in bbox[0] - 5..bbox[2] + 5 && v.y in bbox[1] - 5..bbox[3] + 5) add(5, v.id, keyFor(v.x, v.y))
-        playerKey = keyFor(p.x, p.y)
-        if (e.hasGame && p.driving < 0 && p.inBuilding < 0 && !mapMode) add(4, 0, playerKey)
+        if (dyn) for (v in e.state.vehicles) if (v.x in bbox[0] - 5..bbox[2] + 5 && v.y in bbox[1] - 5..bbox[3] + 5) add(5, v.id, keyFor(v.x, v.y))
+        if (dyn && e.hasGame && p.driving < 0 && p.inBuilding < 0 && !mapMode) add(4, 0, playerKey)
     }
 
     private fun sortDrawables() {
@@ -667,7 +897,7 @@ class WorldRenderer(private val e: GameEngine) {
         val s = e.state
         val p = s.player
         var alpha = 1f
-        if (!mapMode && e.hasGame && p.inBuilding < 0 && b.height > 5f && keyForRect(b) < playerKey) {
+        if (!staticPass && !mapMode && e.hasGame && p.inBuilding < 0 && b.height > 5f && keyForRect(b) < playerKey) {
             if (e.occludes(proj, b, focusX, focusY, 1.2f)) alpha = .3f
         }
         var roof = b.roof
@@ -707,25 +937,16 @@ class WorldRenderer(private val e: GameEngine) {
         val oy = when (face) { 0 -> -1f; 1 -> 1f; else -> 0f }
         val cxp = if (face <= 1) b.cx else (if (face == 2) b.minX else b.maxX)
         val cyp = if (face >= 2) b.cy else (if (face == 0) b.minY else b.maxY)
-        if (proj.project(cxp + ox * .2f, cyp + oy * .2f, 3.8f, tmp)) {
-            val size = (proj.focal * .75f / tmp[2]).coerceAtMost(15f * density)
-            if (size > 6.5f * density * .6f) label(name, tmp[0], tmp[1] + size * .35f, size, 0xFFFFFFFF.toInt())
-        }
+        label(name, cxp + ox * .2f, cyp + oy * .2f, 3.8f, .75f, 15f * density, 6.5f * density * .6f, .35f, 0xFFFFFFFF.toInt())
     }
 
     internal fun forRentLabel(b: Building, face: Int) {
-        if (proj.project(b.doorX, if (face == 0) b.minY else b.maxY, 3.6f, tmp)) {
-            val size = (proj.focal * .6f / tmp[2]).coerceAtMost(12f * density)
-            if (size > 4f * density) label("FOR RENT", tmp[0], tmp[1], size, c(0xFF27AE60), 0xEEFFFFFF.toInt())
-        }
+        label("FOR RENT", b.doorX, if (face == 0) b.minY else b.maxY, 3.6f, .6f, 12f * density, 4f * density, 0f, c(0xFF27AE60), 0xEEFFFFFF.toInt())
     }
 
     internal fun gasLabel(b: Building, y0: Float, y1: Float) {
         if (mapMode) return
-        if (proj.project(b.cx, if (b.facesNorth) y0 else y1, 6.3f, tmp)) {
-            val size = (proj.focal * .8f / tmp[2]).coerceAtMost(14f * density)
-            if (size > 4f * density) label("Fuel Up", tmp[0], tmp[1], size, 0xFFFFFFFF.toInt(), icon = "place_gas")
-        }
+        label("Fuel Up", b.cx, if (b.facesNorth) y0 else y1, 6.3f, .8f, 14f * density, 4f * density, 0f, 0xFFFFFFFF.toInt(), icon = "place_gas")
     }
 
     // ------------------------------------------------------------------ props
@@ -851,35 +1072,45 @@ class WorldRenderer(private val e: GameEngine) {
 
     // ------------------------------------------------------------------ overlays
 
+    private fun drawLabels(canvas: Canvas, list: ArrayList<Label>) {
+        for (l in list) {
+            if (!proj.project(l.x, l.y, l.z, tmp)) continue
+            val size = (proj.focal * l.k / tmp[2]).coerceAtMost(l.max)
+            if (size <= l.min) continue
+            val x = tmp[0]; val y = tmp[1] + size * l.shift
+            if (x < -200f || y < -60f || x > proj.screenW + 200f || y > proj.screenH + 60f) continue
+            textPaint.textSize = size
+            if (l.bg != 0) {
+                val tw = textPaint.measureText(l.text)
+                pillPaint.color = l.bg
+                rect.set(x - tw / 2 - size * .4f, y - size * 1.05f, x + tw / 2 + size * .4f, y + size * .35f)
+                canvas.drawRoundRect(rect, size * .3f, size * .3f, pillPaint)
+                textPaint.color = l.color
+                canvas.drawText(l.text, x, y, textPaint)
+            } else {
+                // an icon sits left of the text, the pair centred on the label point
+                val ic = l.icon
+                val shift = if (ic != null) size * .65f else 0f
+                if (ic != null) {
+                    val tw = textPaint.measureText(l.text)
+                    IconCanvas.draw(canvas, ic, x - tw / 2 - size * .1f + shift - size * .55f + 1.5f, y - size * .35f + 1.5f, size * 1.1f, 0xAA000000.toInt())
+                    IconCanvas.draw(canvas, ic, x - tw / 2 - size * .1f + shift - size * .55f, y - size * .35f, size * 1.1f, l.color)
+                }
+                textPaint.color = 0xAA000000.toInt()
+                canvas.drawText(l.text, x + shift + 1.5f, y + 1.5f, textPaint)
+                textPaint.color = l.color
+                canvas.drawText(l.text, x + shift, y, textPaint)
+            }
+        }
+    }
+
     private fun drawOverlays(canvas: Canvas, w: Int, h: Int) {
         val s = e.state
         val sel = e.city.building(e.ui.selected)
         if (sel != null && !mapMode) outlineBuilding(canvas, sel)
         // business / place signs
-        for (l in labels) {
-            textPaint.textSize = l.size
-            if (l.bg != 0) {
-                val tw = textPaint.measureText(l.text)
-                pillPaint.color = l.bg
-                rect.set(l.x - tw / 2 - l.size * .4f, l.y - l.size * 1.05f, l.x + tw / 2 + l.size * .4f, l.y + l.size * .35f)
-                canvas.drawRoundRect(rect, l.size * .3f, l.size * .3f, pillPaint)
-                textPaint.color = l.color
-                canvas.drawText(l.text, l.x, l.y, textPaint)
-            } else {
-                // an icon sits left of the text, the pair centred on the label point
-                val ic = l.icon
-                val shift = if (ic != null) l.size * .65f else 0f
-                if (ic != null) {
-                    val tw = textPaint.measureText(l.text)
-                    IconCanvas.draw(canvas, ic, l.x - tw / 2 - l.size * .1f + shift - l.size * .55f + 1.5f, l.y - l.size * .35f + 1.5f, l.size * 1.1f, 0xAA000000.toInt())
-                    IconCanvas.draw(canvas, ic, l.x - tw / 2 - l.size * .1f + shift - l.size * .55f, l.y - l.size * .35f, l.size * 1.1f, l.color)
-                }
-                textPaint.color = 0xAA000000.toInt()
-                canvas.drawText(l.text, l.x + shift + 1.5f, l.y + 1.5f, textPaint)
-                textPaint.color = l.color
-                canvas.drawText(l.text, l.x + shift, l.y, textPaint)
-            }
-        }
+        drawLabels(canvas, staticLabels)
+        drawLabels(canvas, labels)
         if (mapMode) drawMapOverlay(canvas)
         // own vehicle pins
         if (!mapMode && s.player.inBuilding < 0) {
@@ -920,7 +1151,8 @@ class WorldRenderer(private val e: GameEngine) {
             textPaint.textSize = 11f * density
             textPaint.color = 0xFFFFFFFF.toInt()
             textPaint.textAlign = Paint.Align.LEFT
-            canvas.drawText("${e.fps.roundToInt()} FPS · ${batch.trianglesDrawn} tris", 8f * density, h - 6f * density, textPaint)
+            val gpuText = if (e.gpuFps > 0f) " · GPU ${e.gpuFps.roundToInt()} FPS at ${(e.renderScale * 100).roundToInt()}%" else " · ${batch.trianglesDrawn} tris"
+            canvas.drawText("${e.fps.roundToInt()} FPS$gpuText", 8f * density, h - 6f * density, textPaint)
             textPaint.textAlign = Paint.Align.CENTER
         }
     }

@@ -123,6 +123,9 @@ class GameEngine(context: Context?) {
     /** Seconds the brake has been held at a standstill (reverse kicks in after a moment). */
     private var stoppedFor = 0f
     var fps = 0f
+    /** Frames the GPU renderer actually drew per second, and its resolution scale (for the FPS counter). */
+    var gpuFps = 0f
+    var renderScale = 1f
     private var fpsAcc = 0f
     private var fpsFrames = 0
     var crashCooldown = 0f
