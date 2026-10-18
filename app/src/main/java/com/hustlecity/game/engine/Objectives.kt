@@ -32,7 +32,9 @@ object Objectives {
                     e.state.businesses.any { BizCalc.requirementsMet(it) }
                 },
                 Objective("stock", "Buy products at a wholesaler", "stock") { e ->
-                    e.state.businesses.any { b -> b.stock.values.any { it > 0 } || Catalog.product(b.type.products.first().first)?.service == true }
+                    e.state.businesses.any { b ->
+                        !b.type.facility && (b.stock.values.any { it > 0 } || b.type.products.firstOrNull()?.let { Catalog.product(it.first)?.service } == true)
+                    }
                 },
                 Objective("open", "Open your store (turn off Temporarily Closed)", "biz") { e -> e.state.businesses.any { !it.tempClosed } },
                 Objective("work", "Start working in your store", "biz", flag("work")),
@@ -52,9 +54,15 @@ object Objectives {
             "Big Ambitions", "Now we're talking. Grow the brand, beat the rivals, own this city.",
             listOf(
                 Objective("marketing", "Run a marketing campaign at Buzz Marketing", "buzz", flag("marketing")),
-                Objective("two", "Own 2 businesses", "realty") { e -> e.state.businesses.size >= 2 },
+                Objective("two", "Own 2 businesses", "realty") { e -> e.state.businesses.count { !it.type.facility } >= 2 },
+                Objective("warehouse", "Open a warehouse and store stock in it", "realty") { e ->
+                    e.state.businesses.any { BizCalc.isWarehouse(it) && it.stock.values.any { q -> q > 0 } }
+                },
+                Objective("hq", "Open a Headquarters and hire a manager", "realty") { e ->
+                    e.state.businesses.any { BizCalc.isHq(it) } && e.state.employees.any { it.role.atHeadquarters && it.businessId >= 0 }
+                },
                 Objective("nw100k", "Reach a net worth of \$100,000", null) { e -> e.netWorth() >= 100_000 },
-                Objective("five", "Own 5 businesses", "realty") { e -> e.state.businesses.size >= 5 },
+                Objective("five", "Own 5 businesses", "realty") { e -> e.state.businesses.count { !it.type.facility } >= 5 },
                 Objective("million", "Reach a net worth of \$1,000,000", null) { e -> e.netWorth() >= 1_000_000 },
                 Objective("top", "Become #1 in the Rivals ranking", null) { e -> e.rank() == 1 },
             ),
@@ -83,8 +91,15 @@ object Objectives {
         if (p.energy < 20) out += Alert("You are exhausted. Go home and sleep.", true)
         if (p.money < 0) out += Alert("Your bank account is overdrawn!", true)
         for (b in s.businesses) {
-            if (b.tempClosed) out += Alert("${b.name}: Is temporarily closed", false, b.id)
             for ((req, ok) in BizCalc.requirements(b)) if (!ok) out += Alert("${b.name}: Requires at least one ${req.label}.", true, b.id)
+            if (b.type.facility) {
+                if (BizCalc.isHq(b)) {
+                    val managers = s.employees.count { it.businessId == b.id }
+                    if (managers > BizCalc.count(b, "desk")) out += Alert("${b.name}: ${managers - BizCalc.count(b, "desk")} manager(s) have no desk", true, b.id)
+                }
+                continue
+            }
+            if (b.tempClosed) out += Alert("${b.name}: Is temporarily closed", false, b.id)
             if (!b.tempClosed && BizCalc.requirementsMet(b)) {
                 val empty = b.type.products.mapNotNull { Catalog.product(it.first) }.filter { !it.service && (b.stock[it.id] ?: 0) == 0 && BizCalc.capacityFor(b, it.id) > 0 }
                 if (empty.isNotEmpty()) out += Alert("${b.name}: Out of ${empty.joinToString { it.name }}", true, b.id)

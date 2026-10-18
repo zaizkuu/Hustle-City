@@ -595,8 +595,18 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
             val full = Modifier.fillMaxWidth()
             val unload = e.unloadableCount()
             when (sc.mode) {
-                InteriorMode.BUSINESS -> {
-                    val biz = sc.business!!
+                InteriorMode.BUSINESS -> if (sc.business!!.type.facility) {
+                    val biz = sc.business
+                    HButton("Open in BizHub", full, small = true) { e.ui.bizHubSel = biz.id; e.ui.app = AppId.BIZHUB }
+                    HButton("Toggle walls", full, small = true, color = HC.GlassLight) { sc.showWalls = !sc.showWalls; e.bump() }
+                    HButton("Interior designer", full, small = true, color = HC.GlassLight) { e.ui.designer = !e.ui.designer; sc.selectedIndex = -1; sc.cancelGhost(); e.bump() }
+                    if (BizCalc.isWarehouse(biz)) {
+                        Text("${BizCalc.warehouseBoxesUsed(biz)} / ${BizCalc.warehouseBoxes(biz)} boxes stored", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        HButton("Load vehicle", full, small = true, color = HC.Teal) { e.ui.panel = Panel.Warehouse(biz.id) }
+                    }
+                    if (unload > 0) HButton("Unload ($unload)", full, small = true, color = HC.Orange) { e.unloadHere() }
+                } else {
+                    val biz = sc.business
                     HButton("Open in BizHub", full, small = true) { e.ui.bizHubSel = biz.id; e.ui.app = AppId.BIZHUB }
                     HButton("Toggle walls", full, small = true, color = HC.GlassLight) { sc.showWalls = !sc.showWalls; e.bump() }
                     HButton("Interior designer", full, small = true, color = HC.GlassLight) { e.ui.designer = !e.ui.designer; sc.selectedIndex = -1; sc.cancelGhost(); e.bump() }

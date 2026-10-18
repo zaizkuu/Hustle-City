@@ -138,7 +138,9 @@ fun BizHubApp(e: GameEngine) {
         }
         // right side
         Column(Modifier.weight(1f)) {
-            val tabs = listOf(building.address, "Insight", "Inventory & Pricing", "Schedule", "Deliveries", "Marketing", "Settings")
+            val tabs = if (biz.type.facility) listOf(building.address, if (BizCalc.isWarehouse(biz)) "Storage" else "Team", "Schedule", "Settings")
+            else listOf(building.address, "Insight", "Inventory & Pricing", "Schedule", "Deliveries", "Marketing", "Settings")
+            if (e.ui.bizHubTab >= tabs.size) e.ui.bizHubTab = 0
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                 for ((i, t) in tabs.withIndex()) {
                     val sel = e.ui.bizHubTab == i
@@ -149,7 +151,12 @@ fun BizHubApp(e: GameEngine) {
                 }
             }
             Box(Modifier.fillMaxSize().padding(top = 6.dp)) {
-                when (e.ui.bizHubTab) {
+                if (biz.type.facility) when (e.ui.bizHubTab) {
+                    0 -> OverviewTab(e, biz)
+                    1 -> if (BizCalc.isWarehouse(biz)) StorageTab(e, biz) else TeamTab(e, biz)
+                    2 -> ScheduleTab(e, biz)
+                    else -> SettingsTab(e, biz)
+                } else when (e.ui.bizHubTab) {
                     0 -> OverviewTab(e, biz)
                     1 -> InsightTab(e, biz)
                     2 -> InventoryTab(e, biz)
@@ -353,7 +360,7 @@ private fun ScheduleTab(e: GameEngine, biz: Business) {
     val s = e.state
     Row(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.weight(1.3f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            WhiteCard(Modifier.fillMaxWidth()) {
+            if (!biz.type.facility) WhiteCard(Modifier.fillMaxWidth()) {
                 CardTitle("Opening hours (every day)")
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Opens", style = HT.body, color = HC.Ink, modifier = Modifier.width(60.dp))
@@ -408,7 +415,13 @@ private fun ScheduleTab(e: GameEngine, biz: Business) {
         }
         WhiteCard(Modifier.weight(1f)) {
             CardTitle("Assign employees")
-            val free = s.employees.filter { it.businessId != biz.id && (it.role == biz.type.staffRole || it.role == StaffRole.CLEANER) }
+            val free = s.employees.filter {
+                it.businessId != biz.id && when {
+                    BizCalc.isHq(biz) -> it.role.atHeadquarters || it.role == StaffRole.CLEANER
+                    biz.type.facility -> it.role == StaffRole.CLEANER
+                    else -> it.role == biz.type.staffRole || it.role == StaffRole.CLEANER
+                }
+            }
             if (free.isEmpty()) {
                 Text("No available ${biz.type.staffRole.label} or Cleaner employees. Hire them at Apex Recruitment (needs the Basic HR course).", style = HT.small, color = HC.InkSoft)
                 HButton("Pin recruiter", small = true, modifier = Modifier.padding(top = 6.dp)) { e.city.placeBuilding("recruit")?.let { e.state.player.waypoint = it.id; e.toast("Waypoint set") } }
@@ -527,5 +540,68 @@ private fun SettingsTab(e: GameEngine, biz: Business) {
         }
         Row { Dot(HC.Green); Text("  Sources: ${biz.type.sources.joinToString { it.label }.ifEmpty { "services only" }}", style = HT.small, color = Color.White) }
         if (biz.type.sources.contains(Source.IMPORT)) Text("Imported goods come from Global Imports Co. in Industry City.", style = HT.small, color = Color.White)
+    }
+}
+
+@Composable
+private fun StorageTab(e: GameEngine, biz: Business) {
+    val used = BizCalc.warehouseBoxesUsed(biz)
+    val cap = BizCalc.warehouseBoxes(biz)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        WhiteCard(Modifier.fillMaxWidth()) {
+            CardTitle("Storage")
+            LabeledBar("Boxes", if (cap == 0) 0f else used / cap.toFloat(), if (used >= cap) HC.Red else HC.Blue, "$used / $cap")
+            KeyValue("Stock value", e.money(BizCalc.stockValue(biz)))
+            Text("Delivery contracts and purchasing agents take stock from here first, at no markup. Order 6+ boxes at a wholesaler for 10% off, then deliver here or unload your vehicle inside.",
+                style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
+        }
+        val items = biz.stock.filter { it.value > 0 }.toList().sortedByDescending { it.second }
+        if (items.isNotEmpty()) WhiteCard(Modifier.fillMaxWidth()) {
+            CardTitle("Products")
+            for ((pid, qty) in items) {
+                val p = Catalog.product(pid) ?: continue
+                Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ProductThumb(p.color, 30.dp)
+                    Text(" ${p.name}", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
+                    Text("$qty units · ${(qty + p.unitsPerBox - 1) / p.unitsPerBox} boxes", style = HT.small, color = HC.InkSoft)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TeamTab(e: GameEngine, biz: Business) {
+    val s = e.state
+    val desks = BizCalc.count(biz, "desk")
+    val hr = BizCalc.managers(e, StaffRole.HR_MANAGER)
+    val agents = BizCalc.managers(e, StaffRole.PURCHASING_AGENT)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        WhiteCard(Modifier.fillMaxWidth()) {
+            CardTitle("Management team")
+            KeyValue("Office desks", "$desks")
+            KeyValue("HR Managers working", "$hr")
+            KeyValue("Purchasing Agents working", "$agents")
+            Text("Each manager needs a desk here. Hire them at Apex Recruitment, then assign them in the Schedule tab.", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
+        }
+        WhiteCard(Modifier.fillMaxWidth()) {
+            CardTitle("HR")
+            Text(
+                if (hr == 0) "No HR Manager yet. HR raises staff satisfaction and replaces anyone who quits with the same schedule."
+                else "Covering ${minOf(s.employees.size, hr * 12)} of ${s.employees.size} employees (12 each). Satisfaction +10%" +
+                    (if (s.employees.size > hr * 12) " — needs another HR Manager to apply." else ".") + " Quitting staff are replaced automatically.",
+                style = HT.body, color = HC.Ink,
+            )
+        }
+        WhiteCard(Modifier.fillMaxWidth()) {
+            CardTitle("Purchasing")
+            val stores = s.businesses.filter { !it.type.facility && it.delivery?.enabled != true }
+            Text(
+                if (agents == 0) "No Purchasing Agent yet. Agents restock your stores every morning at 06:00, from your warehouses first, then wholesale at +8%."
+                else "Restocking ${minOf(stores.size, agents * 4)} of ${stores.size} stores every morning at 06:00 (4 per agent). Stores with their own delivery contract are skipped.",
+                style = HT.body, color = HC.Ink,
+            )
+            for (b in stores.take(agents * 4)) Text("• ${b.type.emoji} ${b.name}", style = HT.small, color = HC.InkSoft)
+        }
     }
 }

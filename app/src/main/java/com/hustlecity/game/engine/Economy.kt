@@ -39,11 +39,36 @@ object BizCalc {
     fun roomFor(b: Business, productId: String): Int {
         val p = Catalog.product(productId) ?: return 0
         if (p.service) return 0
+        if (isWarehouse(b)) return ((warehouseBoxes(b) - warehouseBoxesUsed(b)).coerceAtLeast(0) * p.unitsPerBox)
         val used = b.stock.entries.sumOf { (id, q) -> if (Catalog.product(id)?.tag == p.tag) q else 0 }
         return (displayCapacity(b, p.tag) - used).coerceAtLeast(0)
     }
 
-    fun sells(b: Business, productId: String) = b.type.products.any { it.first == productId }
+    /** Whether the business takes this product: shops take what they sell, warehouses take any boxed goods. */
+    fun sells(b: Business, productId: String): Boolean {
+        if (isWarehouse(b)) return Catalog.product(productId)?.service == false
+        return b.type.products.any { it.first == productId }
+    }
+
+    fun isWarehouse(b: Business) = b.typeId == "warehouse"
+    fun isHq(b: Business) = b.typeId == "hq"
+
+    /** Box capacity of a warehouse (all its pallet racks). */
+    fun warehouseBoxes(b: Business) = displayCapacity(b, "pallet_rack")
+
+    fun warehouseBoxesUsed(b: Business) = b.stock.entries.sumOf { (id, q) ->
+        val per = Catalog.product(id)?.unitsPerBox ?: 1
+        if (q <= 0) 0 else (q + per - 1) / per
+    }
+
+    /** Managers of a role assigned to a furnished headquarters. */
+    fun managers(e: GameEngine, role: StaffRole): Int {
+        val hqs = e.state.businesses.filter { isHq(it) && requirementsMet(it) }.map { it.id }.toSet()
+        if (hqs.isEmpty()) return 0
+        // each manager needs a desk
+        val desks = e.state.businesses.filter { it.id in hqs }.sumOf { count(it, "desk") }
+        return minOf(desks, e.state.employees.count { it.role == role && it.businessId in hqs })
+    }
 
     fun requirements(b: Business): List<Pair<Req, Boolean>> = b.type.requirements.map { it to (count(b, it.tag) > 0) }
 
@@ -173,6 +198,7 @@ class Economy(private val e: GameEngine) {
     }
 
     private fun simulateBusiness(b: Business, hour: Int, weekday: Int) {
+        if (b.type.facility) return
         val building = e.city.building(b.buildingId)
         if (!BizCalc.isOpen(b, hour) || !BizCalc.requirementsMet(b)) {
             servedRate[b.id] = 0.0; capacityNow[b.id] = 0
@@ -208,6 +234,7 @@ class Economy(private val e: GameEngine) {
         var priceSamples = 0
         var bought = false
         val products = b.type.products
+        if (products.isEmpty()) return
         val picks = products.filter { rnd.nextDouble() < it.second }.ifEmpty { listOf(products.first()) }
         for ((pid, _) in picks) {
             val p = Catalog.product(pid) ?: continue
@@ -262,6 +289,7 @@ class Economy(private val e: GameEngine) {
                 b.cleanliness = (b.cleanliness + cleaners * 30.0 * boost).coerceAtMost(100.0)
             }
         }
+        if (hour == 6) purchasingRun()
         // scheduled deliveries
         if (Catalog.COURSE_LOGISTICS in s.player.courses) {
             for (b in s.businesses) {
@@ -282,18 +310,67 @@ class Economy(private val e: GameEngine) {
             val have = b.stock[pid] ?: 0
             val need = min((target - have).coerceAtLeast(0), BizCalc.roomFor(b, pid))
             if (need == 0) continue
-            // buy whole units only for what fits on the displays
-            val qty = need
-            val price = qty * p.cost * 1.12
-            if (e.state.player.money < price) continue
-            e.spend(price, "Inventory", silent = true)
-            addStock(b, pid, qty, price / qty)
-            cost += price; units += qty
+            val r = supply(b, pid, need, 1.12)
+            cost += r.first; units += r.second
         }
         if (units > 0) {
             e.spend(60.0, "Delivery", allowDebt = true, silent = true)
             e.toast("${b.name}: delivery of $units units (${e.money(cost + 60)})", ToastKind.INFO)
         }
+    }
+
+    /**
+     * Moves [need] units of a product into a store: first from the player's warehouses (already paid for),
+     * then bought from the wholesaler at cost × [markup]. Returns (money spent, units delivered).
+     */
+    fun supply(b: Business, pid: String, need: Int, markup: Double): Pair<Double, Int> {
+        val p = Catalog.product(pid) ?: return 0.0 to 0
+        var left = need
+        var units = 0
+        for (w in e.state.businesses) {
+            if (left <= 0) break
+            if (!BizCalc.isWarehouse(w)) continue
+            val have = w.stock[pid] ?: 0
+            if (have <= 0) continue
+            val take = min(have, left)
+            val unitCost = w.unitCost[pid] ?: p.cost
+            w.stock[pid] = have - take
+            addStock(b, pid, take, unitCost)
+            left -= take; units += take
+        }
+        var cost = 0.0
+        if (left > 0) {
+            if (p.source == com.hustlecity.game.data.Source.IMPORT && Catalog.COURSE_IMPORT !in e.state.player.courses) return 0.0 to units
+            val price = left * p.cost * markup
+            if (e.state.player.money >= price) {
+                e.spend(price, "Inventory", silent = true)
+                addStock(b, pid, left, price / left)
+                cost = price; units += left
+            }
+        }
+        return cost to units
+    }
+
+    /** Purchasing agents at HQ restock every store (without its own contract) each morning. */
+    private fun purchasingRun() {
+        val agents = BizCalc.managers(e, StaffRole.PURCHASING_AGENT)
+        if (agents == 0) return
+        val stores = e.state.businesses.filter { !it.type.facility && (it.delivery?.enabled != true) }.take(agents * 4)
+        var total = 0.0
+        var count = 0
+        for (b in stores) {
+            var units = 0
+            for ((pid, _) in b.type.products) {
+                val p = Catalog.product(pid) ?: continue
+                if (p.service) continue
+                val room = BizCalc.roomFor(b, pid)
+                if (room <= 0) continue
+                val r = supply(b, pid, room, 1.08)
+                total += r.first; units += r.second
+            }
+            if (units > 0) { e.spend(30.0, "Delivery", allowDebt = true, silent = true); total += 30; count++ }
+        }
+        if (count > 0) e.toast("Purchasing restocked $count store(s) for ${e.money(total)}", ToastKind.INFO)
     }
 
     fun addStock(b: Business, pid: String, qty: Int, unitCost: Double) {
@@ -415,6 +492,8 @@ class Economy(private val e: GameEngine) {
     private fun employeesDaily() {
         val s = e.state
         val leadership = Catalog.COURSE_LEADERSHIP in s.player.courses
+        val hr = BizCalc.managers(e, StaffRole.HR_MANAGER)
+        val hrCovers = hr > 0 && s.employees.size <= hr * 12
         val quitters = ArrayList<Employee>()
         for (emp in s.employees) {
             val wageRatio = emp.wage / emp.demand
@@ -424,6 +503,7 @@ class Economy(private val e: GameEngine) {
             if (hours < 16 && emp.businessId >= 0) target -= .1
             if (emp.businessId < 0) target -= .15
             if (leadership) target += .15
+            if (hrCovers) target += .1
             target = target.coerceIn(0.0, 1.0)
             emp.satisfaction = (emp.satisfaction * .7 + target * .3).coerceIn(0.0, 1.0)
             if (emp.hoursToday > 0) emp.skill = (emp.skill + (if (leadership) .006 else .004)).coerceAtMost(1.0)
@@ -434,7 +514,17 @@ class Economy(private val e: GameEngine) {
         for (q in quitters) {
             s.employees.remove(q)
             e.message(q.name, "I quit. The pay and hours just weren't working for me.")
-            e.toast("${q.name} quit their job", ToastKind.BAD)
+            if (hr > 0 && q.businessId >= 0) {
+                // HR finds a replacement with the same schedule
+                val skill = (0.3 + e.rnd.nextDouble() * 0.35)
+                val wage = ((q.role.baseWage * (0.85 + skill * 0.6)) * 2).roundToInt() / 2.0
+                val name = "${Catalog.firstNames.random(e.rnd)} ${Catalog.lastNames.random(e.rnd)}"
+                s.employees += Employee(s.newId(), name, q.role, skill, wage, wage, 20 + e.rnd.nextInt(35), businessId = q.businessId,
+                    shiftStart = q.shiftStart, shiftEnd = q.shiftEnd, days = q.days, hiredDay = s.day)
+                e.message("HR", "${q.name} quit. I hired $name as a replacement (${q.role.label}, ${e.money(wage)}/h) with the same schedule.")
+            } else {
+                e.toast("${q.name} quit their job", ToastKind.BAD)
+            }
         }
     }
 

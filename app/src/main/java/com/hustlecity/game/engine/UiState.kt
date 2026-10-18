@@ -23,6 +23,7 @@ sealed class Panel {
     data object Settings : Panel()
     data object Help : Panel()
     data object Sleep : Panel()
+    data class Warehouse(val businessId: Int) : Panel()
 }
 
 enum class ToastKind { INFO, GOOD, BAD, SAVE }

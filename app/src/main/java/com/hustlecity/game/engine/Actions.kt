@@ -95,10 +95,15 @@ fun GameEngine.startBusiness(buildingId: Int, typeId: String, name: String): Bus
     biz.wallColor = rnd.nextInt(WALL_COLORS.size)
     if (type.id == "coffee" || type.id == "fastfood") { biz.openHour = 7; biz.closeHour = 21 }
     if (type.id == "gym") { biz.openHour = 6; biz.closeHour = 22 }
+    if (type.facility) { biz.tempClosed = false; biz.openHour = 0; biz.closeHour = 0 }
     state.businesses += biz
     ui.bizHubSel = biz.id
     if (state.player.inBuilding == buildingId) interior = InteriorScene(this, b, InteriorMode.BUSINESS)
-    message("Uncle Sal", "${biz.name} — great name! Now buy furniture: check the requirements in BizHub. Essentials Appliances and Prime Kitchen Supply sell what you need.")
+    message("Uncle Sal", when (type.id) {
+        "warehouse" -> "A warehouse! Put pallet racks in it (OfficePlus Supply or Essentials Appliances), then fill it with wholesale stock. Your delivery contracts and purchasing agents take stock from here first, at no markup."
+        "hq" -> "Your own Headquarters! Furnish it with office desks from OfficePlus Supply, then hire an HR Manager and Purchasing Agents at Apex Recruitment and assign them here."
+        else -> "${biz.name} — great name! Now buy furniture: check the requirements in BizHub. Essentials Appliances and Prime Kitchen Supply sell what you need."
+    })
     toast("${biz.name} founded!", ToastKind.GOOD)
     bump()
     return biz
@@ -185,7 +190,7 @@ fun GameEngine.unloadHere(): Int {
             if (item.isProduct) {
                 if (biz == null) { skipped++; continue }
                 val pdef = Catalog.product(item.id) ?: continue
-                if (biz.type.products.none { it.first == item.id }) { skipped++; wrongProduct = pdef.name; continue }
+                if (!BizCalc.sells(biz, item.id)) { skipped++; wrongProduct = pdef.name; continue }
                 val room = BizCalc.roomFor(biz, item.id)
                 if (room <= 0) { skipped++; continue }
                 val qty = min(room, item.qty)
@@ -244,7 +249,7 @@ fun GameEngine.checkoutOptions(storeBuildingId: Int, cart: List<CartLine>): List
     }
     val handFree = 2 - state.player.hand.size
     if (slots <= handFree) out += CheckoutTarget.Hand to "Carry by hand ($handFree slots)"
-    val subtotal = cart.sumOf { it.total }
+    val subtotal = cart.sumOf { it.total } * (1 - bulkDiscount(cart))
     val fee = deliveryFee(subtotal)
     val furnitureOnly = cart.none { it.isProduct }
     for (b in state.businesses) out += CheckoutTarget.Deliver(b) to "Deliver to ${b.name} in 2h (+${money(fee)})"
@@ -254,9 +259,12 @@ fun GameEngine.checkoutOptions(storeBuildingId: Int, cart: List<CartLine>): List
 
 fun deliveryFee(subtotal: Double) = 50.0 + subtotal * .08
 
+/** 10% off wholesale orders of 6 boxes or more. */
+fun bulkDiscount(cart: List<CartLine>): Double = if (cart.all { it.isProduct } && cartSlots(cart) >= 6) .1 else 0.0
+
 fun GameEngine.checkout(storeBuildingId: Int, cart: List<CartLine>, target: CheckoutTarget): Boolean {
     if (cart.isEmpty()) return false
-    val subtotal = cart.sumOf { it.total }
+    val subtotal = cart.sumOf { it.total } * (1 - bulkDiscount(cart))
     val items = cart.flatMap { line ->
         List(line.boxes) {
             if (line.isProduct) CargoItem(line.id, true, Catalog.product(line.id)?.unitsPerBox ?: 1) else CargoItem(line.id, false, 1)
@@ -576,3 +584,20 @@ fun GameEngine.setDelivery(biz: Business, contract: DeliveryContract?) {
 fun placeForSource(source: Source): String = Catalog.sourcePlaceId(source)
 
 fun GameEngine.placeKindOf(buildingId: Int): PlaceKind? = city.building(buildingId)?.placeId?.let { Catalog.place(it).kind }
+
+// ---------------------------------------------------------------------- warehouse
+
+/** Loads one box of a product from the warehouse the player is in into a nearby vehicle. */
+fun GameEngine.loadFromWarehouse(w: Business, pid: String): Boolean {
+    val p = Catalog.product(pid) ?: return false
+    val v = vehicleNear(w.buildingId)
+    if (v == null) { toast("Park a vehicle within 45 m of the warehouse"); return false }
+    if (cargoSlotsFree(v) <= 0) { toast("Your ${v.def.name} is full"); return false }
+    val have = w.stock[pid] ?: 0
+    if (have <= 0) return false
+    val qty = min(have, p.unitsPerBox)
+    w.stock[pid] = have - qty
+    v.cargo += CargoItem(pid, true, qty)
+    bump()
+    return true
+}

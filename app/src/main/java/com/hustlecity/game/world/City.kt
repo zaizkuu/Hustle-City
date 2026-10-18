@@ -62,20 +62,24 @@ class Building(
     val streetName get() = City.streetName(streetIndex)
     val address get() = "$number $streetName"
     val solid get() = kind != BKind.PARK && kind != BKind.PARKING && kind != BKind.GAS
-    val rentable get() = kind == BKind.RETAIL || kind == BKind.RESIDENTIAL
+    val rentable get() = kind == BKind.RETAIL || kind == BKind.RESIDENTIAL || kind == BKind.OFFICE || kind == BKind.WAREHOUSE
     val sizeClass: String
         get() = when (kind) {
             BKind.RETAIL -> "A" + when { area <= 75 -> 1; area <= 120 -> 2; area <= 200 -> 3; else -> 4 }
             BKind.RESIDENTIAL -> "B" + when { area <= 55 -> 1; area <= 90 -> 2; else -> 3 }
-            BKind.OFFICE -> "C1"
-            BKind.WAREHOUSE -> "W1"
+            BKind.OFFICE -> "C" + when { area <= 300 -> 1; area <= 500 -> 2; else -> 3 }
+            BKind.WAREHOUSE -> "W" + when { area <= 300 -> 1; area <= 450 -> 2; else -> 3 }
             else -> "M1"
         }
     val customerLimit get() = max(5, area / 5)
     val baseRent: Double
         get() {
             val n = City.neighborhoods[neighborhood]
-            val mult = if (kind == BKind.RESIDENTIAL) 0.8 else (0.75 + traffic)
+            val mult = when (kind) {
+                BKind.RESIDENTIAL -> 0.8
+                BKind.OFFICE, BKind.WAREHOUSE -> 0.45
+                else -> 0.75 + traffic
+            }
             return ((area * n.rentPerSqm * mult) / 10.0).roundToInt() * 10.0
         }
     val value: Double get() = (baseRent * 140 / 1000.0).roundToInt() * 1000.0
@@ -270,6 +274,8 @@ class City(val seed: Long) {
             "essentials" to 3, "primekitchen" to 1, "lux" to 4, "metro" to 2, "distro" to 0, "imports" to 2,
             "motors" to 5, "school" to 4, "recruit" to 0, "bank" to 3, "buzz" to 4, "hospital" to 5,
             "fuel" to 0, "fuel" to 1, "fuel" to 2, "fuel" to 5,
+            // added later: keep at the end so earlier picks stay the same for existing saves
+            "officeplus" to 2,
         )
         val used = HashSet<Int>()
         for ((placeId, hood) in wanted) {

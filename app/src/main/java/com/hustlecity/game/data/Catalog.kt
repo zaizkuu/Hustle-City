@@ -3,11 +3,20 @@ package com.hustlecity.game.data
 /** Colors are ARGB ints so the renderer can use them without conversion. */
 fun c(hex: Long): Int = hex.toInt()
 
+/** Boxes of stock one pallet rack holds in a warehouse. */
+const val WAREHOUSE_BOXES_PER_RACK = 24
+
 enum class StaffRole(val label: String, val baseWage: Double) {
     CUSTOMER_SERVICE("Customer Service", 15.0),
     CLEANER("Cleaner", 13.0),
     GYM_TRAINER("Gym Trainer", 19.0),
     HAIRSTYLIST("Hairstylist", 18.0),
+    HR_MANAGER("HR Manager", 26.0),
+    PURCHASING_AGENT("Purchasing Agent", 24.0),
+    ;
+
+    /** Managers work from your Headquarters. */
+    val atHeadquarters get() = this == HR_MANAGER || this == PURCHASING_AGENT
 }
 
 enum class ItemFn { CASH_REGISTER, DISPLAY, EQUIPMENT, LOCKER, SHOWER, BOARD, DECOR, SPEAKER, SEATING, CLEANING, BED, HOME_FRIDGE, TV, SOFA, OFFICE }
@@ -62,6 +71,10 @@ data class BusinessTypeDef(
     val color: Int,
     val emoji: String,
     val wealthSensitive: Boolean = false,
+    /** Warehouses and headquarters: no customers, no register. */
+    val facility: Boolean = false,
+    /** Building kind this type opens in: RETAIL, WAREHOUSE or OFFICE. */
+    val buildingKind: String = "RETAIL",
 ) {
     val sources: Set<Source> get() = products.mapNotNull { Catalog.product(it.first)?.source }.filter { it != Source.NONE }.toSet()
     val primaryProducts: List<String> get() = products.take(3).mapNotNull { Catalog.product(it.first)?.name }
@@ -394,6 +407,25 @@ object Catalog {
             parts = listOf(box(0f, .1f, .72f, 2f, .9f, .78f, WOOD_L), box(.05f, .15f, 0f, .15f, .85f, .72f, DARK), box(1.85f, .15f, 0f, 1.95f, .85f, .72f, DARK), box(.7f, .3f, .78f, 1.3f, .4f, 1.15f, DARK))),
         FurnitureDef("pallet", "Pallet", 100.0, 1, 1, ItemFn.OFFICE,
             parts = listOf(box(.05f, .05f, 0f, .95f, .95f, .15f, WOOD_L), box(.1f, .1f, .15f, .9f, .9f, .8f, c(0xFFC8A165)), box(.15f, .15f, .8f, .85f, .85f, 1.3f, c(0xFFC8A165)))),
+        // warehouse & headquarters
+        FurnitureDef("pallet_rack", "Pallet Rack", 1800.0, 2, 1, ItemFn.DISPLAY, setOf("pallet_rack"), displayUnits = WAREHOUSE_BOXES_PER_RACK,
+            description = "Heavy steel racking. Stores $WAREHOUSE_BOXES_PER_RACK boxes of any product in a warehouse.",
+            parts = listOf(
+                box(0f, .1f, 0f, .1f, .9f, 2.6f, c(0xFF1F5FAD)), box(1.9f, .1f, 0f, 2f, .9f, 2.6f, c(0xFF1F5FAD)),
+                box(0f, .1f, .9f, 2f, .9f, .98f, c(0xFFF2994A)), box(0f, .1f, 1.8f, 2f, .9f, 1.88f, c(0xFFF2994A)),
+                box(.15f, .2f, .1f, .95f, .85f, .7f, c(0xFFC8A165)), box(1.05f, .2f, .1f, 1.85f, .85f, .75f, c(0xFFC8A165)),
+                box(.2f, .2f, .98f, 1.0f, .85f, 1.55f, c(0xFFC8A165)), box(1.1f, .2f, 1.88f, 1.8f, .85f, 2.4f, c(0xFFC8A165)),
+            )),
+        FurnitureDef("office_desk", "Office Desk", 650.0, 2, 1, ItemFn.OFFICE, setOf("desk"), decor = 1,
+            description = "Desk with a computer. Each manager at your Headquarters needs one.",
+            parts = listOf(box(0f, .1f, .72f, 2f, .9f, .78f, WOOD_L), box(.05f, .15f, 0f, .15f, .85f, .72f, DARK), box(1.85f, .15f, 0f, 1.95f, .85f, .72f, DARK),
+                box(.7f, .25f, .78f, 1.3f, .32f, 1.18f, DARK), box(.75f, .32f, .82f, 1.25f, .34f, 1.14f, c(0xFF56CCF2)), box(.6f, .95f, 0f, 1.4f, 1f, .5f, c(0xFF333333)))),
+        FurnitureDef("filing_cabinet", "Filing Cabinet", 250.0, 1, 1, ItemFn.DECOR, decor = 1,
+            description = "Keeps the paperwork in order.",
+            parts = listOf(box(.15f, .1f, 0f, .85f, .8f, 1.3f, c(0xFF9AA3AD)), box(.2f, .8f, .35f, .8f, .82f, .45f, DARK), box(.2f, .8f, .85f, .8f, .82f, .95f, DARK))),
+        FurnitureDef("water_cooler", "Water Cooler", 180.0, 1, 1, ItemFn.DECOR, decor = 2,
+            description = "Staff love a water cooler.",
+            parts = listOf(box(.3f, .3f, 0f, .7f, .7f, 1.0f, WHITE), box(.33f, .33f, 1.0f, .67f, .67f, 1.45f, c(0xFF8EC5E8)))),
     )
 
     private val furnitureById = furniture.associateBy { it.id }
@@ -493,7 +525,15 @@ object Catalog {
         BusinessTypeDef("jewelry", "Jewelry Store", listOf("ring" to .12, "necklace" to .12, "watch" to .07),
             listOf(REG, Req("jewelry", "Jewelry Case")), StaffRole.CUSTOMER_SERVICE, true, 3.0, RETAIL, c(0xFFC9A227), "💎", wealthSensitive = true),
     )
-    private val typeById = businessTypes.associateBy { it.id }
+    /** Non-retail operations you can open in warehouses and offices. */
+    val facilityTypes: List<BusinessTypeDef> = listOf(
+        BusinessTypeDef("warehouse", "Warehouse", emptyList(), listOf(Req("pallet_rack", "Pallet Rack")), StaffRole.CLEANER, false, 0.0, FloatArray(24),
+            c(0xFF8D6E63), "📦", facility = true, buildingKind = "WAREHOUSE"),
+        BusinessTypeDef("hq", "Headquarters", emptyList(), listOf(Req("desk", "Office Desk")), StaffRole.HR_MANAGER, false, 0.0, FloatArray(24),
+            c(0xFF34495E), "🏢", facility = true, buildingKind = "OFFICE"),
+    )
+
+    private val typeById = (businessTypes + facilityTypes).associateBy { it.id }
     fun type(id: String): BusinessTypeDef = typeById[id] ?: businessTypes.first()
 
     // ---------------------------------------------------------------- courses
@@ -544,7 +584,7 @@ object Catalog {
         PlaceDef("essentials", "Essentials Appliances", PlaceKind.FURNITURE_STORE, "If you need it, we've got it.", c(0xFF2F80ED), "🛋",
             listOf("cash_register", "shelf", "drinks_fridge", "fresh_fridge", "freezer", "treadmill", "workout_bench", "weight_rack", "boxing_bag",
                 "gym_locker", "shower", "fitness_board", "bookshelf", "bench", "barstool", "neon_cactus", "neon_circle", "speaker_small",
-                "speaker_medium", "speaker_large", "cleaning_station", "wall_lamp")),
+                "speaker_medium", "speaker_large", "cleaning_station", "wall_lamp", "pallet_rack")),
         PlaceDef("primekitchen", "Prime Kitchen Supply", PlaceKind.FURNITURE_STORE, "Pro gear for food & beauty.", c(0xFFF2994A), "🍳",
             listOf("coffee_machine", "pastry_case", "grill", "fryer", "hair_chair", "hair_wash", "cash_register", "home_fridge", "bed", "tv", "table_set")),
         PlaceDef("lux", "Lux Interiors", PlaceKind.FURNITURE_STORE, "Make it beautiful.", c(0xFF9B51E0), "🪴",
@@ -560,6 +600,8 @@ object Catalog {
         PlaceDef("buzz", "Buzz Marketing Agency", PlaceKind.MARKETING, "Get noticed.", c(0xFFFFB300), "📣"),
         PlaceDef("hospital", "City Hospital", PlaceKind.HOSPITAL, "Get well soon.", c(0xFFE53935), "🏥"),
         PlaceDef("fuel", "Fuel Up", PlaceKind.GAS_STATION, "Fill her up.", c(0xFFF2C94C), "⛽"),
+        PlaceDef("officeplus", "OfficePlus Supply", PlaceKind.FURNITURE_STORE, "Racks, desks and everything in between.", c(0xFF1F5FAD), "🗄",
+            listOf("pallet_rack", "office_desk", "filing_cabinet", "water_cooler", "plant_large", "painting", "speaker_small", "wall_lamp", "cleaning_station", "bench")),
     )
     fun place(id: String) = places.first { it.id == id }
 

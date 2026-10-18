@@ -715,7 +715,7 @@ class GameEngine(context: Context?) {
         val mode = when {
             b.id == p.home -> InteriorMode.HOME
             s.businessAt(b.id) != null -> InteriorMode.BUSINESS
-            s.rentalFor(b.id) != null && b.kind == BKind.RETAIL -> InteriorMode.EMPTY
+            s.rentalFor(b.id) != null && b.kind != BKind.RESIDENTIAL -> InteriorMode.EMPTY
             s.rentalFor(b.id) != null && b.kind == BKind.RESIDENTIAL -> InteriorMode.HOME
             b.placeId != null -> InteriorMode.PLACE
             s.rivalBusinessAt(b.id) != null -> InteriorMode.RIVAL

@@ -80,6 +80,8 @@ import com.hustlecity.game.engine.buyVehicle
 import com.hustlecity.game.engine.cartSlots
 import com.hustlecity.game.engine.checkout
 import com.hustlecity.game.engine.checkoutOptions
+import com.hustlecity.game.engine.loadFromWarehouse
+import com.hustlecity.game.engine.vehicleNear
 import com.hustlecity.game.engine.eat
 import com.hustlecity.game.engine.refuel
 import com.hustlecity.game.engine.rentBuilding
@@ -137,6 +139,7 @@ fun PanelHost(e: GameEngine, panel: Panel) {
         Panel.Settings -> SettingsPanel(e)
         Panel.Help -> HelpPanel(e)
         Panel.Sleep -> SleepPanel(e)
+        is Panel.Warehouse -> WarehousePanel(e, panel.businessId)
     }
 }
 
@@ -189,7 +192,8 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
 @Composable
 private fun FlatbedBar(e: GameEngine, storeBuildingId: Int, cart: MutableList<CartLine>, unitLabel: String) {
     var showOptions by remember { mutableStateOf(false) }
-    val total = cart.sumOf { it.total }
+    val discount = com.hustlecity.game.engine.bulkDiscount(cart)
+    val total = cart.sumOf { it.total } * (1 - discount)
     Column(Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(6.dp)).background(HC.GlassDark)) {
         Row(Modifier.padding(horizontal = 8.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.padding(end = 8.dp)) {
@@ -212,7 +216,7 @@ private fun FlatbedBar(e: GameEngine, storeBuildingId: Int, cart: MutableList<Ca
                 }
             }
             Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(horizontal = 8.dp)) {
-                Text("Unpaid total", color = Color.White, fontSize = 10.sp)
+                Text(if (discount > 0) "Bulk discount −${(discount * 100).roundToInt()}%" else if (unitLabel == "boxes") "6+ boxes: 10% off" else "Unpaid total", color = if (discount > 0) HC.GreenLight else Color.White, fontSize = 10.sp)
                 Text(e.money(total), color = HC.Yellow, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
             HButton("Checkout", color = HC.Green, enabled = cart.isNotEmpty()) { showOptions = true }
@@ -446,6 +450,8 @@ private fun Recruiter(e: GameEngine, place: PlaceDef) {
                                     StaffRole.CLEANER -> "Keeps stores clean (+30% cleanliness per hour)."
                                     StaffRole.GYM_TRAINER -> "Required to serve gym customers."
                                     StaffRole.HAIRSTYLIST -> "Cuts and colors hair at hairdresser chairs."
+                                    StaffRole.HR_MANAGER -> "Works at your Headquarters: +10% staff satisfaction for up to 12 employees and hires replacements when someone quits."
+                                    StaffRole.PURCHASING_AGENT -> "Works at your Headquarters: restocks up to 4 stores every morning at 06:00, from your warehouse first."
                                 } + " Typical wage ~${e.money(role.baseWage)}/h.", style = HT.small, color = HC.InkSoft,
                             )
                         }
@@ -599,7 +605,7 @@ private fun StartBusiness(e: GameEngine, buildingId: Int) {
                         Text(" ${City.neighborhoods[b.neighborhood].name}", style = HT.small, color = HC.Ink)
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text("RETAIL BUILDING", style = HT.label, color = HC.InkSoft)
+                    Text("${b.kind.label.uppercase()} BUILDING", style = HT.label, color = HC.InkSoft)
                     Text(b.address, style = HT.title, color = HC.Ink)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.SquareFoot, null, tint = HC.Ink, modifier = Modifier.size(14.dp)); Text(" ${b.area} m² (${b.sizeClass})", style = HT.small, color = HC.Ink)
@@ -615,7 +621,12 @@ private fun StartBusiness(e: GameEngine, buildingId: Int) {
                     Text(" Check the business type to ensure you have access to all the inventory sources.", style = HT.small, color = HC.InkSoft)
                 }
                 LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(Catalog.businessTypes) { t ->
+                    val types = when (b.kind) {
+                        com.hustlecity.game.world.BKind.WAREHOUSE -> Catalog.facilityTypes.filter { it.buildingKind == "WAREHOUSE" }
+                        com.hustlecity.game.world.BKind.OFFICE -> Catalog.facilityTypes.filter { it.buildingKind == "OFFICE" }
+                        else -> Catalog.businessTypes
+                    }
+                    items(types) { t ->
                         val sel = typeId == t.id
                         val importLocked = t.sources.contains(Source.IMPORT) && Catalog.COURSE_IMPORT !in e.state.player.courses
                         Column(
@@ -784,5 +795,35 @@ fun SleepPanel(e: GameEngine) {
         }
         val untilSeven = ((7 * 60 - (s.minute % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY).toInt()
         HButton("Until 07:00 (${untilSeven / 60}h ${untilSeven % 60}m)", Modifier.padding(top = 8.dp), color = HC.Purple) { e.sleepMinutes(untilSeven) }
+    }
+}
+
+// ------------------------------------------------------------------ warehouse loading
+
+@Composable
+private fun WarehousePanel(e: GameEngine, businessId: Int) {
+    val w = e.state.business(businessId) ?: return
+    val v = e.vehicleNear(w.buildingId)
+    Modal("${w.name} — Load vehicle", { close(e) }, maxWidth = 640.dp) {
+        Text(
+            if (v == null) "Park a vehicle within 45 m of the entrance to load boxes."
+            else "${v.def.name}: ${v.cargo.size}/${v.def.cargo} slots used. Tap a product to load one box.",
+            style = HT.body, color = if (v == null) HC.Red else HC.InkSoft,
+        )
+        val stock = w.stock.filter { it.value > 0 }.toList()
+        if (stock.isEmpty()) Text("The warehouse is empty. Buy stock at a wholesaler and deliver it here or unload it from your vehicle.", style = HT.body, color = HC.InkSoft, modifier = Modifier.padding(top = 8.dp))
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            for ((pid, qty) in stock) {
+                val p = Catalog.product(pid) ?: continue
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color.White).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ProductThumb(p.color, 36.dp)
+                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                        Text(p.name, style = HT.bodyBold, color = HC.Ink)
+                        Text("$qty units · ${(qty + p.unitsPerBox - 1) / p.unitsPerBox} boxes", style = HT.small, color = HC.InkSoft)
+                    }
+                    HButton("Load box", small = true, enabled = v != null && e.cargoSlotsFree(v) > 0) { e.loadFromWarehouse(w, pid) }
+                }
+            }
+        }
     }
 }

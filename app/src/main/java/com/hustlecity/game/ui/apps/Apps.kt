@@ -476,6 +476,8 @@ fun RealtyApp(e: GameEngine) {
             if (tab == 0) {
                 Chip("Retail", kind == BKind.RETAIL, HC.Orange) { kind = BKind.RETAIL }
                 Chip("Residential", kind == BKind.RESIDENTIAL, HC.Orange) { kind = BKind.RESIDENTIAL }
+                Chip("Warehouse", kind == BKind.WAREHOUSE, HC.Orange) { kind = BKind.WAREHOUSE }
+                Chip("Office", kind == BKind.OFFICE, HC.Orange) { kind = BKind.OFFICE }
                 Spacer(Modifier.width(16.dp))
                 Chip("Cheapest", sort == 0, HC.Teal) { sort = 0 }
                 Chip("Best traffic", sort == 1, HC.Teal) { sort = 1 }
@@ -506,8 +508,12 @@ fun RealtyApp(e: GameEngine) {
                             }
                             Column(Modifier.weight(1f)) {
                                 Text("${b.area} m² (${b.sizeClass})", style = HT.small, color = HC.Ink)
-                                if (kind == BKind.RETAIL) Text("Traffic ${(b.traffic * 100).roundToInt()}% · ${b.customerLimit} cust/h", style = HT.small, color = HC.InkSoft)
-                                else Text("${b.parking} parking spots", style = HT.small, color = HC.InkSoft)
+                                when (kind) {
+                                    BKind.RETAIL -> Text("Traffic ${(b.traffic * 100).roundToInt()}% · ${b.customerLimit} cust/h", style = HT.small, color = HC.InkSoft)
+                                    BKind.WAREHOUSE -> Text("Room for ~${(b.gridW * b.gridD) / 4} pallet racks", style = HT.small, color = HC.InkSoft)
+                                    BKind.OFFICE -> Text("Room for ~${(b.gridW * b.gridD) / 5} desks", style = HT.small, color = HC.InkSoft)
+                                    else -> Text("${b.parking} parking spots", style = HT.small, color = HC.InkSoft)
+                                }
                             }
                             Column(Modifier.weight(.8f)) {
                                 Text("${e.money(b.baseRent)}/mo", style = HT.bodyBold, color = HC.Ink)
