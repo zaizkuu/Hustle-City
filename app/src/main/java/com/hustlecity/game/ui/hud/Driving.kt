@@ -76,8 +76,8 @@ fun BoxScope.DrivingControls(e: GameEngine) {
         Pedals(e, Modifier.align(if (left) Alignment.BottomStart else Alignment.BottomEnd).padding(end = if (left) 0.dp else 72.dp, start = if (left) 72.dp else 0.dp, bottom = 12.dp))
     } else {
         Joystick(e, Modifier.align(if (left) Alignment.BottomEnd else Alignment.BottomStart).padding(18.dp))
-        Pedal("BRAKE\nREVERSE", HC.RedDark, 86.dp, 86.dp, { e.input.brake = it },
-            Modifier.align(if (left) Alignment.BottomStart else Alignment.BottomEnd).padding(end = if (left) 0.dp else 76.dp, start = if (left) 76.dp else 0.dp, bottom = 18.dp))
+        Pedal("BRAKE", HC.Red, brake = true, set = { e.input.brake = it },
+            modifier = Modifier.align(if (left) Alignment.BottomStart else Alignment.BottomEnd).padding(end = if (left) 0.dp else 76.dp, start = if (left) 76.dp else 0.dp, bottom = 12.dp))
     }
     Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 6.dp)) {
@@ -96,42 +96,34 @@ private fun Dashboard(e: GameEngine) {
     val kmh = abs(e.carSpeed) * 3.6f
     val maxKmh = (v.def.maxSpeed * 3.6f / 10f).roundToInt() * 10f + 10f
     val gear = when { e.carSpeed < -.3f -> "R"; abs(e.carSpeed) < .3f -> "N"; else -> "D" }
+    // one compact strip: dial, speed and gear, fuel and condition
     Row(
-        Modifier.shadow(5.dp, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp)).background(Color(0xE61B1F25)).padding(horizontal = 10.dp, vertical = 6.dp),
+        Modifier.shadow(4.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp)).background(Color(0xE61B1F25)).padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // speedometer dial
-        Box(Modifier.size(width = 72.dp, height = 44.dp), contentAlignment = Alignment.BottomCenter) {
-            Canvas(Modifier.fillMaxSize()) {
-                val r = size.width * .46f
-                val cx = size.width / 2; val cy = size.height * .92f
-                drawArc(Color(0x33FFFFFF), 180f, 180f, false, Offset(cx - r, cy - r), Size(r * 2, r * 2), style = Stroke(6.dp.toPx(), cap = StrokeCap.Round))
-                val frac = (kmh / maxKmh).coerceIn(0f, 1f)
-                drawArc(if (frac > .85f) Color(0xFFEB5757) else Color(0xFF6FCF97), 180f, 180f * frac, false, Offset(cx - r, cy - r), Size(r * 2, r * 2), style = Stroke(6.dp.toPx(), cap = StrokeCap.Round))
-                val a = Math.toRadians(180.0 + 180.0 * frac)
-                drawLine(Color.White, Offset(cx, cy), Offset(cx + cos(a).toFloat() * r * .82f, cy + sin(a).toFloat() * r * .82f), 2.5.dp.toPx(), StrokeCap.Round)
-                drawCircle(Color.White, 3.dp.toPx(), Offset(cx, cy))
-            }
+        Canvas(Modifier.size(width = 40.dp, height = 24.dp)) {
+            val r = size.width * .44f
+            val cx = size.width / 2; val cy = size.height * .95f
+            drawArc(Color(0x33FFFFFF), 180f, 180f, false, Offset(cx - r, cy - r), Size(r * 2, r * 2), style = Stroke(3.5.dp.toPx(), cap = StrokeCap.Round))
+            val frac = (kmh / maxKmh).coerceIn(0f, 1f)
+            drawArc(if (frac > .85f) Color(0xFFEB5757) else Color(0xFF6FCF97), 180f, 180f * frac, false, Offset(cx - r, cy - r), Size(r * 2, r * 2), style = Stroke(3.5.dp.toPx(), cap = StrokeCap.Round))
+            val a = Math.toRadians(180.0 + 180.0 * frac)
+            drawLine(Color.White, Offset(cx, cy), Offset(cx + cos(a).toFloat() * r * .8f, cy + sin(a).toFloat() * r * .8f), 1.8.dp.toPx(), StrokeCap.Round)
+        }
+        Text("${kmh.roundToInt()}", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp))
+        Text(" km/h", color = Color(0xAAFFFFFF), fontSize = 8.sp)
+        Box(Modifier.padding(start = 6.dp).clip(RoundedCornerShape(3.dp)).background(if (gear == "R") HC.Red else Color(0x33FFFFFF)).padding(horizontal = 5.dp)) {
+            Text(gear, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
         Column(Modifier.padding(start = 8.dp)) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text("${kmh.roundToInt()}", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text(" km/h", color = Color(0xAAFFFFFF), fontSize = 9.sp, modifier = Modifier.padding(bottom = 3.dp))
-                Spacer(Modifier.width(8.dp))
-                Box(Modifier.clip(RoundedCornerShape(3.dp)).background(if (gear == "R") HC.Red else Color(0x33FFFFFF)).padding(horizontal = 6.dp, vertical = 1.dp)) {
-                    Text(gear, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-            Text(v.def.name.uppercase(), color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("⛽", fontSize = 9.sp)
-                com.hustlecity.game.ui.Bar(v.fuel.toFloat(), if (v.fuel < .15) HC.Red else HC.Orange, Modifier.width(54.dp).padding(start = 3.dp), height = 4.dp)
+                Text("⛽", fontSize = 8.sp)
+                com.hustlecity.game.ui.Bar(v.fuel.toFloat(), if (v.fuel < .15) HC.Red else HC.Orange, Modifier.width(36.dp).padding(start = 2.dp), height = 3.dp)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("🔧", fontSize = 9.sp)
-                com.hustlecity.game.ui.Bar(v.condition.toFloat(), if (v.condition < .3) HC.Red else HC.GreenLight, Modifier.width(54.dp).padding(start = 3.dp), height = 4.dp)
+                Text("🔧", fontSize = 8.sp)
+                com.hustlecity.game.ui.Bar(v.condition.toFloat(), if (v.condition < .3) HC.Red else HC.GreenLight, Modifier.width(36.dp).padding(start = 2.dp), height = 3.dp)
             }
-            Text("📦 ${v.cargo.size}/${v.def.cargo}", color = Color(0xCCFFFFFF), fontSize = 9.sp)
         }
     }
 }
@@ -185,39 +177,83 @@ private fun SteeringWheel(e: GameEngine, modifier: Modifier) {
 
 @Composable
 private fun Pedals(e: GameEngine, modifier: Modifier) {
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
-        Pedal("BRAKE\n(hold to\nreverse)", HC.RedDark, 66.dp, 92.dp, { e.input.brake = it })
-        Pedal("GAS", HC.Green, 74.dp, 118.dp, { e.input.gas = it })
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Bottom) {
+        Pedal("BRAKE", HC.Red, brake = true, set = { e.input.brake = it })
+        Pedal("GAS", HC.GreenLight, brake = false, set = { e.input.gas = it })
     }
 }
 
-/** A hold-to-press pedal. */
+/**
+ * A car pedal you hold down: a ribbed rubber pad on a steel frame. The brake hangs from an arm (wide, square pad),
+ * the gas pedal is the tall, narrow one hinged at the floor. It tips back and glows while pressed.
+ */
 @Composable
-private fun Pedal(label: String, color: Color, w: androidx.compose.ui.unit.Dp, h: androidx.compose.ui.unit.Dp, set: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+private fun Pedal(label: String, glow: Color, brake: Boolean, set: (Boolean) -> Unit, modifier: Modifier = Modifier) {
     var pressed by remember { mutableStateOf(false) }
-    Box(
-        modifier.size(w, h).clip(RoundedCornerShape(14.dp))
-            .background(Brush.verticalGradient(listOf(color.copy(alpha = if (pressed) 1f else .8f), color.copy(alpha = if (pressed) .85f else .55f))))
-            .border(2.dp, Color.White.copy(alpha = if (pressed) .9f else .5f), RoundedCornerShape(14.dp))
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    try {
-                        awaitFirstDown().consume()
-                        pressed = true
-                        set(true)
-                        while (true) {
-                            val ev = awaitPointerEvent()
-                            if (ev.changes.none { it.pressed }) break
-                        }
-                    } finally {
-                        pressed = false
-                        set(false)
+    val push by animateFloatAsState(if (pressed) 1f else 0f, tween(70), label = "pedal")
+    val w = if (brake) 64.dp else 52.dp
+    val h = if (brake) 92.dp else 104.dp
+    Column(
+        modifier.pointerInput(Unit) {
+            awaitEachGesture {
+                try {
+                    awaitFirstDown().consume()
+                    pressed = true
+                    set(true)
+                    while (true) {
+                        val ev = awaitPointerEvent()
+                        if (ev.changes.none { it.pressed }) break
                     }
+                } finally {
+                    pressed = false
+                    set(false)
                 }
-            },
-        contentAlignment = Alignment.Center,
+            }
+        },
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(label, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 12.sp)
+        Canvas(Modifier.size(w, h)) {
+            val W = size.width; val H = size.height
+            val steel = Color(0xFFB8C0CA); val steelDark = Color(0xFF6E7681)
+            val rubber = Color(0xFF26292E); val rib = Color(0xFF3B4047)
+            if (brake) {
+                // arm from the top down to the pad
+                drawLine(steelDark, Offset(W * .5f, 0f), Offset(W * .5f, H * .3f + push * 6.dp.toPx()), 7.dp.toPx(), StrokeCap.Round)
+                drawLine(steel, Offset(W * .5f - 1.dp.toPx(), 0f), Offset(W * .5f - 1.dp.toPx(), H * .3f + push * 6.dp.toPx()), 2.dp.toPx(), StrokeCap.Round)
+            } else {
+                // floor hinge
+                drawRoundRect(steelDark, Offset(W * .2f, H - 7.dp.toPx()), Size(W * .6f, 7.dp.toPx()), CornerRadius(3.dp.toPx()))
+            }
+            // the pad: a trapezoid seen in perspective, shorter while pushed down
+            val padTop = if (brake) H * .28f + push * 6.dp.toPx() else push * 10.dp.toPx()
+            val padBottom = if (brake) H - push * 2.dp.toPx() else H - 6.dp.toPx()
+            val inset = (if (brake) .06f else .14f) * W + push * 2.dp.toPx()
+            val outline = Path().apply {
+                moveTo(inset, padTop); lineTo(W - inset, padTop)
+                lineTo(W - 1.dp.toPx(), padBottom); lineTo(1.dp.toPx(), padBottom); close()
+            }
+            if (push > 0f) drawPath(outline, glow.copy(alpha = .55f * push), style = Stroke(8.dp.toPx(), join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            drawPath(outline, steel)
+            val pad = Path().apply {
+                val m = 3.dp.toPx()
+                moveTo(inset + m, padTop + m); lineTo(W - inset - m, padTop + m)
+                lineTo(W - 1.dp.toPx() - m, padBottom - m); lineTo(1.dp.toPx() + m, padBottom - m); close()
+            }
+            drawPath(pad, Brush.verticalGradient(listOf(rubber, Color(0xFF1A1C20)), padTop, padBottom))
+            // grip ribs
+            val ribs = if (brake) 6 else 9
+            for (k in 1..ribs) {
+                val t = k / (ribs + 1f)
+                val y = padTop + (padBottom - padTop) * t
+                val l = inset + (1.dp.toPx() - inset) * t + 7.dp.toPx()
+                val r = (W - inset) + ((W - 1.dp.toPx()) - (W - inset)) * t - 7.dp.toPx()
+                drawLine(rib, Offset(l, y), Offset(r, y), 2.5.dp.toPx(), StrokeCap.Round)
+            }
+            // a highlight along the top edge of the frame
+            drawLine(Color.White.copy(alpha = .5f - .3f * push), Offset(inset + 2.dp.toPx(), padTop + 1.dp.toPx()), Offset(W - inset - 2.dp.toPx(), padTop + 1.dp.toPx()), 1.dp.toPx())
+        }
+        Text(label, color = if (pressed) glow else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(3.dp)).background(Color(0x99000000)).padding(horizontal = 5.dp, vertical = 1.dp))
     }
 }
 
