@@ -126,6 +126,7 @@ class GameEngine(context: Context?) {
     private var fpsAcc = 0f
     private var fpsFrames = 0
     var crashCooldown = 0f
+    private var cartWarn = 0f
 
     // interaction hints, refreshed each frame
     var nearDoor: Building? = null
@@ -448,6 +449,7 @@ class GameEngine(context: Context?) {
         fpsAcc += dtIn; fpsFrames++
         if (fpsAcc >= .5f) { fps = fpsFrames / fpsAcc; fpsAcc = 0f; fpsFrames = 0 }
         if (crashCooldown > 0) crashCooldown -= dt
+        if (cartWarn > 0) cartWarn -= dt
 
         val job = skip
         if (job != null) {
@@ -603,6 +605,7 @@ class GameEngine(context: Context?) {
         val p = state.player
         p.driving = -1
         p.workingAt = -1
+        if (p.carrier == Carrier.CART) { p.carrier = Carrier.HANDS; p.cartStore = -1 }
         p.x = hospital.doorX; p.y = hospital.doorY + 1.5f
         carSpeed = 0f
         spend(400.0, "Medical", allowDebt = true, silent = true)
@@ -709,7 +712,8 @@ class GameEngine(context: Context?) {
                 city.collide(nx, ny, .45f, tmp)
                 var px = tmp[0]; var py = tmp[1]
                 if (traffic.bump(px, py, .45f, tmp)) { px = tmp[0]; py = tmp[1] }
-                p.x = px; p.y = py
+                if (cartAllows(px, py) || !cartAllows(p.x, p.y)) { p.x = px; p.y = py }
+                else if (cartWarn <= 0f) { toast("Store carts have to stay in the parking lot", ToastKind.INFO, "hand_truck"); cartWarn = 4f }
                 p.heading = atan2(wx, -wy)
                 walkPhase += dt * speed * 1.7f
                 walkAmount = mag
@@ -890,6 +894,8 @@ class GameEngine(context: Context?) {
     fun enterVehicle(v: OwnedVehicle) {
         val p = state.player
         if (p.inBuilding >= 0) return
+        // what you carry goes into the trunk first (or you can't get in)
+        if (!loadForDriving(v)) return
         resetInput()
         Audio.play(Sfx.CAR_DOOR)
         tip("drive", "Driving", if (settings.carControls == 2) "Hold ◀ and ▶ to steer, ▲ to accelerate and ▼ to brake (keep holding ▼ to reverse). Keyboard arrow keys work too. PARK pulls over to the curb and gets you out. Set a destination on the map and follow the blue GPS line."
@@ -900,13 +906,6 @@ class GameEngine(context: Context?) {
         carSpeed = 0f
         objectivesWereOpen = ui.objectivesOpen
         ui.objectivesOpen = false
-        // move hand-carried goods into the trunk
-        val free = v.def.cargo - v.cargo.size
-        if (p.hand.isNotEmpty() && free > 0) {
-            val n = minOf(free, p.hand.size)
-            v.cargo += p.hand.take(n)
-            repeat(n) { p.hand.removeAt(0) }
-        }
         bump()
     }
 
@@ -960,6 +959,7 @@ class GameEngine(context: Context?) {
         if (p.driving >= 0) { toast("Park your vehicle first"); return }
         ui.selected = -1
         if (b.kind == BKind.GAS) { ui.panel = Panel.Place(b.id, b.placeId ?: "fuel"); bump(); return }
+        if (p.carrier == Carrier.CART && p.cartStore != b.id && !leaveCart("You can't go in")) return
         val mode = when {
             b.id == p.home -> InteriorMode.HOME
             s.businessAt(b.id) != null -> InteriorMode.BUSINESS
@@ -994,7 +994,10 @@ class GameEngine(context: Context?) {
         resetInput()
         when (mode) {
             InteriorMode.EMPTY -> ui.panel = Panel.StartBusiness(b.id)
-            InteriorMode.PLACE -> ui.panel = Panel.Place(b.id, b.placeId!!)
+            // furniture stores are walk-in: browse the displays, pick things up and pay at the register
+            InteriorMode.PLACE -> if (Catalog.place(b.placeId!!).kind == PlaceKind.FURNITURE_STORE) {
+                tip("walk_in", "Shopping", "Walk around and tap anything on display to look at it, then pick it up. Your hands hold one box: grab a free cart by the entrance to carry 8. Pay at the register, push your cart out to your vehicle and load it with Manage storage. Can't find something? Use the store directory.")
+            } else ui.panel = Panel.Place(b.id, b.placeId!!)
             InteriorMode.RIVAL -> ui.panel = Panel.RivalShop(b.id)
             else -> {}
         }
@@ -1004,6 +1007,7 @@ class GameEngine(context: Context?) {
     private fun exitBuildingInternal() {
         val p = state.player
         resetInput()
+        dropUnpaid()
         p.workingAt = -1
         p.inBuilding = -1
         interior = null
@@ -1014,6 +1018,11 @@ class GameEngine(context: Context?) {
     fun exitBuilding() {
         val p = state.player
         val b = city.building(p.inBuilding)
+        if (unpaidItems().isNotEmpty()) {
+            toast("Pay for your items at the register first, or put them back (${money(unpaidTotal())} unpaid)", ToastKind.BAD, "receipt")
+            Audio.play(Sfx.ERROR)
+            return
+        }
         Audio.play(Sfx.DOOR)
         exitBuildingInternal()
         if (b != null) { p.x = b.doorX; p.y = b.doorY + if (b.facesNorth) -1f else 1f }

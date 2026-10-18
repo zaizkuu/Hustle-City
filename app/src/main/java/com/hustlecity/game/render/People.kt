@@ -25,7 +25,13 @@ class PersonPainter(private val scene: Scene3D) {
         val PANTS = intArrayOf(c(0xFF34383F), c(0xFF1F3A5F), c(0xFF4A3B2A), c(0xFF5B6770), c(0xFF2E4A3A), c(0xFF22252A), c(0xFF6B4F3A))
         val HAIR = intArrayOf(c(0xFF2B1D14), c(0xFF4A3220), c(0xFF0F0F10), c(0xFF8A5A2B), c(0xFFD9B26A), c(0xFF7A7A7A), c(0xFFA0522D))
         val UMBRELLAS = intArrayOf(c(0xFF1F2933), c(0xFFC0392B), c(0xFF2F80ED), c(0xFFF2C94C), c(0xFF27AE60), c(0xFF9B51E0))
-        private const val MAX = 16
+        private const val MAX = 40
+        private val CARD = c(0xFFC8A165)
+        private val CARD_DARK = c(0xFFB38A55)
+        private val TIRE = c(0xFF1C1E22)
+        private val STEEL = c(0xFF9AA3AD)
+        private val TRUCK_RED = c(0xFFD0392B)
+        private val CART_BLUE = c(0xFF2F80ED)
     }
 
     // parts: forward offset, right offset, z0, z1, length (forward), width (right), color, draw-last flag
@@ -48,11 +54,13 @@ class PersonPainter(private val scene: Scene3D) {
      * @param z height of the floor or seat the person stands/sits on (0 for the ground)
      * @param moving 0..1 how much the limbs swing (walking speed)
      * @param umbrella umbrella color, or 0 for none
+     * @param carry 0 nothing, 1 a box in both arms, 2 pushing a hand truck, 3 pushing a flatbed cart
+     * @param load boxes on the hand truck or cart
      */
     fun draw(
         x: Float, y: Float, z: Float, heading: Float, phase: Float, moving: Float,
         shirt: Int, pants: Int, skin: Int, hair: Int, scale: Float = 1f, pose: Int = Pose.STAND,
-        apron: Int = 0, umbrella: Int = 0, alpha: Float = 1f,
+        apron: Int = 0, umbrella: Int = 0, alpha: Float = 1f, carry: Int = 0, load: Int = 0,
     ) {
         n = 0
         val s = scale
@@ -82,7 +90,9 @@ class PersonPainter(private val scene: Scene3D) {
                 if (lod) {
                     part(0f, 0f, z, z + .82f * s, .16f * s, .3f * s, pants)
                 } else legs(z + bob, s, pants, swing * .17f * s)
-                upperBody(0f, z + .82f * s + bob, s, shirt, skin, hair, apron, swing, phase, false, lod)
+                val holding = carry >= 2 || (carry == 1 && load > 0)
+                upperBody(0f, z + .82f * s + bob, s, shirt, skin, hair, apron, swing, phase, false, lod, reach = holding)
+                if (holding) carried(z, z + .82f * s + bob, s, carry, load)
             }
         }
         if (umbrella != 0 && pose == Pose.STAND) {
@@ -96,6 +106,42 @@ class PersonPainter(private val scene: Scene3D) {
 
     private fun proj() = scene.proj
 
+    /** A box held at the chest, or a hand truck / flatbed cart pushed in front with its boxes stacked on it. */
+    private fun carried(floor: Float, chest: Float, s: Float, carry: Int, load: Int) {
+        when (carry) {
+            1 -> part(.42f * s, 0f, chest + .18f * s, chest + .6f * s, .42f * s, .44f * s, CARD, last = false)
+            2 -> {
+                for (side in -1..1 step 2) {
+                    part(.74f * s, side * .25f * s, floor, floor + .27f * s, .27f * s, .07f * s, TIRE)
+                    part(.62f * s, side * .2f * s, floor + .05f * s, floor + 1.25f * s, .05f * s, .05f * s, TRUCK_RED)
+                }
+                part(.74f * s, 0f, floor + .1f * s, floor + .16f * s, .05f * s, .5f * s, STEEL)
+                part(.6f * s, 0f, floor + 1.2f * s, floor + 1.27f * s, .07f * s, .5f * s, c(0xFF2E3238))
+                part(.86f * s, 0f, floor, floor + .04f * s, .36f * s, .46f * s, STEEL)
+                for (i in 0 until load.coerceAtMost(4)) {
+                    val z0 = floor + .04f * s + i * .29f * s
+                    part(.86f * s, 0f, z0, z0 + .27f * s, .34f * s, .4f * s, if (i % 2 == 0) CARD else CARD_DARK)
+                }
+            }
+            3 -> {
+                part(1.06f * s, 0f, floor + .2f * s, floor + .28f * s, 1.1f * s, .62f * s, c(0xFF5B6770))
+                for (side in -1..1 step 2) {
+                    part(.62f * s, side * .24f * s, floor, floor + .2f * s, .16f * s, .07f * s, TIRE)
+                    part(1.5f * s, side * .24f * s, floor, floor + .2f * s, .16f * s, .07f * s, TIRE)
+                    part(.5f * s, side * .27f * s, floor + .28f * s, floor + 1.12f * s, .05f * s, .05f * s, CART_BLUE)
+                }
+                part(.5f * s, 0f, floor + 1.08f * s, floor + 1.14f * s, .06f * s, .6f * s, CART_BLUE)
+                for (i in 0 until load.coerceAtMost(8)) {
+                    val layer = i / 4; val slot = i % 4
+                    val f = if (slot < 2) .8f else 1.32f
+                    val r = if (slot % 2 == 0) -.15f else .15f
+                    val z0 = floor + .28f * s + layer * .31f * s
+                    part(f * s, r * s, z0, z0 + .29f * s, .44f * s, .28f * s, if ((slot + layer) % 2 == 0) CARD else CARD_DARK)
+                }
+            }
+        }
+    }
+
     private fun legs(z: Float, s: Float, pants: Int, swing: Float) {
         part(swing, -.09f * s, z, z + .82f * s, .15f * s, .13f * s, pants)
         part(-swing, .09f * s, z, z + .82f * s, .15f * s, .13f * s, pants)
@@ -104,10 +150,17 @@ class PersonPainter(private val scene: Scene3D) {
         part(-swing + .03f * s, .09f * s, z, z + .07f * s, .2f * s, .14f * s, c(0xFF1C1C1E))
     }
 
-    private fun upperBody(f: Float, z: Float, s: Float, shirt: Int, skin: Int, hair: Int, apron: Int, swing: Float, phase: Float, armsUp: Boolean, lod: Boolean = false) {
+    private fun upperBody(f: Float, z: Float, s: Float, shirt: Int, skin: Int, hair: Int, apron: Int, swing: Float, phase: Float, armsUp: Boolean, lod: Boolean = false, reach: Boolean = false) {
         part(f, 0f, z, z + .6f * s, .22f * s, .4f * s, shirt, if (apron != 0) apron else shirt)
         if (!lod) {
-            if (armsUp) {
+            if (reach) {
+                // arms held out in front: holding a box or the handle of a hand truck or cart
+                for (side in -1..1 step 2) {
+                    part(f + .02f * s, side * .26f * s, z + .3f * s, z + .58f * s, .11f * s, .1f * s, shirt)
+                    part(f + .2f * s, side * .25f * s, z + .28f * s, z + .38f * s, .34f * s, .09f * s, shirt)
+                    part(f + .41f * s, side * .25f * s, z + .27f * s, z + .37f * s, .09f * s, .09f * s, skin)
+                }
+            } else if (armsUp) {
                 val a = sin(phase * 1.6f) * .12f * s
                 part(f, -.26f * s, z + .45f * s + a, z + 1.0f * s + a, .1f * s, .1f * s, shirt)
                 part(f, .26f * s, z + .45f * s - a, z + 1.0f * s - a, .1f * s, .1f * s, shirt)

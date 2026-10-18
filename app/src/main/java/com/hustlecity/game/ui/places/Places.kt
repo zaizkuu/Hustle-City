@@ -73,12 +73,6 @@ import com.hustlecity.game.engine.BizCalc
 import com.hustlecity.game.engine.CartLine
 import com.hustlecity.game.engine.Confirm
 import com.hustlecity.game.engine.GameEngine
-import com.hustlecity.game.ui.EmptyNote
-import com.hustlecity.game.engine.unloadDestination
-import com.hustlecity.game.engine.unloadInto
-import com.hustlecity.game.engine.stowInTrunk
-import com.hustlecity.game.engine.sellFromTrunk
-import com.hustlecity.game.engine.takeFromTrunk
 import com.hustlecity.game.engine.Panel
 import com.hustlecity.game.engine.Screen
 import com.hustlecity.game.engine.buyBuilding
@@ -107,7 +101,6 @@ import com.hustlecity.game.ui.CardTitle
 import com.hustlecity.game.ui.Chip
 import com.hustlecity.game.ui.Dot
 import com.hustlecity.game.ui.HButton
-import com.hustlecity.game.ui.ItemThumb
 import com.hustlecity.game.ui.KeyValue
 import com.hustlecity.game.ui.ProductThumb
 import com.hustlecity.game.ui.Stepper
@@ -120,7 +113,8 @@ import com.hustlecity.game.world.City
 import com.hustlecity.game.world.dist
 import kotlin.math.roundToInt
 
-private const val FLATBED = 8
+/** Most boxes one wholesale order can hold. */
+private const val ORDER_MAX = 24
 
 @Composable
 fun PanelHost(e: GameEngine, panel: Panel) {
@@ -129,7 +123,7 @@ fun PanelHost(e: GameEngine, panel: Panel) {
             val b = e.city.building(panel.buildingId) ?: return
             val place = Catalog.place(panel.placeId)
             when (place.kind) {
-                PlaceKind.FURNITURE_STORE -> FurnitureStore(e, b.id, place)
+                PlaceKind.FURNITURE_STORE -> StoreDirectory(e, b.id, place)
                 PlaceKind.WHOLESALER, PlaceKind.IMPORTER -> Wholesale(e, b.id, place)
                 PlaceKind.CAR_DEALER -> Dealer(e, b.id, place)
                 PlaceKind.GAS_STATION -> GasStation(e, b.id, place)
@@ -147,7 +141,8 @@ fun PanelHost(e: GameEngine, panel: Panel) {
         Panel.Help -> HelpPanel(e)
         Panel.Sleep -> SleepPanel(e)
         is Panel.Warehouse -> WarehousePanel(e, panel.businessId)
-        is Panel.Trunk -> TrunkPanel(e, panel.vehicleId)
+        is Panel.Trunk -> ManageStoragePanel(e, panel.vehicleId)
+        is Panel.ShopDeliver -> ShopDeliverPanel(e, panel.buildingId)
     }
 }
 
@@ -198,17 +193,17 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
 }
 
 @Composable
-private fun FlatbedBar(e: GameEngine, storeBuildingId: Int, cart: MutableList<CartLine>, unitLabel: String) {
+private fun OrderBar(e: GameEngine, storeBuildingId: Int, cart: MutableList<CartLine>, unitLabel: String) {
     var showOptions by remember { mutableStateOf(false) }
     val discount = com.hustlecity.game.engine.bulkDiscount(cart)
     val total = cart.sumOf { it.total } * (1 - discount)
     Column(Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(6.dp)).background(HC.GlassDark)) {
         Row(Modifier.padding(horizontal = 8.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.padding(end = 8.dp)) {
-                Text("FLATBED", style = HT.label, color = Color.White)
+                Text("ORDER", style = HT.label, color = Color.White)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     GIcon("cargo_boxes", 11.dp, Modifier.padding(end = 3.dp), tint = Color.White.copy(alpha = .8f))
-                    Text("${cartSlots(cart)}/$FLATBED $unitLabel", color = Color.White.copy(alpha = .8f), fontSize = 10.sp)
+                    Text("${cartSlots(cart)}/$ORDER_MAX $unitLabel", color = Color.White.copy(alpha = .8f), fontSize = 10.sp)
                 }
             }
             LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -254,56 +249,9 @@ private fun FlatbedBar(e: GameEngine, storeBuildingId: Int, cart: MutableList<Ca
 }
 
 private fun addToCart(e: GameEngine, cart: MutableList<CartLine>, id: String, isProduct: Boolean, price: Double) {
-    if (cartSlots(cart) >= FLATBED) { e.toast("Your flatbed is full ($FLATBED)"); return }
+    if (cartSlots(cart) >= ORDER_MAX) { e.toast("One order holds up to $ORDER_MAX boxes"); return }
     val idx = cart.indexOfFirst { it.id == id }
     if (idx >= 0) cart[idx] = cart[idx].copy(boxes = cart[idx].boxes + 1) else cart += CartLine(id, isProduct, 1, price)
-}
-
-// ------------------------------------------------------------------ furniture store
-
-@Composable
-private fun FurnitureStore(e: GameEngine, buildingId: Int, place: PlaceDef) {
-    val cart = remember { mutableStateListOf<CartLine>() }
-    var query by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf(place.stock.first()) }
-    Modal("${place.name} Inventory", { close(e) }, headerExtra = { SearchField(query) { query = it } }) {
-        Row(Modifier.weight(1f)) {
-            val list = place.stock.mapNotNull { Catalog.item(it) }.filter { query.isBlank() || it.name.contains(query, true) }
-            LazyVerticalGrid(GridCells.Adaptive(118.dp), Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(list, key = { it.id }) { def ->
-                    Column(
-                        Modifier.clip(RoundedCornerShape(5.dp)).background(Color(0xFFD9DDE2))
-                            .border(2.dp, if (selected == def.id) HC.Blue else Color.Transparent, RoundedCornerShape(5.dp))
-                            .clickable { selected = def.id }.padding(6.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(def.name, color = HC.Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, minLines = 2)
-                        ItemThumb(def.id, 64.dp)
-                        Text(e.money(def.price), color = HC.Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-            val def = Catalog.item(selected)
-            if (def != null) {
-                Column(Modifier.width(220.dp).fillMaxHeight().padding(start = 10.dp).verticalScroll(rememberScrollState())) {
-                    ItemThumb(def.id, 110.dp, Modifier.align(Alignment.CenterHorizontally))
-                    Text(def.name, style = HT.title, color = HC.Ink)
-                    Text(e.money(def.price), style = HT.bodyBold, color = HC.Green)
-                    Text(def.description, style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(vertical = 4.dp))
-                    KeyValue("Size", "${def.w}×${def.d} tiles", bold = false)
-                    if (def.capacity > 0) KeyValue("Customer capacity", "${def.capacity}", bold = false)
-                    if (def.displayUnits > 0) KeyValue("Holds", "${def.displayUnits} units", bold = false)
-                    if (def.decor > 0 || def.music > 0) KeyValue("Interior score", "+${def.decor + def.music * 2}", bold = false)
-                    val users = Catalog.businessTypes.filter { t ->
-                        t.requirements.any { it.tag in def.tags } || t.products.any { Catalog.product(it.first)?.tag in def.tags }
-                    }
-                    if (users.isNotEmpty()) Text("Used by: " + users.joinToString { it.name }, style = HT.small, color = HC.Ink, modifier = Modifier.padding(vertical = 4.dp))
-                    HButton("Add to flatbed", Modifier.fillMaxWidth().padding(top = 6.dp), color = HC.Blue) { addToCart(e, cart, def.id, false, def.price) }
-                }
-            }
-        }
-        FlatbedBar(e, buildingId, cart, "items")
-    }
 }
 
 // ------------------------------------------------------------------ wholesale
@@ -345,7 +293,7 @@ private fun Wholesale(e: GameEngine, buildingId: Int, place: PlaceDef) {
                 }
             }
         }
-        FlatbedBar(e, buildingId, cart, "boxes")
+        OrderBar(e, buildingId, cart, "boxes")
     }
 }
 
@@ -843,7 +791,8 @@ fun HelpPanel(e: GameEngine) {
 private val HELP = listOf(
     "Moving around" to "Use the joystick to walk. Walk up to a door and tap ENTER. Near your car, tap GET IN — the joystick then steers and accelerates, the red pedal brakes and reverses. Drag the city to look around, pinch to zoom and twist with two fingers to rotate. Taxis (from any building card or Maps) save time.",
     "Your needs" to "Energy, hunger and happiness are shown top-left. Sleep at home, eat from your fridge (buy groceries at supermarkets) or at restaurants and cafés. Let energy hit zero and you'll wake up in hospital with a bill.",
-    "Starting a business" to "1) Rent a retail building in the Realty app. 2) Go inside and pick a business type. 3) Buy the required furniture (BizHub lists requirements) at Essentials Appliances, Prime Kitchen Supply or Lux Interiors. 4) Bring it in your car (or pay for delivery), tap UNLOAD and place it with the Interior Designer. 5) Buy stock at Metro Wholesale or CityDistro, unload it. 6) Turn off Temporarily Closed and start working the register.",
+    "Starting a business" to "1) Rent a retail building in the Realty app. 2) Go inside and pick a business type. 3) Buy the required furniture (BizHub lists requirements) at Essentials Appliances, Prime Kitchen Supply, Lux Interiors or OfficePlus: walk around the store, pick things off the displays and pay at the checkout. 4) Push your cart out to your car and load it with MANAGE STORAGE (or pay for delivery), drive to your store, carry the boxes in and place them with the Interior Designer. 5) Buy stock at Metro Wholesale or CityDistro, unload it. 6) Turn off Temporarily Closed and start working the register.",
+    "Carrying boxes" to "Bare hands hold 1 box. Stores lend you a flatbed cart by the entrance that holds 8, but it has to stay in their parking lot. A hand truck (Essentials Appliances, OfficePlus) carries 4, folds into any vehicle and takes one cargo slot. Next to your vehicle, MANAGE STORAGE moves boxes between the trunk and what you carry. Parked by your store or home, CARRY INSIDE takes a trip per load, so a hand truck saves a lot of time.",
     "Customers" to "Demand depends on the building's traffic index, marketing, the hour of the day, competitors in the neighborhood and your reputation. Capacity depends on registers/equipment and staff. Price products near market price — BizHub shows the chance a customer accepts your price.",
     "Money" to "Sales are collected at midnight. Rent, wages, loan payments and marketing are charged then too. The daily summary and the Finance app show where your money goes.",
     "Staff" to "Take Basic HR at Hustle Business School, then pay Apex Recruitment for a candidate search. Hire in the Staff app and schedule shifts in BizHub → Schedule. Unhappy staff (low pay, long weeks) will quit.",
@@ -877,48 +826,6 @@ fun SleepPanel(e: GameEngine) {
 }
 
 // ------------------------------------------------------------------ warehouse loading
-
-/** What's in the trunk: unload into a nearby store or home, take items in hand, or sell them back. */
-@Composable
-private fun TrunkPanel(e: GameEngine, vehicleId: Int) {
-    val v = e.state.vehicle(vehicleId) ?: run { close(e); return }
-    val p = e.state.player
-    val dest = e.unloadDestination(v)
-    Modal("${v.def.name} — Trunk (${v.cargo.size}/${v.def.cargo})", { close(e) }, maxWidth = 620.dp) {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (dest != null && (v.cargo.isNotEmpty() || p.hand.isNotEmpty())) {
-                WhiteCard(Modifier.fillMaxWidth(), padding = 10.dp) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Parked by ${e.buildingName(dest)}", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
-                        HButton("Unload all here", color = HC.Orange, small = true) { e.unloadInto(dest.id, true, v); if (v.cargo.isEmpty()) close(e) }
-                    }
-                    Text("Furniture goes into storage (place it with the Interior Designer); products go onto your shelves.", style = HT.small, color = HC.InkSoft)
-                }
-            } else if (v.cargo.isNotEmpty()) {
-                Text("To unload, park within 45 m of your store, warehouse or home and open the trunk, or go inside and tap Unload.", style = HT.small, color = HC.InkSoft)
-            }
-            if (v.cargo.isEmpty()) EmptyNote("The trunk is empty. Buy furniture or stock at a store and choose \"Load into ${v.def.name}\" at checkout.")
-            for ((i, item) in v.cargo.withIndex()) {
-                val name = if (item.isProduct) "${Catalog.product(item.id)?.name ?: item.id} (${item.qty} units)" else Catalog.item(item.id)?.name ?: item.id
-                WhiteCard(Modifier.fillMaxWidth(), padding = 8.dp) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (item.isProduct) GIcon("product_${item.id}", 28.dp) else ItemThumb(item.id, 28.dp)
-                        Text(name, style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
-                        HButton("Take", small = true, enabled = p.hand.size < 2) { e.takeFromTrunk(v, i) }
-                        HButton("Sell", small = true, color = HC.Red) { e.sellFromTrunk(v, i) }
-                    }
-                }
-            }
-            if (p.hand.isNotEmpty()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("In your hands: " + p.hand.joinToString { if (it.isProduct) Catalog.product(it.id)?.name ?: it.id else Catalog.item(it.id)?.name ?: it.id },
-                        style = HT.small, color = HC.InkSoft, modifier = Modifier.weight(1f))
-                    HButton("Put in trunk", small = true, color = HC.Teal) { e.stowInTrunk(v) }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun WarehousePanel(e: GameEngine, businessId: Int) {

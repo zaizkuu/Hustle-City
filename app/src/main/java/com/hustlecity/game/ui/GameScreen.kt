@@ -86,7 +86,10 @@ fun GameScreen(e: GameEngine) {
                 }
                 if (inside) {
                     if (e.ui.designer) DesignerBar(e, Modifier.align(Alignment.BottomCenter))
-                    else InteriorPanel(e, Modifier.align(Alignment.TopEnd).padding(top = 58.dp, end = 8.dp))
+                    else {
+                        InteriorPanel(e, Modifier.align(Alignment.TopEnd).padding(top = 58.dp, end = 8.dp))
+                        com.hustlecity.game.ui.places.ShopItemCard(e, Modifier.align(Alignment.BottomStart).padding(8.dp))
+                    }
                 } else {
                     if (e.state.player.driving >= 0) {
                         DrivingControls(e)
@@ -166,7 +169,7 @@ fun WorldCanvas(e: GameEngine, r: Renderers, interactive: Boolean) {
                     val w = size.width.toInt(); val h = size.height.toInt()
                     val view = if (gpuOn) glView[0] else null
                     val g = view?.acquire()
-                    if (e.interior != null && e.state.player.inBuilding >= 0) r.interior.draw(c.nativeCanvas, w, h, g)
+                    if (e.interior != null && e.state.player.inBuilding >= 0) r.interior.draw(c.nativeCanvas, w, h, g, density)
                     else r.world.draw(c.nativeCanvas, w, h, density, g)
                     if (g != null) view.submit()
                 }
@@ -268,6 +271,17 @@ private fun onTap(e: GameEngine, r: Renderers, pos: Offset) {
         if (e.ui.designer) {
             if (sc.ghostId != null) sc.moveGhostTo(tx, ty)
             else sc.selectedIndex = sc.itemAt(tx, ty)
+        } else if (sc.walkIn) {
+            // browsing a store: tap a display to look at it (and walk over), or the floor to walk
+            val hit = r.interior.pickItem(sc, pos.x, pos.y)
+            if (hit >= 0 && (hit in sc.forSale || hit == sc.registerIndex || hit == sc.rackIndex)) {
+                sc.inspect = hit
+                sc.walkToItem(hit)
+                com.hustlecity.game.audio.Audio.play(com.hustlecity.game.audio.Sfx.TAP)
+            } else if (tx in 0 until sc.w && ty in 0 until sc.d) {
+                sc.inspect = -1
+                sc.walkPlayerTo(tx, ty)
+            }
         } else if (tx in 0 until sc.w && ty in 0 until sc.d) {
             sc.walkPlayerTo(tx, ty)
         }

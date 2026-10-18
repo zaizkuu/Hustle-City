@@ -113,7 +113,13 @@ import com.hustlecity.game.engine.storeItem
 import com.hustlecity.game.engine.taxiFare
 import com.hustlecity.game.engine.taxiTo
 import com.hustlecity.game.engine.toggleWork
-import com.hustlecity.game.engine.unloadHere
+import com.hustlecity.game.engine.Carrier
+import com.hustlecity.game.engine.HAND_TRUCK
+import com.hustlecity.game.engine.carrierName
+import com.hustlecity.game.engine.carryCap
+import com.hustlecity.game.engine.carryIn
+import com.hustlecity.game.engine.carryMinutes
+import com.hustlecity.game.engine.vehicleNear
 import com.hustlecity.game.engine.unloadInto
 import com.hustlecity.game.engine.unloadDestination
 import com.hustlecity.game.engine.unloadableCount
@@ -450,31 +456,32 @@ fun ActionButtons(e: GameEngine, modifier: Modifier = Modifier) {
         }
         e.nearVehicle?.let { v ->
             HButton("Get in ${v.def.name}", icon = Icons.Filled.DirectionsCar) { e.enterVehicle(v); e.ui.phoneOpen = false }
-            if (v.cargo.isNotEmpty() || p.hand.isNotEmpty()) {
-                // the trunk: unload into a store/home right here, take items in hand, or stow what you carry
-                val dest = e.unloadDestination(v)
-                HButton(if (dest != null && v.cargo.isNotEmpty()) "Unload ${v.cargo.size} into ${e.buildingName(dest)}" else "Trunk (${v.cargo.size}/${v.def.cargo})",
-                    color = HC.Orange, icon = Icons.Filled.Inventory2) {
-                    if (dest != null && v.cargo.isNotEmpty()) e.unloadInto(dest.id, true, v) else e.ui.panel = Panel.Trunk(v.id)
-                }
-                if (dest != null && v.cargo.isNotEmpty()) HButton("Trunk", color = HC.GlassLight, small = true) { e.ui.panel = Panel.Trunk(v.id) }
-            }
+            // Manage storage: move boxes between the trunk and your hands, hand truck or store cart
+            HButton("Manage storage (${v.cargo.size}/${v.def.cargo})", color = HC.Orange, icon = Icons.Filled.Inventory2) { e.ui.panel = Panel.Trunk(v.id) }
+            val dest = e.unloadDestination(v)
+            val boxes = v.cargo.count { it.id != HAND_TRUCK }
+            if (dest != null && boxes > 0) HButton("Carry $boxes inside (~${e.carryMinutes(boxes)} min)", color = HC.GlassLight, small = true) { e.carryIn(dest.id, v) }
         }
     }
 }
 
-/** What you're carrying in your hands (up to two items). */
+/** What you're carrying, and with what: bare hands (1 box), a hand truck (4) or a store cart (8). */
 @Composable
 fun CarryingChip(e: GameEngine, modifier: Modifier = Modifier) {
-    val hand = e.state.player.hand
-    if (hand.isEmpty()) return
-    Row(
+    val p = e.state.player
+    val hand = p.hand
+    if (hand.isEmpty() && p.carrier == Carrier.HANDS) return
+    Column(
         modifier.widthIn(max = 260.dp).shadow(4.dp, RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).background(HC.GlassDark).padding(horizontal = 8.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        GIcon("hands", 16.dp)
-        Text(" Carrying ${hand.size}/2: " + hand.joinToString { if (it.isProduct) Catalog.product(it.id)?.name ?: it.id else Catalog.item(it.id)?.name ?: it.id },
-            color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            GIcon(if (p.carrier == Carrier.HANDS) "hands" else "hand_truck", 16.dp)
+            Text(" Carrying ${hand.size}/${e.carryCap()} · ${carrierName(p.carrier)}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        }
+        if (hand.isNotEmpty()) Row(Modifier.padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            for (item in hand.take(8)) com.hustlecity.game.ui.places.CargoThumb(item, 22.dp, Modifier.clip(RoundedCornerShape(3.dp)).background(Color.White.copy(alpha = .85f)).padding(1.dp))
+        }
+        if (p.carrier == Carrier.CART) Text("Store carts stay in the parking lot", color = Color.White.copy(alpha = .65f), fontSize = 9.sp)
     }
 }
 
@@ -585,7 +592,12 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
             // cargo first: what can be brought in, or why not
             val ownPlace = sc.mode == InteriorMode.BUSINESS || sc.mode == InteriorMode.HOME
             if (ownPlace && unload > 0) {
-                HButton("Unload car & hands ($unload)", full, color = HC.Orange, icon = Icons.Filled.Inventory2) { e.unloadHere() }
+                val carried = e.state.player.hand.count { it.id != HAND_TRUCK && !it.unpaid }
+                if (carried > 0) HButton("Put down what you carry ($carried)", full, color = HC.Orange, icon = Icons.Filled.Inventory2) { e.unloadInto(b.id, true, null) }
+                e.vehicleNear(b.id)?.let { v ->
+                    val boxes = v.cargo.count { it.id != HAND_TRUCK }
+                    if (boxes > 0) HButton("Carry in from ${v.def.name} ($boxes, ~${e.carryMinutes(boxes)} min)", full, small = true, color = HC.Orange) { e.carryIn(b.id, v) }
+                }
             } else if (ownPlace) {
                 e.state.vehicles.firstOrNull { it.cargo.isNotEmpty() }?.let { far ->
                     Text("Your ${far.def.name} has ${far.cargo.size} item(s) but is parked too far away. Park within 45 m of the entrance to unload.",
@@ -635,7 +647,8 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                     HButton("Toggle walls", full, small = true, color = HC.GlassLight) { sc.showWalls = !sc.showWalls; e.bump() }
                 }
                 InteriorMode.EMPTY -> HButton("Start a business", full, small = true, color = HC.Green) { e.ui.panel = Panel.StartBusiness(b.id) }
-                InteriorMode.PLACE -> HButton("Shop / services", full, small = true, color = HC.Green) { e.ui.panel = Panel.Place(b.id, b.placeId!!) }
+                InteriorMode.PLACE -> if (sc.walkIn) com.hustlecity.game.ui.places.ShopControls(e, sc)
+                    else HButton("Shop / services", full, small = true, color = HC.Green) { e.ui.panel = Panel.Place(b.id, b.placeId!!) }
                 InteriorMode.RIVAL -> HButton("Shop / side job", full, small = true, color = HC.Green) { e.ui.panel = Panel.RivalShop(b.id) }
             }
             HButton("Exit building", full, small = true, color = HC.Red) { e.exitBuilding(); e.ui.phoneOpen = true }

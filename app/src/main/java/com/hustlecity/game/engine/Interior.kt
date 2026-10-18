@@ -122,15 +122,35 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     var zoom = 1f
     private val placeKind: PlaceKind? = building.placeId?.let { Catalog.place(it).kind }
 
+    /** Walk-in store: displays (index into [items]) and the furniture each one sells. */
+    val forSale = HashMap<Int, String>()
+    /** The store's own register and its rack of free carts, -1 if none. */
+    var registerIndex = -1
+        private set
+    var rackIndex = -1
+        private set
+    /** Item the player is looking at (its card is shown), -1 for none. */
+    var inspect = -1
+    /** Runs once the player's current walk ends. */
+    private var onArrive: (() -> Unit)? = null
+    val walkIn: Boolean get() = mode == InteriorMode.PLACE && placeKind == PlaceKind.FURNITURE_STORE
+
     init {
-        when (mode) {
-            InteriorMode.HOME -> { w = building.gridW.coerceAtLeast(7); d = building.gridD.coerceAtLeast(6) }
-            InteriorMode.PLACE, InteriorMode.RIVAL -> { w = building.gridW.coerceIn(10, 20); d = building.gridD.coerceIn(8, 14) }
+        when {
+            mode == InteriorMode.HOME -> { w = building.gridW.coerceAtLeast(7); d = building.gridD.coerceAtLeast(6) }
+            mode == InteriorMode.PLACE && placeKind == PlaceKind.FURNITURE_STORE -> {
+                val stock = Catalog.place(building.placeId!!).stock
+                w = 20
+                d = (12..30).firstOrNull { showroom(stock, w, it) != null } ?: 30
+            }
+            mode == InteriorMode.PLACE || mode == InteriorMode.RIVAL -> { w = building.gridW.coerceIn(10, 20); d = building.gridD.coerceIn(8, 14) }
             else -> { w = building.gridW; d = building.gridD }
         }
         doorX = w / 2
         px = doorX.toFloat()
         py = d - .5f
+        // big showrooms start a little closer, following you around
+        if (walkIn) zoom = 1.35f
         if (mode == InteriorMode.PLACE || mode == InteriorMode.RIVAL) generateLayout()
     }
 
@@ -247,11 +267,68 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
 
     fun walkPlayerTo(tx: Int, ty: Int) {
         if (e.state.player.workingAt >= 0) return
+        onArrive = null
+        val hit = itemAt(tx, ty)
+        if (hit >= 0) { walkToItem(hit); return }
         val occ = occupancy()
         val start = idx(floor(px).toInt().coerceIn(0, w - 1), floor(py).toInt().coerceIn(0, d - 1))
         val path = bfs(start, idx(tx, ty), occ) ?: return
         ppath = path; ppathIdx = 0
     }
+
+    /** Walks up to an item (the nearest free tile next to it), then runs [then]. */
+    fun walkToItem(index: Int, then: (() -> Unit)? = null) {
+        val p = items.getOrNull(index) ?: return
+        val def = Catalog.item(p.itemId) ?: return
+        val (fw, fd) = itemDims(def, p.rot)
+        val occ = occupancy()
+        val start = idx(floor(px).toInt().coerceIn(0, w - 1), floor(py).toInt().coerceIn(0, d - 1))
+        // breadth-first from the player to any free tile touching the item's footprint
+        val prev = IntArray(w * d) { -1 }
+        val queue = IntArray(w * d)
+        var head = 0; var tail = 0
+        if (start < 0) return
+        queue[tail++] = start; prev[start] = start
+        var goal = -1
+        while (head < tail) {
+            val cur = queue[head++]
+            val cx = cur % w; val cy = cur / w
+            val touches = (cx in p.x - 1..p.x + fw && cy in p.y until p.y + fd) || (cy in p.y - 1..p.y + fd && cx in p.x until p.x + fw)
+            if (touches && !occ[cur]) { goal = cur; break }
+            for (k in 0 until 4) {
+                val nx = cx + DX[k]; val ny = cy + DY[k]
+                if (nx !in 0 until w || ny !in 0 until d) continue
+                val ni = ny * w + nx
+                if (prev[ni] != -1 || occ[ni]) continue
+                prev[ni] = cur
+                queue[tail++] = ni
+            }
+        }
+        if (goal < 0) return
+        val path = ArrayList<Int>()
+        var cur = goal
+        while (cur != start) { path += cur; cur = prev[cur] }
+        path.reverse()
+        ppath = path.toIntArray(); ppathIdx = 0
+        onArrive = {
+            // face the item
+            playerHeading = kotlin.math.atan2(p.x + fw / 2f - px, -(p.y + fd / 2f - py))
+            then?.invoke()
+        }
+        if (ppath.isEmpty()) { onArrive?.invoke(); onArrive = null }
+    }
+
+    /** True when the player stands next to item [index] (close enough to pick it up or pay). */
+    fun playerNear(index: Int): Boolean {
+        val p = items.getOrNull(index) ?: return false
+        val def = Catalog.item(p.itemId) ?: return false
+        val (fw, fd) = itemDims(def, p.rot)
+        val dx = maxOf(p.x - px, 0f, px - (p.x + fw))
+        val dy = maxOf(p.y - py, 0f, py - (p.y + fd))
+        return dx * dx + dy * dy < 1.3f * 1.3f
+    }
+
+    val playerWalking: Boolean get() = ppathIdx < ppath.size
 
     /** Where the player stands when working the floor. */
     fun workSpot(): Pair<Float, Float>? {
@@ -275,7 +352,10 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         } else if (ppathIdx < ppath.size) {
             val t = ppath[ppathIdx]
             val tx = t % w + .5f; val ty = t / w + .5f
-            if (moveToward(tx, ty, 3.2f * dt, true)) ppathIdx++
+            if (moveToward(tx, ty, 3.2f * dt, true)) {
+                ppathIdx++
+                if (ppathIdx >= ppath.size) onArrive?.let { onArrive = null; it() }
+            }
         }
         // customers
         val rate = when (mode) {
@@ -408,6 +488,8 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
 
     /** Service counters with a queue: cash registers, or the bar in a nightclub. */
     private fun counters(): List<Int> {
+        // in a walk-in store, the registers on display are for sale: only the checkout serves
+        if (registerIndex >= 0) return listOf(registerIndex)
         val regs = items.withIndex().filter { Catalog.item(it.value.itemId)?.fn == ItemFn.CASH_REGISTER }.map { it.index }
         if (regs.isNotEmpty()) return regs
         return if (typeId == "nightclub") itemsWith("bar").map { it.index } else emptyList()
@@ -468,7 +550,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             t == "gym" -> { stops += stopAt("locker"); repeat(1 + r.nextInt(2)) { stops += stopAt("workout") }; if (r.nextFloat() < .6f) stops += stopAt("shower"); pays = false }
             t != null && Catalog.type(t).office -> { stops += stopAt("desk"); pays = false } // a client meeting
             else -> {
-                val targets = items.indices.filter { i -> Catalog.item(items[i].itemId)?.fn.let { it == ItemFn.DISPLAY || it == ItemFn.EQUIPMENT || it == ItemFn.OFFICE || it == ItemFn.LOCKER } }
+                val targets = if (forSale.isNotEmpty()) forSale.keys.toList() else items.indices.filter { i -> Catalog.item(items[i].itemId)?.fn.let { it == ItemFn.DISPLAY || it == ItemFn.EQUIPMENT || it == ItemFn.OFFICE || it == ItemFn.LOCKER } }
                 repeat(1 + r.nextInt(3)) { targets.randomOrNull(r)?.let { stops += it } }
             }
         }
@@ -882,15 +964,15 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         }
         when (placeKind) {
             PlaceKind.FURNITURE_STORE -> {
-                put("cash_register", w - 3, d - 3)
-                val stock = Catalog.place(building.placeId!!).stock
-                var x = 1; var y = 1; var rowDepth = 1
-                for (id in stock) {
-                    val def = Catalog.item(id) ?: continue
-                    if (x + def.w > w - 1) { x = 1; y += rowDepth + 1; rowDepth = 1 }
-                    if (y + def.d > d - 3) break
-                    if (put(id, x, y)) { x += def.w + 1; rowDepth = maxOf(rowDepth, def.d) }
+                // everything the store sells is on display, in rows with an aisle in front of each row
+                for (p in showroom(Catalog.place(building.placeId!!).stock, w, d).orEmpty()) {
+                    if (put(p.itemId, p.x, p.y, p.rot)) forSale[generated.size - 1] = p.itemId
                 }
+                // the checkout by the exit, and the free carts by the door
+                if (put("checkout_counter", w - 5, d - 3)) registerIndex = generated.size - 1
+                if (put("cart_rack", 1, d - 2)) rackIndex = generated.size - 1
+                put("plant_large", w - 1, d - 1)
+                put("trash_can", doorX + 2, d - 1)
             }
             PlaceKind.WHOLESALER, PlaceKind.IMPORTER -> {
                 put("cash_register", w - 3, d - 3)
@@ -934,5 +1016,36 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     companion object {
         private val DX = intArrayOf(1, -1, 0, 0)
         private val DY = intArrayOf(0, 0, 1, -1)
+
+        /**
+         * Lays out a store's [stock] as a showroom of [w] by [d] tiles: rows of displays from the back wall
+         * (wall-mounted pieces go first, so they hang there), each with a walkway in front, and the last five rows kept free for
+         * the checkout, the carts and the entrance. Returns null if it doesn't fit.
+         */
+        fun showroom(stock: List<String>, w: Int, d: Int): List<PlacedItem>? {
+            val zone = d - 5
+            val defs = stock.mapNotNull { Catalog.item(it) }
+            val wallMounted = { def: FurnitureDef -> def.d == 1 && def.parts.isNotEmpty() && def.parts.minOf { it.z0 } > .3f }
+            val queue = (defs.filter(wallMounted) + defs.filterNot(wallMounted).sortedWith(compareBy({ -it.d }, { -it.w })))
+                .toMutableList()
+            val out = ArrayList<PlacedItem>()
+            var y = 0
+            while (queue.isNotEmpty()) {
+                var x = 1
+                var rowDepth = 0
+                val it = queue.iterator()
+                while (it.hasNext()) {
+                    val def = it.next()
+                    if (x + def.w > w - 1 || y + def.d > zone) continue
+                    out += PlacedItem(def.id, x, y, 0)
+                    x += def.w + 1
+                    rowDepth = maxOf(rowDepth, def.d)
+                    it.remove()
+                }
+                if (rowDepth == 0) return null
+                y += rowDepth + 1
+            }
+            return out
+        }
     }
 }

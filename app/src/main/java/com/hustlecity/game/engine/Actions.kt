@@ -193,23 +193,28 @@ fun GameEngine.unloadDestination(v: OwnedVehicle): com.hustlecity.game.world.Bui
     return ids.mapNotNull { city.building(it) }.filter { dist(v.x, v.y, it.doorX, it.doorY) < 45f }.minByOrNull { dist(v.x, v.y, it.doorX, it.doorY) }
 }
 
-/** Moves one item from the trunk into your hands (you can carry two). */
+/** Moves one item from the trunk into your hands, onto your hand truck or onto a store cart. */
 fun GameEngine.takeFromTrunk(v: OwnedVehicle, index: Int): Boolean {
     val item = v.cargo.getOrNull(index) ?: return false
-    if (state.player.hand.size >= 2) { toast("Your hands are full (2 items)", ToastKind.BAD); return false }
+    if (carryFree() <= 0) {
+        toast(if (state.player.carrier == Carrier.HANDS) "Your hands are full (1 box). A hand truck carries 4" else "Your ${carrierName(state.player.carrier).lowercase()} is full (${carryCap()})", ToastKind.BAD)
+        return false
+    }
     v.cargo.removeAt(index)
     state.player.hand += item
     bump()
     return true
 }
 
-/** Puts whatever you're carrying into the trunk. */
+/** Puts whatever you're carrying (and have paid for) into the trunk. */
 fun GameEngine.stowInTrunk(v: OwnedVehicle): Int {
     val p = state.player
-    val n = minOf(cargoSlotsFree(v), p.hand.size)
-    if (n <= 0) { toast(if (p.hand.isEmpty()) "You're not carrying anything" else "The ${v.def.name} is full", ToastKind.BAD); return 0 }
-    v.cargo += p.hand.take(n)
-    repeat(n) { p.hand.removeAt(0) }
+    val paid = p.hand.filter { !it.unpaid }
+    val n = minOf(cargoSlotsFree(v), paid.size)
+    if (n <= 0) { toast(if (paid.isEmpty()) "You're not carrying anything" else "The ${v.def.name} is full", ToastKind.BAD); return 0 }
+    val moving = paid.take(n)
+    v.cargo += moving
+    moving.forEach { p.hand.remove(it) }
     bump()
     return n
 }
@@ -240,6 +245,8 @@ fun GameEngine.unloadInto(buildingId: Int, fromHand: Boolean, v: OwnedVehicle?):
         val it = list.iterator()
         while (it.hasNext()) {
             val item = it.next()
+            // the hand truck stays with you (or in the trunk); unpaid goods aren't yours yet
+            if ((!item.isProduct && item.id == HAND_TRUCK) || item.unpaid) continue
             if (item.isProduct) {
                 if (biz == null) { skipped++; continue }
                 val pdef = Catalog.product(item.id) ?: continue
@@ -276,7 +283,7 @@ fun GameEngine.unloadableCount(): Int {
     val p = state.player
     val b = city.building(p.inBuilding) ?: return 0
     val v = vehicleNear(b.id)
-    return p.hand.size + (v?.cargo?.size ?: 0)
+    return p.hand.count { it.id != HAND_TRUCK && !it.unpaid } + (v?.cargo?.count { it.id != HAND_TRUCK } ?: 0)
 }
 
 // ---------------------------------------------------------------------- shopping
@@ -302,8 +309,8 @@ fun GameEngine.checkoutOptions(storeBuildingId: Int, cart: List<CartLine>): List
         val free = cargoSlotsFree(v)
         out += CheckoutTarget.Vehicle(v) to "Load into ${v.def.name} (${free} of ${v.def.cargo} slots free)"
     }
-    val handFree = 2 - state.player.hand.size
-    if (slots <= handFree) out += CheckoutTarget.Hand to "Carry by hand ($handFree slots)"
+    val handFree = carryFree()
+    if (slots <= handFree) out += CheckoutTarget.Hand to "Carry it (${carrierName(state.player.carrier).lowercase()}: $handFree free)"
     val subtotal = cart.sumOf { it.total } * (1 - bulkDiscount(cart))
     val fee = deliveryFee(subtotal)
     val furnitureOnly = cart.none { it.isProduct }
@@ -334,7 +341,7 @@ fun GameEngine.checkout(storeBuildingId: Int, cart: List<CartLine>, target: Chec
             toast("Loaded ${items.size} item(s) into your ${target.v.def.name}", ToastKind.GOOD)
         }
         CheckoutTarget.Hand -> {
-            if (state.player.hand.size + items.size > 2) { toast("You can only carry 2 items", ToastKind.BAD); return false }
+            if (items.size > carryFree()) { toast("You can only carry ${carryCap()} box(es)", ToastKind.BAD); return false }
             if (!spend(subtotal, category)) return false
             state.player.hand += items
             toast("You're carrying ${items.size} item(s). Unload them at your store or home.", ToastKind.GOOD)
@@ -612,7 +619,8 @@ fun GameEngine.sideJob(hours: Int, wage: Double, where: String) {
 fun GameEngine.taxiTo(buildingId: Int) {
     val b = city.building(buildingId) ?: return
     val p = state.player
-    if (p.inBuilding >= 0) exitBuilding()
+    if (!leaveCart("You can't take a taxi")) return
+    if (p.inBuilding >= 0) { exitBuilding(); if (p.inBuilding >= 0) return }
     if (p.driving >= 0) exitVehicle()
     val d = dist(p.x, p.y, b.doorX, b.doorY)
     val fare = taxiFare(d)

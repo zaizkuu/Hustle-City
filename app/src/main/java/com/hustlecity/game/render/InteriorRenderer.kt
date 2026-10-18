@@ -5,6 +5,7 @@ import com.hustlecity.game.data.Catalog
 import com.hustlecity.game.data.FurnitureDef
 import com.hustlecity.game.data.c
 import com.hustlecity.game.engine.GameEngine
+import com.hustlecity.game.engine.carryPose
 import com.hustlecity.game.engine.InteriorScene
 import com.hustlecity.game.engine.SHIRT_COLORS
 import com.hustlecity.game.engine.SKIN_TONES
@@ -38,8 +39,10 @@ class InteriorRenderer(private val e: GameEngine) {
     }
 
     fun setupCamera(sc: InteriorScene, w: Int, h: Int) {
-        proj.tx = sc.w / 2f
-        proj.ty = sc.d / 2f
+        // zoomed in, the camera drifts from the middle of the room toward the player
+        val follow = ((sc.zoom - 1f) / 1.2f).coerceIn(0f, 1f)
+        proj.tx = sc.w / 2f + (sc.px - sc.w / 2f) * follow
+        proj.ty = sc.d / 2f + (sc.py - sc.d / 2f) * follow
         proj.dist = (max(sc.w, sc.d) * .95f + 5f) / sc.zoom
         proj.pitch = Math.toRadians(56.0).toFloat()
         proj.yaw = sc.yaw
@@ -48,7 +51,7 @@ class InteriorRenderer(private val e: GameEngine) {
     }
 
     /** Draws the current interior; with [gpu] the 3D goes into that frame for the GPU renderer. */
-    fun draw(canvas: Canvas, w: Int, h: Int, gpu: com.hustlecity.game.render.gpu.GpuFrame? = null) {
+    fun draw(canvas: Canvas, w: Int, h: Int, gpu: com.hustlecity.game.render.gpu.GpuFrame? = null, density: Float = 1f) {
         val sc = e.interior ?: return
         scene.gpu = gpu
         setupCamera(sc, w, h)
@@ -150,7 +153,7 @@ class InteriorRenderer(private val e: GameEngine) {
                     val p = e.state.player
                     scene.disc(sc.px, sc.py, .02f, .45f, .45f, 12, scene.withAlpha(c(0xFF27AE60), .55f))
                     people.draw(sc.px, sc.py, 0f, sc.playerHeading, e.realTime * 7f, sc.playerMoving, SHIRT_COLORS[p.shirt % SHIRT_COLORS.size], PersonPainter.PANTS[1],
-                        SKIN_TONES[p.skin % SKIN_TONES.size], PersonPainter.HAIR[p.skin % PersonPainter.HAIR.size])
+                        SKIN_TONES[p.skin % SKIN_TONES.size], PersonPainter.HAIR[p.skin % PersonPainter.HAIR.size], carry = e.carryPose(), load = p.hand.size)
                 }
                 4 -> {
                     val car = sc.showroom[dIdx[i]]
@@ -176,6 +179,91 @@ class InteriorRenderer(private val e: GameEngine) {
         scene.material = Mat.PLAIN
         if (gpu == null) batch.flush()
         scene.gpu = null
+        if (sc.walkIn && !e.ui.designer) priceTags(canvas, sc, density)
+    }
+
+    private val rayD = FloatArray(3)
+
+    /** The item under a screen point (ray against each item's bounding box), or -1. */
+    fun pickItem(sc: InteriorScene, sx: Float, sy: Float): Int {
+        proj.rayDir(sx, sy, rayD)
+        val ox = proj.camX; val oy = proj.camY; val oz = proj.camZ
+        var best = -1
+        var bestT = Float.MAX_VALUE
+        for ((i, p) in sc.items.withIndex()) {
+            val def = Catalog.item(p.itemId) ?: continue
+            val (fw, fd) = itemDims(def, p.rot)
+            val top = (def.parts.maxOfOrNull { it.z1 } ?: 1f).coerceAtLeast(.3f)
+            var t0 = 0f; var t1 = Float.MAX_VALUE
+            val lo = floatArrayOf(p.x.toFloat(), p.y.toFloat(), 0f)
+            val hi = floatArrayOf((p.x + fw).toFloat(), (p.y + fd).toFloat(), top)
+            val o = floatArrayOf(ox, oy, oz)
+            var hit = true
+            for (a in 0 until 3) {
+                val dv = rayD[a]
+                if (abs(dv) < 1e-6f) { if (o[a] < lo[a] || o[a] > hi[a]) { hit = false; break }; continue }
+                var ta = (lo[a] - o[a]) / dv; var tb = (hi[a] - o[a]) / dv
+                if (ta > tb) { val tt = ta; ta = tb; tb = tt }
+                t0 = max(t0, ta); t1 = min(t1, tb)
+                if (t0 > t1) { hit = false; break }
+            }
+            if (hit && t0 < bestT) { bestT = t0; best = i }
+        }
+        return best
+    }
+
+    private val tagText = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        textAlign = android.graphics.Paint.Align.CENTER
+    }
+    private val tagFill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val tagPt = FloatArray(3)
+    private val tagRect = android.graphics.RectF()
+
+    private val tagOrder = ArrayList<Int>()
+    private val placedTags = ArrayList<android.graphics.RectF>()
+
+    /**
+     * Price tags over everything on display in a walk-in store, plus signs for the checkout and the carts.
+     * Nearest first; a tag that would overlap one already drawn is left out (the one you're looking at always shows).
+     */
+    private fun priceTags(canvas: Canvas, sc: InteriorScene, density: Float) {
+        tagText.textSize = 10f * density
+        tagOrder.clear()
+        for (i in sc.items.indices) if (i in sc.forSale || i == sc.registerIndex || i == sc.rackIndex) tagOrder += i
+        tagOrder.sortWith(compareBy({ it != sc.inspect }, { it != sc.registerIndex && it != sc.rackIndex }, { val p = sc.items[it]; key(p.x + .5f, p.y + .5f) }))
+        placedTags.clear()
+        for (i in tagOrder) {
+            val p = sc.items[i]
+            val sale = sc.forSale[i]
+            val text: String
+            val bg: Int
+            when {
+                sale != null -> {
+                    val def = Catalog.item(sale) ?: continue
+                    val price = "$" + "%,d".format(def.price.toLong())
+                    text = if (i == sc.inspect) "${def.name} · $price" else price
+                    bg = if (i == sc.inspect) c(0xFF2F80ED) else c(0xFFF2C94C)
+                }
+                i == sc.registerIndex -> { text = "PAY HERE"; bg = c(0xFF27AE60) }
+                else -> { text = "FREE CARTS"; bg = c(0xFF2F80ED) }
+            }
+            val def = Catalog.item(p.itemId) ?: continue
+            val (fw, fd) = itemDims(def, p.rot)
+            val top = (def.parts.maxOfOrNull { it.z1 } ?: 1f) + .25f
+            if (!proj.project(p.x + fw / 2f, p.y + fd / 2f, top, tagPt)) continue
+            val tw = tagText.measureText(text) + 9f * density
+            val th = 14f * density
+            tagRect.set(tagPt[0] - tw / 2, tagPt[1] - th, tagPt[0] + tw / 2, tagPt[1])
+            if (placedTags.any { android.graphics.RectF.intersects(it, tagRect) }) continue
+            placedTags += android.graphics.RectF(tagRect)
+            tagFill.color = 0x55000000
+            canvas.drawRoundRect(tagRect.left + density, tagRect.top + 1.5f * density, tagRect.right + density, tagRect.bottom + 1.5f * density, 4f * density, 4f * density, tagFill)
+            tagFill.color = bg
+            canvas.drawRoundRect(tagRect, 4f * density, 4f * density, tagFill)
+            tagText.color = if (bg == c(0xFFF2C94C)) c(0xFF1D2228) else 0xFFFFFFFF.toInt()
+            canvas.drawText(text, tagPt[0], tagPt[1] - 3.8f * density, tagText)
+        }
     }
 
     private fun key(x: Float, y: Float): Float { val dx = x - proj.camX; val dy = y - proj.camY; return dx * dx + dy * dy }

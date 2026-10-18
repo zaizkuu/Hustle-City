@@ -10,7 +10,9 @@ import com.hustlecity.game.engine.InteriorMode
 import com.hustlecity.game.engine.InteriorScene
 import com.hustlecity.game.engine.Panel
 import com.hustlecity.game.engine.Screen
+import com.hustlecity.game.engine.pickUp
 import com.hustlecity.game.engine.startBusiness
+import com.hustlecity.game.engine.takeCart
 import com.hustlecity.game.model.PlacedItem
 import com.hustlecity.game.model.Rental
 import com.hustlecity.game.ui.menu.HustleCityApp
@@ -119,6 +121,37 @@ class UiSnapshotTest {
         e.state.player.x = b.doorX; e.state.player.y = b.doorY
         e.enterBuilding(b)
         shoot(e, "ui_store.png")
+    }
+
+    @Test
+    fun furnitureStoreShopping() {
+        val e = game()
+        val b = e.city.placeBuilding("essentials")!!
+        e.state.player.x = b.doorX; e.state.player.y = b.doorY
+        e.enterBuilding(b)
+        e.ui.tip = null
+        val sc = e.interior!!
+        e.takeCart(b.id)
+        e.ui.tip = null
+        for (id in listOf("shelf", "drinks_fridge", "cash_register")) e.pickUp(id)
+        sc.inspect = sc.forSale.entries.first { it.value == "treadmill" }.key
+        sc.px = 7.5f; sc.py = sc.d - 4.5f
+        shoot(e, "ui_store_shopping.png")
+    }
+
+    @Test
+    fun manageStorage() {
+        val e = game()
+        val v = e.state.vehicles.first()
+        e.state.player.x = v.x + 1.5f; e.state.player.y = v.y
+        v.cargo += com.hustlecity.game.model.CargoItem("shelf", false)
+        v.cargo += com.hustlecity.game.model.CargoItem("coffee", true, 60)
+        v.cargo += com.hustlecity.game.model.CargoItem("hand_truck", false)
+        e.state.player.carrier = com.hustlecity.game.engine.Carrier.HAND_TRUCK
+        e.state.player.hand += com.hustlecity.game.model.CargoItem("cash_register", false)
+        e.state.player.hand += com.hustlecity.game.model.CargoItem("plant_small", false)
+        e.ui.panel = Panel.Trunk(v.id)
+        shoot(e, "ui_storage.png")
     }
 
     @Test

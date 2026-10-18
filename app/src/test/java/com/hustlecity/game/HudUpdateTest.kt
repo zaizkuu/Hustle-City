@@ -90,7 +90,7 @@ class HudUpdateTest {
         v.cargo += com.hustlecity.game.model.CargoItem("shelf", false)
         e.state.player.hand += com.hustlecity.game.model.CargoItem("plant_small", false)
         step(e)
-        assertTrue("trunk button next to a loaded car", count("Trunk") > 0)
+        assertTrue("manage storage button next to a loaded car", count("Manage storage") > 0)
         assertTrue("carrying indicator", count("Carrying") > 0)
     }
 }

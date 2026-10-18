@@ -14,9 +14,15 @@ data class CargoItem(
     val isProduct: Boolean,
     /** Units contained (products) or 1 (furniture). */
     var qty: Int = 1,
+    /** Picked up in a store and not paid for yet; it can't leave the store until it is. */
+    var unpaid: Boolean = false,
+    /** Shelf price of an unpaid item. */
+    val price: Double = 0.0,
 ) {
     val label: String
         get() = if (isProduct) "${Catalog.product(id)?.name ?: id} ×$qty" else Catalog.item(id)?.name ?: id
+    val name: String
+        get() = if (isProduct) Catalog.product(id)?.name ?: id else Catalog.item(id)?.name ?: id
 }
 
 @Serializable
@@ -36,7 +42,12 @@ data class PlayerState(
     var home: Int = -1,
     var fridgeMeals: Int = 4,
     var courses: MutableSet<String> = mutableSetOf(),
+    /** Boxes you're carrying: in your hands, on your hand truck or on a store cart (see [carrier]). */
     var hand: MutableList<CargoItem> = mutableListOf(),
+    /** What you carry boxes with: 0 bare hands (1 box), 1 hand truck (4), 2 a store's flatbed cart (8). */
+    var carrier: Int = 0,
+    /** Store the flatbed cart belongs to (it can't leave that store's parking lot). */
+    var cartStore: Int = -1,
     var waypoint: Int = -1,
     /** Business id the player is currently working at, -1 if none. */
     var workingAt: Int = -1,

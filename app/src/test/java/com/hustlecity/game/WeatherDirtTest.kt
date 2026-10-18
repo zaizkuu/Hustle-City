@@ -152,7 +152,7 @@ class WeatherDirtTest {
         assertEquals(60.0, counter, .01)
         // every furniture item is sold somewhere
         val sold = Catalog.places.flatMap { it.stock }.toSet()
-        val unsold = Catalog.furniture.filter { it.id !in sold && it.id !in setOf("desk", "pallet") }.map { it.id }
+        val unsold = Catalog.furniture.filter { it.id !in sold && it.id !in setOf("desk", "pallet", "cart_rack") }.map { it.id }
         assertTrue("not sold anywhere: $unsold", unsold.isEmpty())
         // every requirement and every product display can be bought
         for (t in Catalog.allTypes) {

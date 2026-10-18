@@ -9,6 +9,7 @@ import com.hustlecity.game.data.Catalog
 import com.hustlecity.game.data.c
 import com.hustlecity.game.engine.AppId
 import com.hustlecity.game.engine.GameEngine
+import com.hustlecity.game.engine.carryPose
 import com.hustlecity.game.engine.SHIRT_COLORS
 import com.hustlecity.game.engine.SKIN_TONES
 import com.hustlecity.game.ui.icons.IconCanvas
@@ -844,7 +845,8 @@ class WorldRenderer(private val e: GameEngine) {
         val p = e.state.player
         scene.disc(p.x, p.y, .04f, 1f, 1f, 14, scene.withAlpha(c(0xFF27AE60), .55f))
         people.draw(p.x, p.y, 0f, p.heading, e.walkPhase, e.walkAmount, SHIRT_COLORS[p.shirt % SHIRT_COLORS.size], PersonPainter.PANTS[1],
-            SKIN_TONES[p.skin % SKIN_TONES.size], PersonPainter.HAIR[p.skin % PersonPainter.HAIR.size], 1.12f)
+            SKIN_TONES[p.skin % SKIN_TONES.size], PersonPainter.HAIR[p.skin % PersonPainter.HAIR.size], 1.12f,
+            carry = e.carryPose(), load = p.hand.size)
     }
 
     // ------------------------------------------------------------------ overlays

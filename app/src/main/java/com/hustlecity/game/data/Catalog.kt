@@ -429,6 +429,36 @@ object Catalog {
             parts = listOf(box(0f, .1f, .72f, 2f, .9f, .78f, WOOD_L), box(.05f, .15f, 0f, .15f, .85f, .72f, DARK), box(1.85f, .15f, 0f, 1.95f, .85f, .72f, DARK), box(.7f, .3f, .78f, 1.3f, .4f, 1.15f, DARK))),
         FurnitureDef("pallet", "Pallet", 100.0, 1, 1, ItemFn.OFFICE,
             parts = listOf(box(.05f, .05f, 0f, .95f, .95f, .15f, WOOD_L), box(.1f, .1f, .15f, .9f, .9f, .8f, c(0xFFC8A165)), box(.15f, .15f, .8f, .85f, .85f, 1.3f, c(0xFFC8A165)))),
+        // carrying gear: a hand truck you own, and the flatbed carts stores lend you
+        FurnitureDef("hand_truck", "Hand Truck", 250.0, 1, 1, ItemFn.DECOR,
+            description = "Carry 4 boxes at a time instead of 1. Folds into any vehicle (takes one cargo slot). Not for display.",
+            parts = listOf(
+                box(.2f, .18f, 0f, .8f, .5f, .05f, c(0xFF9AA3AD)),
+                box(.27f, .42f, .05f, .33f, .5f, 1.28f, c(0xFFD0392B)), box(.67f, .42f, .05f, .73f, .5f, 1.28f, c(0xFFD0392B)),
+                box(.33f, .43f, .45f, .67f, .48f, .5f, c(0xFFD0392B)), box(.33f, .43f, .9f, .67f, .48f, .95f, c(0xFFD0392B)),
+                box(.22f, .38f, 1.24f, .78f, .52f, 1.31f, DARK),
+                box(.27f, .55f, .1f, .73f, .62f, .16f, STEEL),
+                box(.12f, .46f, 0f, .26f, .74f, .3f, c(0xFF1C1E22)), box(.74f, .46f, 0f, .88f, .74f, .3f, c(0xFF1C1E22)),
+                box(.15f, .55f, .1f, .23f, .65f, .2f, STEEL), box(.77f, .55f, .1f, .85f, .65f, .2f, STEEL),
+            )),
+        FurnitureDef("cart_rack", "Store Carts", 0.0, 3, 1, ItemFn.DECOR,
+            description = "Free flatbed carts. Each holds 8 boxes, but it has to stay in the store's parking lot.",
+            parts = buildList {
+                for (k in 0 until 3) {
+                    val x = .08f + k * .98f
+                    add(box(x, .1f, .2f, x + .82f, .9f, .27f, c(0xFF5B6770)))
+                    add(box(x, .1f, .27f, x + .82f, .9f, .3f, c(0xFF7D8A96)))
+                    add(box(x + .05f, .1f, .3f, x + .1f, .16f, 1.05f, c(0xFF2F80ED)))
+                    add(box(x + .72f, .1f, .3f, x + .77f, .16f, 1.05f, c(0xFF2F80ED)))
+                    add(box(x + .05f, .1f, .98f, x + .77f, .16f, 1.05f, c(0xFF2F80ED)))
+                    add(box(x + .04f, .12f, 0f, x + .16f, .24f, .2f, c(0xFF1C1E22)))
+                    add(box(x + .66f, .12f, 0f, x + .78f, .24f, .2f, c(0xFF1C1E22)))
+                    add(box(x + .04f, .76f, 0f, x + .16f, .88f, .2f, c(0xFF1C1E22)))
+                    add(box(x + .66f, .76f, 0f, x + .78f, .88f, .2f, c(0xFF1C1E22)))
+                }
+                add(box(1.4f, 0f, 0f, 1.5f, .08f, 1.7f, DARK))
+                add(box(1.05f, 0f, 1.45f, 1.85f, .06f, 1.85f, c(0xFFF2C94C)))
+            }),
         // warehouse & headquarters
         FurnitureDef("pallet_rack", "Pallet Rack", 1800.0, 2, 1, ItemFn.DISPLAY, setOf("pallet_rack"), displayUnits = WAREHOUSE_BOXES_PER_RACK,
             description = "Heavy steel racking. Stores $WAREHOUSE_BOXES_PER_RACK boxes of any product in a warehouse.",
@@ -837,7 +867,7 @@ object Catalog {
             listOf("cash_register", "shelf", "drinks_fridge", "fresh_fridge", "freezer", "treadmill", "workout_bench", "weight_rack", "boxing_bag",
                 "gym_locker", "shower", "fitness_board", "bookshelf", "bench", "barstool", "neon_cactus", "neon_circle", "speaker_small",
                 "speaker_medium", "speaker_large", "cleaning_station", "wall_lamp", "pallet_rack", "dance_floor", "dj_booth", "cinema_screen", "cinema_seats", "stage",
-                "checkout_counter", "shopping_baskets", "security_camera", "security_gate", "trash_can", "exercise_bike", "rowing_machine", "coat_check", "stage_lights")),
+                "checkout_counter", "shopping_baskets", "security_camera", "security_gate", "trash_can", "exercise_bike", "rowing_machine", "coat_check", "stage_lights", "hand_truck")),
         PlaceDef("primekitchen", "Prime Kitchen Supply", PlaceKind.FURNITURE_STORE, "Pro gear for food & beauty.", c(0xFFF2994A), "place_kitchen",
             listOf("coffee_machine", "pastry_case", "grill", "fryer", "pizza_oven", "ice_cream_freezer", "digital_scale", "hair_chair", "hair_wash", "cash_register", "checkout_counter",
                 "home_fridge", "bed", "tv", "table_set", "cocktail_bar", "concession_stand", "trash_can")),
@@ -856,7 +886,7 @@ object Catalog {
         PlaceDef("fuel", "Fuel Up", PlaceKind.GAS_STATION, "Fill her up.", c(0xFFF2C94C), "place_gas"),
         PlaceDef("officeplus", "OfficePlus Supply", PlaceKind.FURNITURE_STORE, "Racks, desks and everything in between.", c(0xFF1F5FAD), "place_office",
             listOf("pallet_rack", "office_desk", "graphic_tablet", "desk_globe", "desk_calendar", "copier", "meeting_table", "whiteboard", "filing_cabinet", "water_cooler",
-                "plant_large", "painting", "speaker_small", "wall_lamp", "cleaning_station", "trash_can", "security_camera", "bench")),
+                "plant_large", "painting", "speaker_small", "wall_lamp", "cleaning_station", "trash_can", "security_camera", "bench", "hand_truck")),
     )
     fun place(id: String) = places.first { it.id == id }
 

@@ -25,6 +25,8 @@ sealed class Panel {
     data object Sleep : Panel()
     data class Warehouse(val businessId: Int) : Panel()
     data class Trunk(val vehicleId: Int) : Panel()
+    /** Paying for picked-up furniture at the checkout and having it delivered. */
+    data class ShopDeliver(val buildingId: Int) : Panel()
 }
 
 enum class ToastKind { INFO, GOOD, BAD, SAVE }
