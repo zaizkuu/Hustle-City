@@ -17,14 +17,24 @@ android {
         versionName = "1.0.0"
     }
 
+    // Optional private release key, supplied through the environment (CI secrets).
+    val releaseKeystore = System.getenv("HUSTLE_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (releaseKeystore != null) create("release") {
+            storeFile = releaseKeystore
+            storePassword = System.getenv("HUSTLE_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("HUSTLE_KEY_ALIAS")
+            keyPassword = System.getenv("HUSTLE_KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Signed with the debug key so the release APK installs straight away.
-            // Swap in your own signing config before publishing to a store.
-            signingConfig = signingConfigs.getByName("debug")
+            // Without a private key the release APK is signed with the debug key so it installs straight away.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 
