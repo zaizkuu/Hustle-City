@@ -86,6 +86,7 @@ fun GameEngine.startBusiness(buildingId: Int, typeId: String, name: String): Bus
     val b = city.building(buildingId) ?: return null
     if (state.rentalFor(buildingId) == null || state.businessAt(buildingId) != null) return null
     val type = Catalog.type(typeId)
+    if (type.buildingKind != b.kind.name) { toast("${type.name} can't open in a ${b.kind.label.lowercase()} building"); return null }
     if (type.sources.contains(Source.IMPORT) && Catalog.COURSE_IMPORT !in state.player.courses) {
         toast("${type.name} needs the Import & Trade course"); return null
     }
@@ -95,6 +96,9 @@ fun GameEngine.startBusiness(buildingId: Int, typeId: String, name: String): Bus
     biz.wallColor = rnd.nextInt(WALL_COLORS.size)
     if (type.id == "coffee" || type.id == "fastfood") { biz.openHour = 7; biz.closeHour = 21 }
     if (type.id == "gym") { biz.openHour = 6; biz.closeHour = 22 }
+    if (type.id == "nightclub") { biz.openHour = 20; biz.closeHour = 4 }
+    if (type.id == "cinema" || type.id == "theater") { biz.openHour = 11; biz.closeHour = 0 }
+    if (type.office) { biz.openHour = 8; biz.closeHour = if (type.id == "travel") 21 else 19 }
     if (type.facility) { biz.tempClosed = false; biz.openHour = 0; biz.closeHour = 0 }
     state.businesses += biz
     ui.bizHubSel = biz.id
@@ -102,7 +106,12 @@ fun GameEngine.startBusiness(buildingId: Int, typeId: String, name: String): Bus
     message("Uncle Sal", when (type.id) {
         "warehouse" -> "A warehouse! Put pallet racks in it (OfficePlus Supply or Essentials Appliances), then fill it with wholesale stock. Your delivery contracts and purchasing agents take stock from here first, at no markup."
         "hq" -> "Your own Headquarters! Furnish it with office desks from OfficePlus Supply, then hire an HR Manager and Purchasing Agents at Apex Recruitment and assign them here."
-        else -> "${biz.name} — great name! Now buy furniture: check the requirements in BizHub. Essentials Appliances and Prime Kitchen Supply sell what you need."
+        "nightclub" -> "A nightclub! You need a Cocktail Bar (Prime Kitchen Supply), a Dance Floor and a DJ Booth (Essentials Appliances). Hire a DJ and bar staff at Apex Recruitment: no DJ, no party. Stock beer and cocktails from the wholesalers."
+        "cinema" -> "A cinema! Put in a Cinema Screen and rows of seats (Essentials Appliances), a Concession Stand and a register (Prime Kitchen Supply). A Projectionist must be on shift to run the films. Licences cost ${money(type.dailyFee)} a day."
+        "theater" -> "A theater! Build a Stage and rows of seats (Essentials Appliances) plus a register. Hire Actors at Apex Recruitment: the show needs a cast on shift. Licences cost ${money(type.dailyFee)} a day, but tickets sell for a lot."
+        else -> if (type.office) "${biz.name} is open for business! Each ${type.staffRole.label} needs an Office Desk (OfficePlus Supply)" +
+            (type.requirements.drop(1).joinToString("") { ", plus a ${it.label}" }) + ". Clients pay by the hour, so a good reputation and advertising bring in work. Hire ${type.staffRole.label}s at Apex Recruitment."
+        else "${biz.name} — great name! Now buy furniture: check the requirements in BizHub. Essentials Appliances and Prime Kitchen Supply sell what you need."
     })
     toast("${biz.name} founded!", ToastKind.GOOD)
     bump()

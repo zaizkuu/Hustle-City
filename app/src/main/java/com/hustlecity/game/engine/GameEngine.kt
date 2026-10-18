@@ -117,20 +117,7 @@ class GameEngine(context: Context?) {
         val spot = curbSpot(home, 4f)
         s.vehicles += OwnedVehicle(s.newId(), "tico", spot.first, spot.second, (Math.PI / 2).toFloat(), fuel = .6, condition = .75)
         // rivals and their businesses
-        val rivalRnd = Random(seed + 7)
-        for ((i, pair) in Catalog.rivalCompanies.withIndex()) {
-            val cash = 150_000.0 + rivalRnd.nextDouble() * 900_000.0
-            s.rivals += Rival(s.newId(), pair.first, pair.second, cash, cash)
-            if (i == 0) Unit
-        }
-        val retail = city.buildings.filter { it.kind == BKind.RETAIL }.shuffled(rivalRnd)
-        val rivalShare = (retail.size * .55).toInt()
-        for (b in retail.take(rivalShare)) {
-            val rival = s.rivals[rivalRnd.nextInt(s.rivals.size)]
-            val type = if (rival.name == "Ironclad Fitness" && rivalRnd.nextBoolean()) Catalog.type("gym") else Catalog.businessTypes[rivalRnd.nextInt(Catalog.businessTypes.size)]
-            s.rivalBusinesses += RivalBusiness(s.newId(), rival.id, b.id, type.id, Catalog.randomBusinessName(type.id, rivalRnd))
-        }
-        for (r in s.rivals) r.netWorth = r.cash + s.rivalBusinesses.count { it.rivalId == r.id } * 65000.0
+        economy.rivals.seed(Random(seed + 7))
         message("Uncle Sal", Objectives.groups[0].intro, notify = false)
         message("Uncle Sal", "Your old Tico Compact is parked outside your apartment at ${home.address}. Tap the phone apps to get around — Maps shows the whole city.", notify = false)
         camera.zoom = 70f
@@ -159,6 +146,7 @@ class GameEngine(context: Context?) {
         state = s
         city = City(s.seed)
         rnd = Random(System.nanoTime())
+        economy.rivals.migrate()
         interior = null
         minuteAcc = 0.0
         s.player.workingAt = if (s.skip?.kind == SkipKind.WORK) s.skip!!.target else -1
@@ -316,6 +304,37 @@ class GameEngine(context: Context?) {
 
     // ------------------------------------------------------------------ main loop
 
+    private var doorClock = 0f
+
+    /** Tells pedestrians which shop doors near the camera are open, and how likely they are to walk in. */
+    private fun refreshDoors(fx: Float, fy: Float) {
+        val hour = state.hour
+        val rivals = state.rivalBusinesses.associateBy { it.buildingId }
+        val mine = state.businesses.associateBy { it.buildingId }
+        var n = 0
+        for (b in city.buildings) {
+            val dx = b.doorX - fx; val dy = b.doorY - fy
+            if (dx * dx + dy * dy > 160f * 160f || !b.solid) continue
+            val biz = mine[b.id]
+            val rb = rivals[b.id]
+            val chance = when {
+                b.placeId != null -> .02f
+                biz != null -> if (biz.type.facility || biz.type.office || !BizCalc.isOpen(biz, hour)) 0f
+                    else ((economy.servedRate[biz.id] ?: 0.0) / 250.0).toFloat().coerceIn(.02f, .25f)
+                rb != null -> Catalog.type(rb.typeId).let { t -> if (t.office || t.curve[hour] < .05f) 0f else .03f + .05f * t.curve[hour] * rb.level }
+                else -> 0f
+            }
+            if (chance <= 0f) continue
+            if (traffic.doors.size < (n + 1) * 4) traffic.doors = traffic.doors.copyOf((n + 1) * 4 + 64)
+            traffic.doors[n * 4] = b.doorX
+            traffic.doors[n * 4 + 1] = b.doorY
+            traffic.doors[n * 4 + 2] = chance
+            traffic.doors[n * 4 + 3] = if (b.facesNorth) 1f else -1f
+            n++
+        }
+        traffic.doorCount = n
+    }
+
     fun frame(dtIn: Float) {
         if (!ready) return
         val dt = dtIn.coerceIn(0f, .05f)
@@ -365,6 +384,8 @@ class GameEngine(context: Context?) {
             var n = 0
             for (v in state.vehicles) if (v.id != state.player.driving) { traffic.obstacles[n * 2] = v.x; traffic.obstacles[n * 2 + 1] = v.y; n++ }
             traffic.obstacleCount = n
+            doorClock -= dt
+            if (doorClock <= 0f) { doorClock = 1f; refreshDoors(camera.tx, camera.ty) }
             traffic.update(dt, camera.tx, camera.ty, 230f, bx, by)
         }
         interior?.update(dt, !simPaused() || skip != null)

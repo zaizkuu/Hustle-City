@@ -249,29 +249,78 @@ fun ContactsApp(e: GameEngine) {
 fun RivalsApp(e: GameEngine) {
     val s = e.state
     var open by remember { mutableIntStateOf(-1) }
-    data class RowData(val id: Int, val name: String, val color: Color, val worth: Double, val count: Int, val trend: Double)
-    val rows = (s.rivals.map { r -> RowData(r.id, r.name, r.color.toColor(), r.netWorth, s.rivalBusinesses.count { it.rivalId == r.id }, r.trend) } +
-        RowData(-1, "${s.player.name} (You)", HC.Green, e.netWorth(), s.businesses.size, s.history.lastOrNull()?.profit ?: 0.0)).sortedByDescending { it.worth }
+    data class RowData(val id: Int, val name: String, val color: Color, val worth: Double, val count: Int, val trend: Double, val strategy: String)
+    val myWorth = e.netWorth()
+    val rows = (s.rivals.map { r ->
+        RowData(r.id, r.name, r.color.toColor(), r.netWorth, s.rivalBusinesses.count { it.rivalId == r.id }, r.trend, com.hustlecity.game.engine.RivalAI.STRATEGIES[r.strategy])
+    } + RowData(-1, "${s.player.name} (You)", HC.Green, myWorth, s.businesses.count { !it.type.facility }, s.history.lastOrNull()?.profit ?: 0.0, "")).sortedByDescending { it.worth }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        item { Spacer(Modifier.height(6.dp)) }
+        item {
+            Spacer(Modifier.height(6.dp))
+            val leader = s.rivals.maxByOrNull { it.netWorth }
+            WhiteCard(Modifier.fillMaxWidth(), padding = 10.dp) {
+                Text("Race to the top", style = HT.bodyBold, color = HC.Ink)
+                Text(
+                    if (leader == null || myWorth > leader.netWorth) "You lead the city. Reach ${e.moneyShort(5_000_000.0)} net worth to win."
+                    else "${leader.name} leads with ${e.moneyShort(leader.netWorth)} and earns about ${e.moneyShort(leader.trend)} a day. Overtake every rival and reach ${e.moneyShort(5_000_000.0)} to win.",
+                    style = HT.small, color = HC.InkSoft,
+                )
+                val wars = s.rivalBusinesses.filter { rb -> rb.targetBiz >= 0 && s.businesses.any { it.id == rb.targetBiz } }
+                for (rb in wars.take(3)) {
+                    val mine = s.businesses.first { it.id == rb.targetBiz }
+                    val r = s.rivals.firstOrNull { it.id == rb.rivalId }
+                    Text("⚔ Price war: ${r?.name}'s ${rb.name} vs your ${mine.name} (${((1 - rb.priceFactor) * 100).roundToInt()}% cheaper)", style = HT.small, color = HC.Red, modifier = Modifier.padding(top = 3.dp))
+                }
+            }
+        }
         items(rows.size) { idx ->
             val r = rows[idx]
             WhiteCard(Modifier.fillMaxWidth().clickable { open = if (open == r.id) -2 else r.id }, padding = 10.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("#${idx + 1}", style = HT.title, color = if (r.id == -1) HC.Green else HC.Ink, modifier = Modifier.width(44.dp))
                     Dot(r.color, 12.dp)
-                    Text("  ${r.name}", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
-                    Text("${r.count} businesses", style = HT.small, color = HC.InkSoft, modifier = Modifier.width(100.dp))
-                    Text(e.moneyShort(r.worth), style = HT.bodyBold, color = HC.Ink, modifier = Modifier.width(90.dp))
+                    Column(Modifier.weight(1f).padding(start = 6.dp)) {
+                        Text(r.name, style = HT.bodyBold, color = HC.Ink)
+                        if (r.strategy.isNotEmpty()) Text(r.strategy, style = HT.small, color = HC.InkSoft)
+                    }
+                    Text("${r.count} businesses", style = HT.small, color = HC.InkSoft, modifier = Modifier.width(92.dp))
+                    Text((if (r.trend >= 0) "+" else "") + e.moneyShort(r.trend) + "/day", style = HT.small, color = if (r.trend >= 0) HC.Green else HC.Red, modifier = Modifier.width(84.dp))
+                    Text(e.moneyShort(r.worth), style = HT.bodyBold, color = HC.Ink, modifier = Modifier.width(76.dp))
                     Icon(if (r.trend >= 0) Icons.Filled.ArrowDropUp else Icons.Filled.ArrowDropDown, null, tint = if (r.trend >= 0) HC.Green else HC.Red)
                 }
-                if (open == r.id && r.id >= 0) {
-                    val list = s.rivalBusinesses.filter { it.rivalId == r.id }
+                val rival = s.rivals.firstOrNull { it.id == r.id }
+                if (open == r.id && rival != null) {
+                    val list = s.rivalBusinesses.filter { it.rivalId == r.id }.sortedByDescending { it.profit }
+                    Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            KeyValue("Cash", e.moneyShort(rival.cash))
+                            KeyValue("Sales yesterday", e.moneyShort(rival.revenue))
+                            KeyValue("Renovated stores", "${list.count { it.level > 1 }} of ${list.size}")
+                            KeyValue("Buildings owned", "${list.count { it.owned }}")
+                            KeyValue("Advertising", "${list.count { it.marketing > 0 }} stores")
+                            KeyValue("Aggression", when { rival.aggression >= .7 -> "High"; rival.aggression >= .5 -> "Medium"; else -> "Low" })
+                        }
+                        Column(Modifier.weight(1.3f)) {
+                            Text("Net worth, last ${rival.worthHistory.size} days", style = HT.small, color = HC.InkSoft)
+                            WorthChart(listOf(r.color to rival.worthHistory, HC.Green to s.history.takeLast(rival.worthHistory.size).map { it.netWorth }),
+                                Modifier.fillMaxWidth().height(90.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Dot(r.color, 8.dp); Text(" ${r.name}   ", style = HT.small, color = HC.InkSoft); Dot(HC.Green, 8.dp); Text(" You", style = HT.small, color = HC.InkSoft)
+                            }
+                        }
+                    }
+                    if (rival.log.isNotEmpty()) {
+                        Text("Recent moves", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(top = 8.dp))
+                        for (line in rival.log.take(5)) Text("• $line", style = HT.small, color = HC.Ink)
+                    }
+                    Text("Businesses (most profitable first)", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(top = 8.dp))
                     for (rb in list.take(40)) {
                         val b = e.city.building(rb.buildingId) ?: continue
                         Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("${Catalog.type(rb.typeId).emoji}  ${rb.name}", style = HT.body, color = HC.Ink, modifier = Modifier.weight(1f))
+                            Text("${Catalog.type(rb.typeId).emoji}  ${rb.name} " + "★".repeat(rb.level), style = HT.body, color = HC.Ink, modifier = Modifier.weight(1f))
                             Text("${b.address} · ${City.neighborhoods[b.neighborhood].name}", style = HT.small, color = HC.InkSoft, modifier = Modifier.weight(1f))
+                            Text(if (rb.targetBiz >= 0) "price war" else "${(rb.reputation * 100).roundToInt()}% rep", style = HT.small,
+                                color = if (rb.targetBiz >= 0) HC.Red else HC.InkSoft, modifier = Modifier.width(70.dp))
                             Icon(Icons.Filled.Place, null, tint = HC.Blue, modifier = Modifier.size(20.dp).clickable { e.setWaypoint(b.id); e.toast("Waypoint set") })
                         }
                     }
@@ -279,6 +328,35 @@ fun RivalsApp(e: GameEngine) {
             }
         }
         item { Spacer(Modifier.height(8.dp)) }
+    }
+}
+
+/** Overlaid net worth lines sharing one scale. */
+@Composable
+private fun WorthChart(series: List<Pair<Color, List<Double>>>, modifier: Modifier) {
+    Canvas(modifier) {
+        val all = series.flatMap { it.second }
+        if (all.size < 2) return@Canvas
+        val lo = minOf(0.0, all.min())
+        val hi = all.max().coerceAtLeast(lo + 1.0)
+        for (g in 0..3) {
+            val y = size.height - g / 3f * size.height
+            drawLine(Color(0xFFE3E7EC), androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(size.width, y), 1f)
+        }
+        val n = series.maxOf { it.second.size }
+        if (n < 2) return@Canvas
+        val stepX = size.width / (n - 1)
+        for ((color, values) in series) {
+            if (values.size < 2) continue
+            val path = androidx.compose.ui.graphics.Path()
+            val offset = n - values.size
+            for ((i, v) in values.withIndex()) {
+                val x = (i + offset) * stepX
+                val y = (size.height - ((v - lo) / (hi - lo)) * (size.height - 4)).toFloat()
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
+        }
     }
 }
 
@@ -421,7 +499,7 @@ fun FinanceApp(e: GameEngine) {
                         Text("${b.type.emoji} ${b.name}", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
                         if (d == null) Text("no data yet", style = HT.small, color = HC.InkSoft)
                         else {
-                            val profit = d.revenue - d.cogs - d.wages - d.rent - d.marketing
+                            val profit = d.profit
                             Text("${d.customers} customers · revenue ${e.money(d.revenue)} · profit ", style = HT.small, color = HC.InkSoft)
                             Text(e.money(profit), style = HT.small, color = if (profit >= 0) HC.Green else HC.Red, fontWeight = FontWeight.Bold)
                         }

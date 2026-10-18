@@ -110,6 +110,14 @@ object Objectives {
                 if (BizCalc.isWithinHours(b, s.hour) && BizCalc.workers(e, b, s.hour, s.weekday).isEmpty()) {
                     out += Alert("${b.name}: Nobody is working right now", true, b.id)
                 }
+                b.type.performer?.let { role ->
+                    if (BizCalc.isWithinHours(b, s.hour) && BizCalc.performers(e, b, s.hour, s.weekday).isEmpty()) {
+                        out += Alert("${b.name}: No ${role.label} on shift, so no customers can be served", true, b.id)
+                    }
+                }
+                if (b.type.office && BizCalc.count(b, "desk") < s.employees.count { it.businessId == b.id && it.role == b.type.staffRole }) {
+                    out += Alert("${b.name}: Some ${b.type.staffRole.label}s have no desk", false, b.id)
+                }
                 if (b.cleanliness < 40) out += Alert("${b.name}: The store is dirty (${b.cleanliness.toInt()}%)", false, b.id)
             }
         }

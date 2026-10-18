@@ -9,19 +9,22 @@ Native Kotlin + Jetpack Compose. The 3D city is rendered with a small custom eng
 **The city**
 - Procedural Manhattan-style grid: 6 neighborhoods (Garment District, Hell's Kitchen, Midtown, Murray Hill, Lower Manhattan, Industry City), about 600 buildings with addresses, parks, parking lots and gas stations.
 - 2.5D perspective rendering with windows, storefronts, awnings, rooftop units, sun-tracking shadows, a day/night cycle with lit windows and street lamps.
-- Traffic with traffic lights, pedestrians, and buildings that turn see-through when they block your view.
+- Traffic with traffic lights: cars plan their turns and take smooth arcs, keep their distance and give way to pedestrians. Pedestrians cross on the walk signal, step aside for each other and walk into open shops. Buildings turn see-through when they block your view.
 - Walk with the on-screen joystick, or drive your own car with fuel, condition and cargo space. Taxis are available from any building card.
 
 **Your character**
 - Energy, hunger and happiness. Sleep at home, eat from your fridge or at restaurants, and avoid passing out.
 - Courses at Hustle Business School unlock hiring, logistics, marketing, importing and real estate.
 
-**Businesses** (13 types)
-- Florist, Fruit & Vegetable Store, Coffee Shop, Supermarket, Fast Food, Hairdresser, Gym, Gift Shop, Liquor Store, Clothing, Bookstore, Electronics, Jewelry.
+**Businesses** (21 types, the full Big Ambitions roster)
+- Shops: Florist, Fruit & Vegetable Store, Coffee Shop, Supermarket, Fast Food, Hairdresser, Gym, Gift Shop, Liquor Store, Clothing, Bookstore, Electronics, Jewelry.
+- Nightlife and shows: Nightclub (needs a DJ), Cinema (projectionist, licence fees) and Theater (actors, licence fees).
+- Office firms: Law Firm, Web Development Agency, Graphic Designer, Travel Agency and Event Planning Agency. Professionals at desks bill clients by the hour; clients come from reputation and advertising.
 - Rent a building in **Realty** and pick a business type, comparing inventory sources, nearby competitors and primary products.
 - Buy furniture at three appliance stores. Load it into your car (or pay for delivery) and place it with the grid-based **Interior Designer**, with floor and wall colors.
 - Buy wholesale stock at Metro Wholesale, CityDistro or Global Imports, then unload it onto shelves, fridges and machines.
 - Customer simulation is driven by traffic index, marketing, hour of day, competitors, price acceptance, wait times, cleanliness, interior and staff skill.
+- Inside, customers browse displays, queue at the register, pay, then sit down to eat, watch the film or dance. They never share a spot, and staff walk to their posts and cleaners make their rounds.
 
 **Growing the empire**
 - **Warehouses**: rent one, fill it with pallet racks, and buy wholesale in bulk (10% off at 6+ boxes). Delivery contracts and purchasing agents use warehouse stock first, and you can load boxes into your van from inside.
@@ -35,7 +38,7 @@ Native Kotlin + Jetpack Compose. The 3D city is rendered with a small custom eng
 - **BizHub** has the tabs Insight, Inventory & Pricing, Schedule, Deliveries, Marketing and Settings.
 - **Staff** lets you hire candidates from Apex Recruitment, give raises, train and fire. Unhappy staff quit.
 - **Finance** shows a daily operating-profit chart, a cost breakdown and your loans. Hudson Bank offers three loan tiers.
-- **Rivals** has 8 AI companies that open and close stores; your goal is to become #1.
+- **Rivals** has 8 AI companies, each with its own strategy (balanced, aggressive, premium, discounter, specialist). Their stores earn money with the same demand model as yours. They expand into good locations (always leaving buildings for you), renovate busy stores, advertise, buy their buildings, close money-losers and start price wars with your best stores. Your goal is to become #1.
 - **Maps** is a zoomable city map with neighborhood, business-type and for-rent filters, plus search.
 - **Persona** and **Contacts** cover your stats, education, vehicles and messages.
 - Midnight settlement with a day summary and autosave. Guided objectives from Uncle Sal.

@@ -267,4 +267,61 @@ class UiSnapshotTest {
         e.ui.panel = Panel.Settings
         shoot(e, "ui_settings.png")
     }
+
+    @Test
+    fun rivalsRace() {
+        val e = game()
+        e.ui.tip = null
+        e.state.sandbox = true
+        repeat(20) { e.state.minute = (e.state.minute / 1440 + 1) * 1440 - 1; e.simulateMinute() }
+        e.ui.summary = null
+        e.ui.app = AppId.RIVALS
+        shoot(e, "ui_rivals.png")
+    }
+
+    @Test
+    fun officeStart() {
+        val e = game()
+        e.ui.tip = null
+        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.OFFICE }
+        e.state.rentals += Rental(b.id, b.baseRent, 1)
+        e.state.player.x = b.doorX; e.state.player.y = b.doorY
+        e.enterBuilding(b)
+        shoot(e, "ui_office_start.png")
+    }
+
+    private fun venue(e: GameEngine, type: String, items: List<PlacedItem>, roles: List<com.hustlecity.game.data.StaffRole>): com.hustlecity.game.world.Building {
+        e.ui.tip = null
+        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.gridW >= 13 && it.gridD >= 10 }
+        e.state.rentals += Rental(b.id, b.baseRent, 1)
+        val biz = e.startBusiness(b.id, type, "Venue")!!
+        biz.furniture += items
+        biz.tempClosed = false
+        for ((n, r) in roles.withIndex()) e.state.employees += com.hustlecity.game.model.Employee(e.state.newId(), "S$n", r, .6, 20.0, 20.0, 30, businessId = biz.id, shiftStart = 0, shiftEnd = 0, days = 127)
+        e.state.player.x = b.doorX; e.state.player.y = b.doorY
+        e.enterBuilding(b)
+        e.economy.servedRate[biz.id] = 120.0
+        repeat(30 * 50) { e.interior!!.update(1 / 30f, true) }
+        return b
+    }
+
+    @Test
+    fun nightclubInterior() {
+        val e = game()
+        e.state.minute = (e.state.minute / 1440) * 1440 + 23 * 60
+        venue(e, "nightclub", listOf(PlacedItem("cocktail_bar", 1, 0, 0), PlacedItem("dance_floor", 6, 3, 0), PlacedItem("dj_booth", 7, 0, 0),
+            PlacedItem("barstool", 1, 2, 0), PlacedItem("barstool", 3, 2, 0), PlacedItem("neon_circle", 11, 0, 0), PlacedItem("speaker_large", 11, 3, 0)),
+            listOf(com.hustlecity.game.data.StaffRole.CUSTOMER_SERVICE, com.hustlecity.game.data.StaffRole.DJ))
+        shoot(e, "ui_nightclub.png")
+    }
+
+    @Test
+    fun cinemaInterior() {
+        val e = game()
+        e.state.minute = (e.state.minute / 1440) * 1440 + 19 * 60
+        venue(e, "cinema", listOf(PlacedItem("cinema_screen", 4, 0, 0), PlacedItem("cinema_seats", 2, 3, 0), PlacedItem("cinema_seats", 6, 3, 0),
+            PlacedItem("cinema_seats", 2, 5, 0), PlacedItem("cinema_seats", 6, 5, 0), PlacedItem("cash_register", 10, 7, 0), PlacedItem("concession_stand", 1, 7, 0)),
+            listOf(com.hustlecity.game.data.StaffRole.CUSTOMER_SERVICE, com.hustlecity.game.data.StaffRole.PROJECTIONIST))
+        shoot(e, "ui_cinema.png")
+    }
 }

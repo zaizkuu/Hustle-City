@@ -381,6 +381,17 @@ private fun ScheduleTab(e: GameEngine, biz: Business) {
                         }
                     }
                 }
+                biz.type.performer?.let { perf ->
+                    Text("${perf.label} coverage (required to serve customers)", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+                    Row(Modifier.fillMaxWidth()) {
+                        for (h in 0 until 24) {
+                            val open = BizCalc.isWithinHours(biz, h)
+                            val n = s.employees.count { it.businessId == biz.id && it.role == perf && it.worksAt(h, s.weekday) }
+                            val col = when { !open -> Color(0xFFE3E7EC); n == 0 -> HC.Red; else -> HC.Purple }
+                            Box(Modifier.weight(1f).padding(horizontal = 1.dp).height(12.dp).background(col))
+                        }
+                    }
+                }
                 Text("Red = open but nobody scheduled (you can work these hours yourself).", style = HT.small, color = HC.InkSoft)
             }
             val assigned = s.employees.filter { it.businessId == biz.id }
@@ -419,11 +430,11 @@ private fun ScheduleTab(e: GameEngine, biz: Business) {
                 it.businessId != biz.id && when {
                     BizCalc.isHq(biz) -> it.role.atHeadquarters || it.role == StaffRole.CLEANER
                     biz.type.facility -> it.role == StaffRole.CLEANER
-                    else -> it.role == biz.type.staffRole || it.role == StaffRole.CLEANER
+                    else -> it.role == biz.type.staffRole || it.role == biz.type.performer || it.role == StaffRole.CLEANER
                 }
             }
             if (free.isEmpty()) {
-                Text("No available ${biz.type.staffRole.label} or Cleaner employees. Hire them at Apex Recruitment (needs the Basic HR course).", style = HT.small, color = HC.InkSoft)
+                Text("No available ${biz.type.staffRole.label}${biz.type.performer?.let { ", ${it.label}" } ?: ""} or Cleaner employees. Hire them at Apex Recruitment (needs the Basic HR course).", style = HT.small, color = HC.InkSoft)
                 HButton("Pin recruiter", small = true, modifier = Modifier.padding(top = 6.dp)) { e.city.placeBuilding("recruit")?.let { e.state.player.waypoint = it.id; e.toast("Waypoint set") } }
             }
             for (emp in free) {

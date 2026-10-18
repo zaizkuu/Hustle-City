@@ -89,6 +89,12 @@ object BizCalc {
         return out
     }
 
+    /** Performers on shift (DJ, projectionists, actors) for types that need one. */
+    fun performers(e: GameEngine, b: Business, hour: Int, weekday: Int): List<Double> {
+        val role = b.type.performer ?: return emptyList()
+        return e.state.employees.filter { it.businessId == b.id && it.role == role && it.worksAt(hour, weekday) }.map { it.skill }
+    }
+
     fun cleaners(e: GameEngine, b: Business, hour: Int, weekday: Int) =
         e.state.employees.count { it.businessId == b.id && it.role == StaffRole.CLEANER && it.worksAt(hour, weekday) }
 
@@ -101,6 +107,10 @@ object BizCalc {
         return rivals + mine
     }
 
+    /** Office firms compete for clients across the whole city. */
+    fun cityCompetitors(e: GameEngine, typeId: String) =
+        e.state.rivalBusinesses.count { it.typeId == typeId } + e.state.businesses.count { it.typeId == typeId }
+
     fun competitorsFor(e: GameEngine, typeId: String, hood: Int): Int {
         val rivals = e.state.rivalBusinesses.count { it.typeId == typeId && e.city.building(it.buildingId)?.neighborhood == hood }
         val mine = e.state.businesses.count { it.typeId == typeId && e.city.building(it.buildingId)?.neighborhood == hood }
@@ -111,21 +121,38 @@ object BizCalc {
     fun demand(e: GameEngine, b: Business, hour: Int): Double {
         val building = e.city.building(b.buildingId) ?: return 0.0
         val type = b.type
+        if (type.office) {
+            // clients find firms by reputation and advertising rather than foot traffic
+            val comp = 1.0 / (1.0 + .06 * e.economy.rivals.competitionFor(b))
+            return type.baseDemand * (.35 + .9 * b.reputation) * (1.0 + b.marketing) * type.curve[hour] * comp
+        }
         val promo = promotion(b, building)
         val hood = City.neighborhoods[building.neighborhood]
         val wealth = if (type.wealthSensitive) hood.wealth.toDouble().pow(1.6) else 1.0
-        val comp = 1.0 / (1.0 + .15 * competitors(e, b))
+        val comp = 1.0 / (1.0 + .15 * e.economy.rivals.competitionFor(b))
         val rep = .55 + .9 * b.reputation
         return type.baseDemand * (.25 + 1.6 * promo) * type.curve[hour] * wealth * comp * rep
     }
 
     /** Customers per hour the business can serve with the given workers. */
-    fun capacity(b: Business, building: Building?, workers: List<Double>): Int {
-        if (workers.isEmpty()) return 0
+    fun capacity(b: Business, building: Building?, workers: List<Double>): Int = capacityRate(b, building, workers).roundToInt()
+
+    fun capacityRate(b: Business, building: Building?, workers: List<Double>): Double {
+        if (workers.isEmpty()) return 0.0
         val n = workers.size
         val skill = workers.average()
+        // billable hours: one per professional at a desk, more for skilled staff
+        if (b.type.office) return min(count(b, "desk"), n) * (.6 + .4 * skill)
         val registers = countFn(b, ItemFn.CASH_REGISTER)
+        val seats = b.furniture.sumOf { p -> Catalog.item(p.itemId)?.takeIf { "cinema_seat" in it.tags }?.capacity ?: 0 }.toDouble()
         var cap = when (b.typeId) {
+            "nightclub" -> {
+                val bars = count(b, "bar")
+                val floor = count(b, "dance_floor") * 35.0
+                minOf(min(bars, n) * 45.0 * (.6 + .4 * skill), floor)
+            }
+            "cinema" -> minOf(min(registers, n) * 40.0 * (.6 + .4 * skill), seats, count(b, "screen") * 45.0)
+            "theater" -> minOf(min(registers, n) * 40.0 * (.6 + .4 * skill), seats, count(b, "stage") * 40.0)
             "gym" -> {
                 val eq = b.furniture.sumOf { p -> Catalog.item(p.itemId)?.takeIf { "workout" in it.tags }?.capacity ?: 0 } * 1.5
                 val lockers = count(b, "locker") * 16.0
@@ -139,7 +166,7 @@ object BizCalc {
             else -> min(registers, n) * 40.0 * (.6 + .4 * skill)
         }
         if (building != null) cap = min(cap, building.customerLimit.toDouble())
-        return cap.roundToInt()
+        return cap
     }
 
     fun decorScore(b: Business, building: Building?): Double {
@@ -174,6 +201,7 @@ object BizCalc {
 class Economy(private val e: GameEngine) {
     /** Last computed served customers per hour, per business id (for visuals and Insight). */
     val servedRate = HashMap<Int, Double>()
+    val rivals = RivalAI(e)
     val capacityNow = HashMap<Int, Int>()
 
     fun minute() {
@@ -206,9 +234,11 @@ class Economy(private val e: GameEngine) {
         }
         val workers = BizCalc.workers(e, b, hour, weekday)
         val demand = BizCalc.demand(e, b, hour)
-        val cap = BizCalc.capacity(b, building, workers)
-        capacityNow[b.id] = cap
-        val served = min(demand, cap.toDouble())
+        // clubs, cinemas and theaters can't run the show without their DJ, projectionist or actors
+        val showOn = b.type.performer == null || BizCalc.performers(e, b, hour, weekday).isNotEmpty()
+        val cap = if (showOn) BizCalc.capacityRate(b, building, workers) else 0.0
+        capacityNow[b.id] = cap.roundToInt()
+        val served = min(demand, cap)
         servedRate[b.id] = served
         val lostRate = max(0.0, demand - served)
         if (lostRate > 0) {
@@ -218,7 +248,9 @@ class Economy(private val e: GameEngine) {
         if (workers.isEmpty()) return
         b.custAcc += served / 60.0
         val waitScore = if (demand <= 0.1) 1.0 else (served / demand).coerceIn(0.0, 1.0)
-        val staffSkill = workers.average()
+        val perf = BizCalc.performers(e, b, hour, weekday)
+        // a better DJ or cast makes for happier guests
+        val staffSkill = if (perf.isEmpty()) workers.average() else (workers.average() + perf.average()) / 2
         val interior = BizCalc.decorScore(b, building)
         while (b.custAcc >= 1.0) {
             b.custAcc -= 1.0
@@ -257,7 +289,8 @@ class Economy(private val e: GameEngine) {
         b.customersToday++
         b.hourlyToday[e.state.hour] = b.hourlyToday[e.state.hour] + 1
         val area = building?.area ?: 75
-        b.cleanliness = (b.cleanliness - 28.0 / area).coerceAtLeast(0.0)
+        // office clients rarely visit; shops get dirty with every customer
+        if (!b.type.office) b.cleanliness = (b.cleanliness - 28.0 / area).coerceAtLeast(0.0)
         b.satPrice += if (priceSamples == 0) .5 else priceScore / priceSamples
         b.satAvail += if (wanted == 0) 1.0 else 1.0 - missing.toDouble() / wanted
         b.satWait += waitScore
@@ -435,7 +468,9 @@ class Economy(private val e: GameEngine) {
             } else -1.0
             if (sat >= 0 && b.customersToday >= 5) b.reputation = (b.reputation * .6 + sat * .4).coerceIn(0.0, 1.0)
             val wages = s.employees.filter { it.businessId == b.id }.sumOf { it.hoursToday * it.wage }
-            b.history += BizDay(finishedDay, b.revenueToday, b.cogsToday, wages, rent, marketingCost, b.customersToday, sat)
+            val fees = if (b.tempClosed) 0.0 else b.type.dailyFee
+            if (fees > 0) e.spend(fees, "Licences", allowDebt = true, silent = true)
+            b.history += BizDay(finishedDay, b.revenueToday, b.cogsToday, wages, rent, marketingCost, b.customersToday, sat, fees)
             if (b.history.size > 30) b.history.removeAt(0)
             for (h in 0 until 24) { b.hourlyYesterday[h] = b.hourlyToday[h]; b.hourlyToday[h] = 0 }
             b.revenueToday = 0.0; b.cogsToday = 0.0; b.customersToday = 0; b.lostToday = 0
@@ -528,33 +563,7 @@ class Economy(private val e: GameEngine) {
         }
     }
 
-    private fun rivalsDaily() {
-        val s = e.state
-        for (r in s.rivals) {
-            val biz = s.rivalBusinesses.filter { it.rivalId == r.id }
-            var profit = 0.0
-            for (rb in biz) profit += Catalog.type(rb.typeId).baseDemand * (6 + e.rnd.nextDouble() * 8) - 150
-            r.cash += profit
-            r.trend = profit
-            r.netWorth = r.cash + biz.size * 65000.0
-            if (r.cash > 150_000 && e.rnd.nextDouble() < .22) {
-                val free = e.city.buildings.filter { it.kind == BKind.RETAIL && e.isVacant(it.id) }
-                if (free.isNotEmpty()) {
-                    val bld = free[e.rnd.nextInt(free.size)]
-                    val type = Catalog.businessTypes.filter { it.id != "electronics" || e.rnd.nextBoolean() }.random(e.rnd)
-                    val name = Catalog.randomBusinessName(type.id, e.rnd)
-                    s.rivalBusinesses += RivalBusiness(s.newId(), r.id, bld.id, type.id, name)
-                    r.cash -= 90_000
-                    e.message("Rival News", "${r.name} opened a ${type.name} \"$name\" at ${bld.address}, ${City.neighborhoods[bld.neighborhood].name}.")
-                }
-            } else if (biz.size > 3 && e.rnd.nextDouble() < .04) {
-                val rb = biz[e.rnd.nextInt(biz.size)]
-                s.rivalBusinesses.remove(rb)
-                r.cash += 30_000
-                e.message("Rival News", "${r.name} closed ${rb.name} at ${e.city.building(rb.buildingId)?.address}. The space is now for rent.")
-            }
-        }
-    }
+    private fun rivalsDaily() = rivals.daily()
 
     companion object {
         val NON_OPERATING = setOf("in:Loans", "Loan repayment", "Vehicles", "Real estate", "Furniture", "in:Sold assets", "in:Refunds")

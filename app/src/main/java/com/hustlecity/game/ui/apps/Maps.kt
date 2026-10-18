@@ -96,7 +96,7 @@ fun MapsOverlay(e: GameEngine, @Suppress("UNUSED_PARAMETER") r: Renderers) {
                 }
                 FilterRow("Enable / disable all", null, f.values.any { it }) { on ->
                     for (n in City.neighborhoods) f["hood:${n.id}"] = on
-                    for (t in Catalog.businessTypes) f["type:${t.id}"] = on
+                    for (t in Catalog.customerTypes) f["type:${t.id}"] = on
                     f["rent"] = on
                 }
                 FilterRow("Shops & services", null, f["places"] != false) { f["places"] = it }
@@ -110,7 +110,7 @@ fun MapsOverlay(e: GameEngine, @Suppress("UNUSED_PARAMETER") r: Renderers) {
                     }) { f["hood:${n.id}"] = it }
                 }
                 Section("Active businesses")
-                for (t in Catalog.businessTypes) FilterRow("${t.emoji}  ${t.name}", null, f["type:${t.id}"] == true) { f["type:${t.id}"] = it }
+                for (t in Catalog.customerTypes) FilterRow("${t.emoji}  ${t.name}", null, f["type:${t.id}"] == true) { f["type:${t.id}"] = it }
                 Spacer(Modifier.height(8.dp))
             }
             HButton("Close maps", Modifier.fillMaxWidth().padding(8.dp), color = HC.Orange) { e.ui.app = null; e.ui.selected = -1 }

@@ -67,7 +67,11 @@ data class BizDay(
     val marketing: Double,
     val customers: Int,
     val satisfaction: Double,
-)
+    /** Licence fees (cinemas and theaters). */
+    val fees: Double = 0.0,
+) {
+    val profit get() = revenue - cogs - wages - rent - marketing - fees
+}
 
 @Serializable
 data class Business(
@@ -176,10 +180,51 @@ data class OwnedVehicle(
 data class Loan(val id: Int, val name: String, var remaining: Double, val dailyPrincipal: Double, val dailyRate: Double, var daysLeft: Int)
 
 @Serializable
-data class Rival(val id: Int, val name: String, val color: Int, var cash: Double, var netWorth: Double, var trend: Double = 0.0)
+data class Rival(
+    val id: Int,
+    val name: String,
+    val color: Int,
+    var cash: Double,
+    var netWorth: Double,
+    /** Yesterday's operating profit across all stores. */
+    var trend: Double = 0.0,
+    /** 0 balanced, 1 aggressive expander, 2 premium (wealthy areas), 3 discounter, 4 specialist. */
+    var strategy: Int = 0,
+    /** Business types this company likes to open. */
+    var focus: List<String> = emptyList(),
+    /** 0..1: how readily it expands, cuts prices and goes after your stores. */
+    var aggression: Double = .5,
+    /** Net worth at the end of each day (last 60 days). */
+    val worthHistory: MutableList<Double> = mutableListOf(),
+    /** Latest moves, newest first. */
+    val log: MutableList<String> = mutableListOf(),
+    var revenue: Double = 0.0,
+    var milestone: Int = 0,
+)
 
 @Serializable
-data class RivalBusiness(val id: Int, val rivalId: Int, val buildingId: Int, val typeId: String, val name: String)
+data class RivalBusiness(
+    val id: Int,
+    val rivalId: Int,
+    val buildingId: Int,
+    val typeId: String,
+    val name: String,
+    /** 1..3: size of the fit-out (staff, registers and displays). */
+    var level: Int = 1,
+    var reputation: Double = .55,
+    /** Price relative to the market price; below 1 means a price war. */
+    var priceFactor: Double = 1.0,
+    var marketing: Double = 0.0,
+    /** Smoothed daily profit. */
+    var profit: Double = 0.0,
+    var revenue: Double = 0.0,
+    var customers: Int = 0,
+    var opened: Int = 0,
+    var owned: Boolean = false,
+    var losingDays: Int = 0,
+    /** Player business this store is fighting on price (-1 none). */
+    var targetBiz: Int = -1,
+)
 
 @Serializable
 data class DayRecord(

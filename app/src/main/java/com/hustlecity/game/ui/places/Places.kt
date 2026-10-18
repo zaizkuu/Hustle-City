@@ -466,6 +466,14 @@ private fun Recruiter(e: GameEngine, place: PlaceDef) {
                                     StaffRole.HAIRSTYLIST -> "Cuts and colors hair at hairdresser chairs."
                                     StaffRole.HR_MANAGER -> "Works at your Headquarters: +10% staff satisfaction for up to 12 employees and hires replacements when someone quits."
                                     StaffRole.PURCHASING_AGENT -> "Works at your Headquarters: restocks up to 4 stores every morning at 06:00, from your warehouse first."
+                                    StaffRole.DJ -> "Plays the DJ booth. A nightclub can't let anyone in without a DJ on shift."
+                                    StaffRole.PROJECTIONIST -> "Runs the films. A cinema needs one on shift to sell tickets."
+                                    StaffRole.ACTOR -> "Performs on stage. A theater needs a cast on shift to put on a show."
+                                    StaffRole.LAWYER -> "Bills legal work by the hour at a Law Firm. Needs an Office Desk."
+                                    StaffRole.PROGRAMMER -> "Builds websites for clients at a Web Development Agency. Needs an Office Desk."
+                                    StaffRole.GRAPHIC_DESIGNER -> "Designs logos and posters at a Graphic Designer studio. Needs an Office Desk."
+                                    StaffRole.TRAVEL_AGENT -> "Books trips for clients at a Travel Agency. Needs an Office Desk."
+                                    StaffRole.EVENT_PLANNER -> "Organizes parties and conferences at an Event Planning Agency. Needs an Office Desk."
                                 } + " Typical wage ~${e.money(role.baseWage)}/h.", style = HT.small, color = HC.InkSoft,
                             )
                         }
@@ -637,7 +645,7 @@ private fun StartBusiness(e: GameEngine, buildingId: Int) {
                 LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val types = when (b.kind) {
                         com.hustlecity.game.world.BKind.WAREHOUSE -> Catalog.facilityTypes.filter { it.buildingKind == "WAREHOUSE" }
-                        com.hustlecity.game.world.BKind.OFFICE -> Catalog.facilityTypes.filter { it.buildingKind == "OFFICE" }
+                        com.hustlecity.game.world.BKind.OFFICE -> Catalog.facilityTypes.filter { it.buildingKind == "OFFICE" } + Catalog.officeTypes
                         else -> Catalog.businessTypes
                     }
                     items(types) { t ->
@@ -660,7 +668,10 @@ private fun StartBusiness(e: GameEngine, buildingId: Int) {
                             val srcText = if (t.sources.isEmpty()) "Services" else t.sources.joinToString { if (it == Source.IMPORT) "Importer" else "Wholesaler" }
                             Text("Source: $srcText" + if (importLocked) " 🔒" else " ✓", color = if (importLocked) Color(0xFFFF7B7B) else Color.White, fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 3.dp))
-                            Text("Competitors nearby: ${BizCalc.competitorsFor(e, t.id, b.neighborhood)}", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 2.dp))
+                            Text(if (t.office) "Firms in the city: ${BizCalc.cityCompetitors(e, t.id)}" else "Competitors nearby: ${BizCalc.competitorsFor(e, t.id, b.neighborhood)}",
+                                color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 2.dp))
+                            if (!t.facility) Text("Staff: ${t.staffRole.label}" + (t.performer?.let { " + ${it.label}" } ?: ""), color = Color.White, fontSize = 10.sp, textAlign = TextAlign.Center, lineHeight = 12.sp)
+                            if (t.dailyFee > 0) Text("Licences ${e.money(t.dailyFee)}/day", color = Color(0xFFFFC27B), fontSize = 10.sp)
                             Text("Primary products", color = Color.White.copy(alpha = .6f), fontSize = 9.sp, modifier = Modifier.padding(top = 3.dp))
                             Text(t.primaryProducts.joinToString(", "), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, lineHeight = 12.sp)
                             Text("Needs: " + t.requirements.joinToString { it.label }, color = Color.White.copy(alpha = .7f), fontSize = 9.sp, textAlign = TextAlign.Center, lineHeight = 11.sp,
@@ -799,6 +810,9 @@ private val HELP = listOf(
     "Growing" to "Logistics Management unlocks automatic daily deliveries. Marketing Fundamentals unlocks bigger campaigns at Buzz Marketing. Import & Trade unlocks electronics and jewelry stores. Real Estate Investing lets you buy buildings. Beat the rivals in the Rivals app!",
     "Warehouses" to "Rent a warehouse (Realty → Warehouse), open it, and fill it with pallet racks from OfficePlus Supply or Essentials Appliances. Buy 6+ boxes at a wholesaler for 10% off and deliver them there. Delivery contracts and purchasing agents use warehouse stock first, and you can load boxes into your vehicle from inside.",
     "Headquarters" to "Rent an office and open your Headquarters with office desks. Hire HR Managers (happier staff, automatic replacements) and Purchasing Agents (each restocks 4 stores every morning) at Apex Recruitment, then assign them to HQ in BizHub → Schedule.",
+    "Nightlife and shows" to "Nightclubs need a Cocktail Bar, a Dance Floor and a DJ Booth, and a DJ on shift. Cinemas need a screen, seat rows, a concession stand and a projectionist; theaters need a stage, seats and actors. Cinemas and theaters pay a daily licence fee, but sell tickets all evening.",
+    "Office firms" to "Office buildings can host a Law Firm, Web Development Agency, Graphic Designer, Travel Agency or Event Planning Agency. Each professional needs an Office Desk and bills clients by the hour. Clients come from reputation and advertising, not foot traffic, and firms compete across the whole city.",
+    "Rivals" to "Rival companies run their own chains. They open stores where the money is, renovate busy ones, advertise, buy their buildings and close losers. Aggressive rivals open next to your best stores and start price wars, which makes them tougher competition. Watch their moves in the Rivals app.",
     "Winning and losing" to "Stay out of deep debt: three midnights below -\$5,000 and the bank declares you bankrupt. Reach #1 in Rivals with a \$5,000,000 net worth to own Hustle City, then keep building as long as you like.",
     "Radio" to "Your phone has a radio with four stations. Tap the station name to switch, or change volumes in Settings.",
 )

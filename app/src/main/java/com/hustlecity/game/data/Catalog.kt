@@ -13,6 +13,14 @@ enum class StaffRole(val label: String, val baseWage: Double) {
     HAIRSTYLIST("Hairstylist", 18.0),
     HR_MANAGER("HR Manager", 26.0),
     PURCHASING_AGENT("Purchasing Agent", 24.0),
+    DJ("DJ", 24.0),
+    PROJECTIONIST("Projectionist", 18.0),
+    ACTOR("Actor", 30.0),
+    LAWYER("Lawyer", 52.0),
+    PROGRAMMER("Programmer", 42.0),
+    GRAPHIC_DESIGNER("Graphic Designer", 30.0),
+    TRAVEL_AGENT("Travel Agent", 21.0),
+    EVENT_PLANNER("Event Planner", 26.0),
     ;
 
     /** Managers work from your Headquarters. */
@@ -75,6 +83,12 @@ data class BusinessTypeDef(
     val facility: Boolean = false,
     /** Building kind this type opens in: RETAIL, WAREHOUSE or OFFICE. */
     val buildingKind: String = "RETAIL",
+    /** A second role that must be on shift for customers to be served (DJ, projectionist, actors). */
+    val performer: StaffRole? = null,
+    /** Office firms bill clients per hour of work; no walk-in traffic or stock. */
+    val office: Boolean = false,
+    /** Daily licence fee (screening and performance rights). */
+    val dailyFee: Double = 0.0,
 ) {
     val sources: Set<Source> get() = products.mapNotNull { Catalog.product(it.first)?.source }.filter { it != Source.NONE }.toSet()
     val primaryProducts: List<String> get() = products.take(3).mapNotNull { Catalog.product(it.first)?.name }
@@ -426,6 +440,73 @@ object Catalog {
         FurnitureDef("water_cooler", "Water Cooler", 180.0, 1, 1, ItemFn.DECOR, decor = 2,
             description = "Staff love a water cooler.",
             parts = listOf(box(.3f, .3f, 0f, .7f, .7f, 1.0f, WHITE), box(.33f, .33f, 1.0f, .67f, .67f, 1.45f, c(0xFF8EC5E8)))),
+        // nightlife & entertainment
+        FurnitureDef("cocktail_bar", "Cocktail Bar", 3800.0, 3, 1, ItemFn.DISPLAY, setOf("bar"), displayUnits = 420, decor = 3,
+            description = "Bar counter with taps and bottles. Each staffed bar serves about 45 guests per hour.",
+            parts = listOf(
+                box(0f, .15f, 0f, 3f, .95f, 1.05f, c(0xFF3B2A4A)),
+                box(0f, .1f, 1.05f, 3f, 1f, 1.12f, c(0xFF8E7CC3)),
+                box(.2f, .2f, 1.12f, .3f, .3f, 1.5f, STEEL), box(.45f, .2f, 1.12f, .55f, .3f, 1.5f, STEEL),
+                box(1.2f, .25f, 1.12f, 1.35f, .4f, 1.45f, c(0xFF27AE60)), box(1.5f, .25f, 1.12f, 1.65f, .4f, 1.5f, c(0xFFF2994A)),
+                box(2.0f, .25f, 1.12f, 2.15f, .4f, 1.42f, c(0xFFEB5757)), box(2.4f, .25f, 1.12f, 2.55f, .4f, 1.48f, c(0xFF56CCF2)),
+            )),
+        FurnitureDef("dance_floor", "Dance Floor", 2600.0, 3, 3, ItemFn.EQUIPMENT, setOf("dance_floor"), capacity = 35, decor = 4,
+            description = "Light-up dance floor. Holds about 35 guests per hour.",
+            parts = listOf(
+                box(0f, 0f, 0f, 3f, 3f, .06f, c(0xFF1A1A2E)),
+                box(.1f, .1f, .06f, .95f, .95f, .08f, c(0xFFFF4FD8)), box(1.05f, .1f, .06f, 1.95f, .95f, .08f, c(0xFF4FC3FF)),
+                box(2.05f, .1f, .06f, 2.9f, .95f, .08f, c(0xFFFFE14F)), box(.1f, 1.05f, .06f, .95f, 1.95f, .08f, c(0xFF4FFF9A)),
+                box(1.05f, 1.05f, .06f, 1.95f, 1.95f, .08f, c(0xFFFF7A4F)), box(2.05f, 1.05f, .06f, 2.9f, 1.95f, .08f, c(0xFFB04FFF)),
+                box(.1f, 2.05f, .06f, .95f, 2.9f, .08f, c(0xFF4FC3FF)), box(1.05f, 2.05f, .06f, 1.95f, 2.9f, .08f, c(0xFFFFE14F)),
+                box(2.05f, 2.05f, .06f, 2.9f, 2.9f, .08f, c(0xFFFF4FD8)),
+            )),
+        FurnitureDef("dj_booth", "DJ Booth", 2200.0, 2, 1, ItemFn.EQUIPMENT, setOf("dj_booth"), music = 3, decor = 2,
+            description = "Turntables and a mixer. A DJ must be on shift for the club to open its doors.",
+            parts = listOf(
+                box(0f, .2f, 0f, 2f, .9f, 1.0f, c(0xFF222222)),
+                box(.15f, .3f, 1.0f, .85f, .8f, 1.06f, c(0xFF555555)), box(1.15f, .3f, 1.0f, 1.85f, .8f, 1.06f, c(0xFF555555)),
+                box(.4f, .45f, 1.06f, .6f, .65f, 1.08f, c(0xFFFF4FD8)), box(1.4f, .45f, 1.06f, 1.6f, .65f, 1.08f, c(0xFF4FC3FF)),
+            )),
+        FurnitureDef("cinema_screen", "Cinema Screen", 9500.0, 4, 1, ItemFn.EQUIPMENT, setOf("screen"), capacity = 45,
+            description = "Projector and screen. Each screen shows films to about 45 guests per hour.",
+            parts = listOf(
+                box(0f, 0f, 0f, 4f, .3f, .5f, DARK),
+                box(.1f, .05f, .5f, 3.9f, .15f, 2.6f, c(0xFFF5F5F5)),
+                box(0f, 0f, .5f, .12f, .3f, 2.7f, c(0xFF7A1E2C)), box(3.88f, 0f, .5f, 4f, .3f, 2.7f, c(0xFF7A1E2C)),
+            )),
+        FurnitureDef("cinema_seats", "Theater Seat Row", 1400.0, 3, 1, ItemFn.SEATING, setOf("cinema_seat"), capacity = 9, decor = 1,
+            description = "A row of padded seats. Each row seats about 9 guests per hour.",
+            parts = listOf(
+                box(0f, .2f, 0f, 3f, .9f, .45f, c(0xFF8E1B2B)),
+                box(0f, .75f, .45f, 3f, .95f, 1.0f, c(0xFFA82536)),
+                box(0f, .2f, .45f, .08f, .95f, .65f, DARK), box(.96f, .2f, .45f, 1.04f, .95f, .65f, DARK),
+                box(1.96f, .2f, .45f, 2.04f, .95f, .65f, DARK), box(2.92f, .2f, .45f, 3f, .95f, .65f, DARK),
+            )),
+        FurnitureDef("concession_stand", "Concession Stand", 2400.0, 2, 1, ItemFn.DISPLAY, setOf("concession"), displayUnits = 320,
+            description = "Popcorn machine and slushie dispenser.",
+            parts = listOf(
+                box(0f, .15f, 0f, 2f, .95f, 1.0f, c(0xFFC0392B)),
+                box(.15f, .3f, 1.0f, .85f, .8f, 1.6f, GLASS), box(.25f, .4f, 1.0f, .75f, .7f, 1.25f, c(0xFFF2C94C)),
+                box(1.15f, .35f, 1.0f, 1.45f, .75f, 1.5f, c(0xFF56CCF2)), box(1.5f, .35f, 1.0f, 1.8f, .75f, 1.5f, c(0xFFEB5757)),
+            )),
+        FurnitureDef("stage", "Stage", 8000.0, 4, 2, ItemFn.EQUIPMENT, setOf("stage"), capacity = 40, decor = 4,
+            description = "Raised stage with curtains and lights. Actors perform here.",
+            parts = listOf(
+                box(0f, 0f, 0f, 4f, 2f, .6f, WOOD),
+                box(0f, 0f, .6f, .25f, .25f, 2.8f, c(0xFF7A1E2C)), box(3.75f, 0f, .6f, 4f, .25f, 2.8f, c(0xFF7A1E2C)),
+                box(0f, 0f, 2.6f, 4f, .2f, 2.8f, c(0xFF7A1E2C)),
+                box(1.6f, .8f, .6f, 2.4f, 1.2f, 1.1f, c(0xFFF2C94C)),
+            )),
+        // professional offices
+        FurnitureDef("graphic_tablet", "Graphic Tablet Station", 450.0, 1, 1, ItemFn.OFFICE, setOf("tablet"), decor = 1,
+            description = "Pen display for illustration. Graphic designers need at least one.",
+            parts = listOf(box(.15f, .15f, 0f, .85f, .85f, .72f, WOOD_L), box(.25f, .3f, .72f, .75f, .7f, .78f, DARK), box(.3f, .35f, .78f, .7f, .65f, .79f, c(0xFF56CCF2)))),
+        FurnitureDef("desk_globe", "Desk Globe", 120.0, 1, 1, ItemFn.DECOR, setOf("globe"), decor = 2,
+            description = "A globe for planning trips. Travel agencies need at least one.",
+            parts = listOf(box(.3f, .3f, 0f, .7f, .7f, .7f, WOOD), box(.47f, .47f, .7f, .53f, .53f, .85f, c(0xFFC9A227)), box(.3f, .3f, .85f, .7f, .7f, 1.25f, c(0xFF2D9CDB)))),
+        FurnitureDef("desk_calendar", "Wall Planner", 90.0, 1, 1, ItemFn.DECOR, setOf("calendar"), decor = 1,
+            description = "A big wall calendar. Event planning agencies need at least one.",
+            parts = listOf(box(.05f, 0f, 1.0f, .95f, .05f, 1.8f, WHITE), box(.1f, .05f, 1.6f, .9f, .07f, 1.75f, c(0xFFEB5757)), box(.15f, .05f, 1.1f, .85f, .06f, 1.5f, c(0xFFBDBDBD)))),
     )
 
     private val furnitureById = furniture.associateBy { it.id }
@@ -472,6 +553,18 @@ object Catalog {
         ProductDef("ring", "Ring", 165.0, 320.0, 5, "jewelry", Source.IMPORT, color = c(0xFFF2C94C)),
         ProductDef("necklace", "Necklace", 125.0, 240.0, 5, "jewelry", Source.IMPORT, color = c(0xFFE0E0E0)),
         ProductDef("watch", "Watch", 270.0, 520.0, 4, "jewelry", Source.IMPORT, color = c(0xFF9AA3AD)),
+        ProductDef("draft_beer", "Draft Beer", 1.0, 7.0, 60, "bar", Source.METRO, color = c(0xFFF2C94C)),
+        ProductDef("cocktail", "Cocktail", 2.2, 13.0, 40, "bar", Source.DISTRO, color = c(0xFFFF4FD8)),
+        ProductDef("club_entry", "Club Entry Fee", 0.0, 12.0, 0, "dance_floor", Source.NONE, service = true, color = c(0xFFB04FFF)),
+        ProductDef("popcorn", "Popcorn", 0.5, 6.5, 80, "concession", Source.METRO, color = c(0xFFF2C94C)),
+        ProductDef("slushie", "Slushie", 0.4, 5.0, 80, "concession", Source.METRO, color = c(0xFF56CCF2)),
+        ProductDef("movie_ticket", "Movie Ticket", 0.0, 14.0, 0, "screen", Source.NONE, service = true, color = c(0xFF7A1E2C)),
+        ProductDef("show_ticket", "Theater Ticket", 0.0, 45.0, 0, "stage", Source.NONE, service = true, color = c(0xFFC9A227)),
+        ProductDef("legal_hour", "Legal Services (per hour)", 0.0, 120.0, 0, "desk", Source.NONE, service = true, color = c(0xFF34495E)),
+        ProductDef("web_hour", "Web Development (per hour)", 0.0, 98.0, 0, "desk", Source.NONE, service = true, color = c(0xFF2F80ED)),
+        ProductDef("design_hour", "Graphic Design (per hour)", 0.0, 72.0, 0, "tablet", Source.NONE, service = true, color = c(0xFFFF7043)),
+        ProductDef("travel_booking", "Trip Booking", 0.0, 52.0, 0, "globe", Source.NONE, service = true, color = c(0xFF00897B)),
+        ProductDef("event_hour", "Event Planning (per hour)", 0.0, 66.0, 0, "calendar", Source.NONE, service = true, color = c(0xFFE91E63)),
     )
     private val productById = products.associateBy { it.id }
     fun product(id: String): ProductDef? = productById[id]
@@ -493,6 +586,10 @@ object Catalog {
     private val MEALS = curve(0 to .05f, 6 to .05f, 9 to .2f, 12 to 1f, 14 to .6f, 16 to .4f, 18 to .95f, 20 to .7f, 22 to .3f, 23 to .1f)
     private val EVENING = curve(0 to .1f, 8 to .05f, 11 to .3f, 15 to .5f, 18 to 1f, 21 to .9f, 23 to .3f)
     private val GYM = curve(0 to .02f, 5 to .2f, 7 to .9f, 9 to .6f, 12 to .5f, 15 to .4f, 17 to .9f, 19 to 1f, 21 to .5f, 23 to .05f)
+    private val NIGHT = curve(0 to .95f, 1 to .85f, 2 to .6f, 3 to .25f, 4 to .03f, 6 to 0f, 17 to 0f, 19 to .1f, 20 to .25f, 21 to .5f, 22 to .8f, 23 to 1f)
+    private val SHOWS = curve(0 to .1f, 1 to .02f, 9 to 0f, 11 to .15f, 13 to .3f, 16 to .45f, 18 to .85f, 20 to 1f, 22 to .65f, 23 to .3f)
+    private val OFFICE = curve(0 to 0f, 7 to 0f, 8 to .55f, 9 to .9f, 11 to 1f, 12 to .7f, 13 to .9f, 16 to 1f, 17 to .8f, 18 to .4f, 19 to .1f, 20 to 0f)
+    private val BOOKINGS = curve(0 to 0f, 8 to 0f, 9 to .5f, 11 to .9f, 13 to .8f, 15 to 1f, 18 to .9f, 20 to .4f, 21 to 0f)
 
     private val REG = Req("register", "Cash Register")
 
@@ -524,6 +621,28 @@ object Catalog {
             listOf(REG, Req("electronics", "Electronics Table")), StaffRole.CUSTOMER_SERVICE, true, 7.0, RETAIL, c(0xFF455A64), "📱", wealthSensitive = true),
         BusinessTypeDef("jewelry", "Jewelry Store", listOf("ring" to .12, "necklace" to .12, "watch" to .07),
             listOf(REG, Req("jewelry", "Jewelry Case")), StaffRole.CUSTOMER_SERVICE, true, 3.0, RETAIL, c(0xFFC9A227), "💎", wealthSensitive = true),
+        BusinessTypeDef("nightclub", "Nightclub", listOf("club_entry" to 1.0, "draft_beer" to .7, "cocktail" to .45),
+            listOf(Req("bar", "Cocktail Bar"), Req("dance_floor", "Dance Floor"), Req("dj_booth", "DJ Booth")), StaffRole.CUSTOMER_SERVICE, false, 30.0, NIGHT,
+            c(0xFF7B1FA2), "🪩", wealthSensitive = true, performer = StaffRole.DJ),
+        BusinessTypeDef("cinema", "Cinema", listOf("movie_ticket" to 1.0, "popcorn" to .55, "slushie" to .4),
+            listOf(REG, Req("screen", "Cinema Screen"), Req("cinema_seat", "Theater Seat Row"), Req("concession", "Concession Stand")), StaffRole.CUSTOMER_SERVICE, true, 22.0, SHOWS,
+            c(0xFFB71C1C), "🎬", performer = StaffRole.PROJECTIONIST, dailyFee = 350.0),
+        BusinessTypeDef("theater", "Theater", listOf("show_ticket" to 1.0, "popcorn" to .2, "slushie" to .25),
+            listOf(REG, Req("stage", "Stage"), Req("cinema_seat", "Theater Seat Row")), StaffRole.CUSTOMER_SERVICE, true, 9.0, SHOWS,
+            c(0xFF880E4F), "🎭", wealthSensitive = true, performer = StaffRole.ACTOR, dailyFee = 500.0),
+    )
+    /** Professional firms that open in office buildings and bill clients per hour of work. */
+    val officeTypes: List<BusinessTypeDef> = listOf(
+        BusinessTypeDef("lawfirm", "Law Firm", listOf("legal_hour" to 1.0), listOf(Req("desk", "Office Desk")), StaffRole.LAWYER, false, 8.0, OFFICE,
+            c(0xFF263238), "⚖", buildingKind = "OFFICE", office = true),
+        BusinessTypeDef("webdev", "Web Development Agency", listOf("web_hour" to 1.0), listOf(Req("desk", "Office Desk")), StaffRole.PROGRAMMER, false, 8.0, OFFICE,
+            c(0xFF1565C0), "💻", buildingKind = "OFFICE", office = true),
+        BusinessTypeDef("design", "Graphic Designer", listOf("design_hour" to 1.0), listOf(Req("desk", "Office Desk"), Req("tablet", "Graphic Tablet Station")), StaffRole.GRAPHIC_DESIGNER, false, 9.0, OFFICE,
+            c(0xFFE64A19), "🎨", buildingKind = "OFFICE", office = true),
+        BusinessTypeDef("travel", "Travel Agency", listOf("travel_booking" to 1.0), listOf(Req("desk", "Office Desk"), Req("globe", "Desk Globe")), StaffRole.TRAVEL_AGENT, false, 11.0, BOOKINGS,
+            c(0xFF00796B), "✈", buildingKind = "OFFICE", office = true),
+        BusinessTypeDef("events", "Event Planning Agency", listOf("event_hour" to 1.0), listOf(Req("desk", "Office Desk"), Req("calendar", "Wall Planner")), StaffRole.EVENT_PLANNER, false, 8.0, OFFICE,
+            c(0xFFC2185B), "🎉", buildingKind = "OFFICE", office = true),
     )
     /** Non-retail operations you can open in warehouses and offices. */
     val facilityTypes: List<BusinessTypeDef> = listOf(
@@ -533,7 +652,11 @@ object Catalog {
             c(0xFF34495E), "🏢", facility = true, buildingKind = "OFFICE"),
     )
 
-    private val typeById = (businessTypes + facilityTypes).associateBy { it.id }
+    /** Every type a business can be: shops, office firms, warehouses and headquarters. */
+    val allTypes: List<BusinessTypeDef> = businessTypes + officeTypes + facilityTypes
+    /** Types that serve customers (shops and office firms). */
+    val customerTypes: List<BusinessTypeDef> = businessTypes + officeTypes
+    private val typeById = allTypes.associateBy { it.id }
     fun type(id: String): BusinessTypeDef = typeById[id] ?: businessTypes.first()
 
     // ---------------------------------------------------------------- courses
@@ -584,14 +707,14 @@ object Catalog {
         PlaceDef("essentials", "Essentials Appliances", PlaceKind.FURNITURE_STORE, "If you need it, we've got it.", c(0xFF2F80ED), "🛋",
             listOf("cash_register", "shelf", "drinks_fridge", "fresh_fridge", "freezer", "treadmill", "workout_bench", "weight_rack", "boxing_bag",
                 "gym_locker", "shower", "fitness_board", "bookshelf", "bench", "barstool", "neon_cactus", "neon_circle", "speaker_small",
-                "speaker_medium", "speaker_large", "cleaning_station", "wall_lamp", "pallet_rack")),
+                "speaker_medium", "speaker_large", "cleaning_station", "wall_lamp", "pallet_rack", "dance_floor", "dj_booth", "cinema_screen", "cinema_seats", "stage")),
         PlaceDef("primekitchen", "Prime Kitchen Supply", PlaceKind.FURNITURE_STORE, "Pro gear for food & beauty.", c(0xFFF2994A), "🍳",
-            listOf("coffee_machine", "pastry_case", "grill", "fryer", "hair_chair", "hair_wash", "cash_register", "home_fridge", "bed", "tv", "table_set")),
+            listOf("coffee_machine", "pastry_case", "grill", "fryer", "hair_chair", "hair_wash", "cash_register", "home_fridge", "bed", "tv", "table_set", "cocktail_bar", "concession_stand")),
         PlaceDef("lux", "Lux Interiors", PlaceKind.FURNITURE_STORE, "Make it beautiful.", c(0xFF9B51E0), "🪴",
             listOf("plant_large", "plant_small", "painting", "clothing_rack", "fitting_room", "electronics_table", "jewelry_case", "flower_stand",
                 "produce", "sofa", "table_set", "neon_circle")),
-        PlaceDef("metro", "Metro Wholesale", PlaceKind.WHOLESALER, "Bulk groceries, drinks & food supplies.", c(0xFF27AE60), "📦"),
-        PlaceDef("distro", "CityDistro Wholesale", PlaceKind.WHOLESALER, "Flowers, gifts, books & fashion in bulk.", c(0xFF00897B), "📦"),
+        PlaceDef("metro", "Metro Wholesale", PlaceKind.WHOLESALER, "Bulk groceries, drinks, snacks & food supplies.", c(0xFF27AE60), "📦"),
+        PlaceDef("distro", "CityDistro Wholesale", PlaceKind.WHOLESALER, "Flowers, gifts, books, fashion & cocktail mixes in bulk.", c(0xFF00897B), "📦"),
         PlaceDef("imports", "Global Imports Co.", PlaceKind.IMPORTER, "Electronics & jewelry from overseas.", c(0xFF455A64), "🚢"),
         PlaceDef("motors", "Eastside Motors", PlaceKind.CAR_DEALER, "New wheels, fair deals.", c(0xFFEB5757), "🚗"),
         PlaceDef("school", "Hustle Business School", PlaceKind.SCHOOL, "Invest in yourself.", c(0xFF2D9CDB), "🎓"),
@@ -601,7 +724,7 @@ object Catalog {
         PlaceDef("hospital", "City Hospital", PlaceKind.HOSPITAL, "Get well soon.", c(0xFFE53935), "🏥"),
         PlaceDef("fuel", "Fuel Up", PlaceKind.GAS_STATION, "Fill her up.", c(0xFFF2C94C), "⛽"),
         PlaceDef("officeplus", "OfficePlus Supply", PlaceKind.FURNITURE_STORE, "Racks, desks and everything in between.", c(0xFF1F5FAD), "🗄",
-            listOf("pallet_rack", "office_desk", "filing_cabinet", "water_cooler", "plant_large", "painting", "speaker_small", "wall_lamp", "cleaning_station", "bench")),
+            listOf("pallet_rack", "office_desk", "graphic_tablet", "desk_globe", "desk_calendar", "filing_cabinet", "water_cooler", "plant_large", "painting", "speaker_small", "wall_lamp", "cleaning_station", "bench")),
     )
     fun place(id: String) = places.first { it.id == id }
 
@@ -635,6 +758,14 @@ object Catalog {
         "bookstore" to listOf("Pages", "Books", "Chapter", "Library", "Novel"),
         "electronics" to listOf("Tech", "Gadgets", "Circuit", "Electro", "Digital"),
         "jewelry" to listOf("Gems", "Jewels", "Sparkle", "Diamonds", "Gold"),
+        "nightclub" to listOf("Club", "Lounge", "Beats", "Disco", "Nights"),
+        "cinema" to listOf("Cinema", "Pictures", "Screens", "Movies", "Picturehouse"),
+        "theater" to listOf("Playhouse", "Theater", "Stage", "Footlights", "Opera"),
+        "lawfirm" to listOf("Legal", "Law Partners", "Counsel", "& Associates", "Attorneys"),
+        "webdev" to listOf("Code", "Web Studio", "Pixels", "Devs", "Labs"),
+        "design" to listOf("Design", "Studio", "Graphics", "Creative", "Ink"),
+        "travel" to listOf("Travel", "Getaways", "Voyages", "Trips", "Journeys"),
+        "events" to listOf("Events", "Occasions", "Celebrations", "Parties", "Gatherings"),
     )
 
     fun randomBusinessName(typeId: String, rnd: kotlin.random.Random): String {
