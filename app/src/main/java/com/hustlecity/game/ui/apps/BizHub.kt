@@ -325,7 +325,7 @@ private fun InventoryTab(e: GameEngine, biz: Business) {
             val prob = BizCalc.buyProbability(price / market)
             WhiteCard(Modifier.fillMaxWidth(), padding = 9.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ProductThumb(p.color, 40.dp)
+                    ProductThumb(p, 40.dp)
                     Column(Modifier.weight(1.3f).padding(start = 8.dp)) {
                         Text(p.name, style = HT.bodyBold, color = HC.Ink)
                         if (p.service) Text("Service · needs ${Catalog.item(com.hustlecity.game.engine.itemForTag(p.tag))?.name ?: p.tag}", style = HT.small, color = HC.InkSoft)
@@ -499,7 +499,7 @@ private fun DeliveriesTab(e: GameEngine, biz: Business) {
                     val cap = BizCalc.capacityFor(biz, pid)
                     est += (target - (biz.stock[pid] ?: 0)).coerceAtLeast(0) * p.cost * 1.12
                     Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ProductThumb(p.color, 30.dp)
+                        ProductThumb(p, 30.dp)
                         Text(" ${p.name}", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
                         Text("stock ${biz.stock[pid] ?: 0} / cap $cap   restock to ", style = HT.small, color = HC.InkSoft)
                         Stepper("$target", { contract.targets[pid] = (target - 10).coerceAtLeast(0); e.bump() }, { contract.targets[pid] = (target + 10).coerceAtMost(max(cap, 10)); e.bump() })
@@ -581,7 +581,7 @@ private fun StorageTab(e: GameEngine, biz: Business) {
             for ((pid, qty) in items) {
                 val p = Catalog.product(pid) ?: continue
                 Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ProductThumb(p.color, 30.dp)
+                    ProductThumb(p, 30.dp)
                     Text(" ${p.name}", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
                     Text("$qty units · ${(qty + p.unitsPerBox - 1) / p.unitsPerBox} boxes", style = HT.small, color = HC.InkSoft)
                 }

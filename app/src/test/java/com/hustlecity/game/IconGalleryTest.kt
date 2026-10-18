@@ -22,6 +22,13 @@ class IconGalleryTest {
     private val pinColors = intArrayOf(0xFFE8833A.toInt(), 0xFF2F80ED.toInt(), 0xFF27AE60.toInt(), 0xFF9B51E0.toInt(), 0xFFEB5757.toInt(), 0xFF00897B.toInt())
 
     @Test
+    fun everyProductAndBusinessHasItsOwnIcon() {
+        val missing = com.hustlecity.game.data.Catalog.products.map { "product_${it.id}" }.filterNot { GameIcons.has(it) } +
+            com.hustlecity.game.data.Catalog.businessTypes.map { "biz_${it.id}" }.filterNot { GameIcons.has(it) }
+        assertTrue("missing icons: $missing", missing.isEmpty())
+    }
+
+    @Test
     fun everyIconParsesAndRenders() {
         val icons = GameIcons.all.values.toList()
         assertTrue("no icons registered", icons.isNotEmpty())

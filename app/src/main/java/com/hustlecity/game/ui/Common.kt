@@ -204,6 +204,14 @@ fun VehicleThumb(id: String, size: Dp, modifier: Modifier = Modifier) {
     Image(bmp, null, modifier.size(size))
 }
 
+/** A product's own illustration (flowers, cans, bottles, phones…), or a colored box for products without one. */
+@Composable
+fun ProductThumb(p: com.hustlecity.game.data.ProductDef, size: Dp, modifier: Modifier = Modifier) {
+    val id = "product_${p.id}"
+    if (com.hustlecity.game.ui.icons.GameIcons.has(id)) com.hustlecity.game.ui.icons.GIcon(id, size, modifier)
+    else ProductThumb(p.color, size, modifier)
+}
+
 @Composable
 fun ProductThumb(color: Int, size: Dp, modifier: Modifier = Modifier) {
     val px = (size.value * 2.5f).toInt().coerceIn(48, 240)

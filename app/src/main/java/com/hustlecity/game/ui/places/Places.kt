@@ -325,7 +325,7 @@ private fun Wholesale(e: GameEngine, buildingId: Int, place: PlaceDef) {
                     Modifier.clip(RoundedCornerShape(6.dp)).background(if (mine) Color(0xFFE6F4EC) else Color.White).border(1.dp, HC.Line, RoundedCornerShape(6.dp)).padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    ProductThumb(p.color, 46.dp)
+                    ProductThumb(p, 46.dp)
                     Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                         Text(p.name, style = HT.bodyBold, color = HC.Ink)
                         Text("Box of ${p.unitsPerBox} · ${e.money(p.cost)}/unit", style = HT.small, color = HC.InkSoft)
@@ -916,7 +916,7 @@ private fun WarehousePanel(e: GameEngine, businessId: Int) {
             for ((pid, qty) in stock) {
                 val p = Catalog.product(pid) ?: continue
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color.White).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ProductThumb(p.color, 36.dp)
+                    ProductThumb(p, 36.dp)
                     Column(Modifier.weight(1f).padding(start = 8.dp)) {
                         Text(p.name, style = HT.bodyBold, color = HC.Ink)
                         Text("$qty units · ${(qty + p.unitsPerBox - 1) / p.unitsPerBox} boxes", style = HT.small, color = HC.InkSoft)
