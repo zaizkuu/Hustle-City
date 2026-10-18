@@ -76,6 +76,8 @@ class UiSnapshotTest {
         val e = GameEngine(null)
         e.ui.screen = Screen.NEW_GAME
         e.prepareMenuBackground()
+        // draw the city thumbnails up front so the picker shows them
+        for (m in com.hustlecity.game.world.Maps.all) com.hustlecity.game.ui.menu.CityThumbs.get(m.id)
         shoot(e, "ui_newgame.png")
     }
 
