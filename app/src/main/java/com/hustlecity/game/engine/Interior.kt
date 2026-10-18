@@ -348,6 +348,11 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         ghostY = spot?.second ?: 0
     }
 
+    fun cancelGhost() {
+        ghostId = null
+        movingIndex = -1
+    }
+
     fun startMoving(index: Int) {
         val p = items.getOrNull(index) ?: return
         ghostId = p.itemId

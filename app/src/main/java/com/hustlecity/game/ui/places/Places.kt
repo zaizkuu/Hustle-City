@@ -532,10 +532,7 @@ private fun Hospital(e: GameEngine, place: PlaceDef) {
         HButton("Rest 2 hours — \$200 (+25 energy)", Modifier.padding(top = 10.dp)) {
             if (e.spend(200.0, "Medical")) {
                 close(e)
-                e.startSkip(com.hustlecity.game.engine.SkipKind.WAIT, 120, "Resting at City Hospital…") { eng, _ ->
-                    eng.state.player.energy = (eng.state.player.energy + 25).coerceAtMost(100.0)
-                    eng.state.player.happiness = (eng.state.player.happiness + 3).coerceAtMost(100.0)
-                }
+                e.startSkip(com.hustlecity.game.model.SkipKind.REST, 120, "Resting at City Hospital…")
             }
         }
     }
@@ -567,7 +564,7 @@ private fun RivalShop(e: GameEngine, buildingId: Int) {
                     "florist" -> HButton("Bouquet \$22", small = true) { e.eat(22.0, 0.0, happiness = 4.0, label = "a bouquet") }
                     "giftshop" -> HButton("Souvenir \$12", small = true) { e.eat(12.0, 0.0, happiness = 3.0, label = "a souvenir") }
                     "gym" -> HButton("Workout \$12 (1h)", small = true) {
-                        if (e.spend(12.0, "Personal")) { close(e); e.startSkip(com.hustlecity.game.engine.SkipKind.WAIT, 60, "Working out…") { eng, _ -> eng.state.player.happiness = (eng.state.player.happiness + 8).coerceAtMost(100.0); eng.state.player.energy = (eng.state.player.energy - 8).coerceAtLeast(1.0) } }
+                        if (e.spend(12.0, "Personal")) { close(e); e.startSkip(com.hustlecity.game.model.SkipKind.WORKOUT, 60, "Working out…") }
                     }
                     "hairdresser" -> HButton("Haircut \$28", small = true) { e.eat(28.0, 0.0, happiness = 6.0, label = "a fresh haircut") }
                 }

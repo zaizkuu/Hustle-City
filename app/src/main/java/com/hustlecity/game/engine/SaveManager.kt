@@ -27,7 +27,12 @@ class SaveManager(context: Context?) {
     fun load(): GameState? {
         val f = file ?: return null
         if (!f.exists()) return null
-        return runCatching { json.decodeFromString(GameState.serializer(), f.readText()) }.getOrNull()
+        val state = runCatching { json.decodeFromString(GameState.serializer(), f.readText()) }.getOrNull()
+        if (state == null) {
+            // keep the damaged file for inspection, and stop offering Continue
+            runCatching { f.renameTo(File(f.parentFile, "save-damaged.json")) }
+        }
+        return state
     }
 
     fun encode(state: GameState): String = json.encodeToString(GameState.serializer(), state)

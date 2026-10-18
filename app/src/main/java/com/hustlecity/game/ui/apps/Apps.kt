@@ -398,7 +398,7 @@ fun FinanceApp(e: GameEngine) {
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             WhiteCard(Modifier.fillMaxWidth()) {
-                CardTitle("Daily profit (last 14 days)")
+                CardTitle("Daily operating profit (last 14 days)")
                 val hist = s.history.takeLast(14)
                 if (hist.isEmpty()) Text("Your first day summary arrives at midnight.", style = HT.small, color = HC.InkSoft)
                 else ProfitChart(hist.map { it.profit }, hist.map { it.cash }, Modifier.fillMaxWidth().height(150.dp))
@@ -408,7 +408,8 @@ fun FinanceApp(e: GameEngine) {
                 CardTitle("Day ${last.day} breakdown")
                 KeyValue("Income", e.money(last.revenue), HC.Green)
                 for ((k, v) in last.expenses.toList().sortedByDescending { it.second }) KeyValue(k, "-" + e.money(v), HC.Red, bold = false)
-                KeyValue("Profit", e.money(last.profit), if (last.profit >= 0) HC.Green else HC.Red)
+                KeyValue("Operating profit", e.money(last.profit), if (last.profit >= 0) HC.Green else HC.Red)
+                Text("Loans, repayments, furniture, vehicles and property count as investments, not as running costs.", style = HT.small, color = HC.InkSoft)
             }
             if (s.businesses.isNotEmpty()) WhiteCard(Modifier.fillMaxWidth()) {
                 CardTitle("Businesses (yesterday)")

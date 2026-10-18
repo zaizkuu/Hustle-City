@@ -13,7 +13,6 @@ import com.hustlecity.game.model.RivalBusiness
 import com.hustlecity.game.world.BKind
 import com.hustlecity.game.world.Building
 import com.hustlecity.game.world.City
-import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -30,10 +29,21 @@ object BizCalc {
         if (def != null && tag in def.tags) def.displayUnits else 0
     }
 
+    /** Display space for a product (shared with every other product that uses the same kind of display). */
     fun capacityFor(b: Business, productId: String): Int {
         val p = Catalog.product(productId) ?: return 0
         return if (p.service) Int.MAX_VALUE else displayCapacity(b, p.tag)
     }
+
+    /** Units of a product that still fit, after everything already stocked on the same displays. */
+    fun roomFor(b: Business, productId: String): Int {
+        val p = Catalog.product(productId) ?: return 0
+        if (p.service) return 0
+        val used = b.stock.entries.sumOf { (id, q) -> if (Catalog.product(id)?.tag == p.tag) q else 0 }
+        return (displayCapacity(b, p.tag) - used).coerceAtLeast(0)
+    }
+
+    fun sells(b: Business, productId: String) = b.type.products.any { it.first == productId }
 
     fun requirements(b: Business): List<Pair<Req, Boolean>> = b.type.requirements.map { it to (count(b, it.tag) > 0) }
 
@@ -175,7 +185,10 @@ class Economy(private val e: GameEngine) {
         val served = min(demand, cap.toDouble())
         servedRate[b.id] = served
         val lostRate = max(0.0, demand - served)
-        if (lostRate > 0 && e.rnd.nextDouble() < lostRate / 60.0) b.lostToday++
+        if (lostRate > 0) {
+            b.lostAcc += lostRate / 60.0
+            while (b.lostAcc >= 1.0) { b.lostAcc -= 1.0; b.lostToday++ }
+        }
         if (workers.isEmpty()) return
         b.custAcc += served / 60.0
         val waitScore = if (demand <= 0.1) 1.0 else (served / demand).coerceIn(0.0, 1.0)
@@ -267,12 +280,11 @@ class Economy(private val e: GameEngine) {
             val p = Catalog.product(pid) ?: continue
             if (p.service) continue
             val have = b.stock[pid] ?: 0
-            val cap = BizCalc.capacityFor(b, pid)
-            val need = (min(target, cap) - have).coerceAtLeast(0)
+            val need = min((target - have).coerceAtLeast(0), BizCalc.roomFor(b, pid))
             if (need == 0) continue
-            val boxes = ceil(need / p.unitsPerBox.toDouble()).toInt()
-            val qty = min(boxes * p.unitsPerBox, cap - have)
-            val price = boxes * p.unitsPerBox * p.cost * 1.12
+            // buy whole units only for what fits on the displays
+            val qty = need
+            val price = qty * p.cost * 1.12
             if (e.state.player.money < price) continue
             e.spend(price, "Inventory", silent = true)
             addStock(b, pid, qty, price / qty)
@@ -298,7 +310,7 @@ class Economy(private val e: GameEngine) {
         for (item in b.pendingDelivery) {
             if (item.isProduct) {
                 val p = Catalog.product(item.id) ?: continue
-                val room = (BizCalc.capacityFor(b, item.id) - (b.stock[item.id] ?: 0)).coerceAtLeast(0)
+                val room = if (BizCalc.sells(b, item.id)) BizCalc.roomFor(b, item.id) else 0
                 val qty = min(room, item.qty)
                 addStock(b, item.id, qty, p.cost)
                 refund += (item.qty - qty) * p.cost
@@ -332,6 +344,9 @@ class Economy(private val e: GameEngine) {
             sales += b.revenueToday
             val rental = s.rentalFor(b.buildingId)
             val rent = if (rental != null && !rental.owned) rental.rentPerMonth / 30.0 else 0.0
+            // the day that just ended is used up; bill tomorrow for the campaigns still running
+            b.campaigns.forEach { it.daysLeft-- }
+            b.campaigns.removeAll { it.daysLeft <= 0 }
             val marketingCost = b.campaigns.sumOf { Catalog.campaign(it.campaignId).pricePerDay }
             val sat = if (b.satSamples > 0) {
                 val n = b.satSamples.toDouble()
@@ -351,8 +366,6 @@ class Economy(private val e: GameEngine) {
             b.satPrice = 0.0; b.satAvail = 0.0; b.satWait = 0.0; b.satClean = 0.0; b.satInterior = 0.0; b.satStaff = 0.0; b.satSamples = 0
             // marketing
             if (marketingCost > 0) e.spend(marketingCost, "Marketing", allowDebt = true, silent = true)
-            b.campaigns.forEach { it.daysLeft-- }
-            b.campaigns.removeAll { it.daysLeft <= 0 }
             val active = b.campaigns.sumOf { Catalog.campaign(it.campaignId).boost }.coerceAtMost(1.0)
             b.marketing = max(active, b.marketing * .65).let { if (it < .01) 0.0 else it }
         }
@@ -383,9 +396,10 @@ class Economy(private val e: GameEngine) {
         s.candidates.removeAll { it.expiresDay < s.day }
         // ledger -> day record
         val expenses = s.ledgerToday.filterKeys { !it.startsWith("in:") }
-        val income = s.ledgerToday.filterKeys { it.startsWith("in:") }.values.sum()
-        val totalExp = expenses.values.sum()
-        val record = DayRecord(finishedDay, income, expenses, income - totalExp, s.player.money, e.netWorth(), s.businesses.size)
+        // profit counts running the business only: loans, repayments and buying/selling assets are not income or costs
+        val income = s.ledgerToday.filterKeys { it.startsWith("in:") && it !in NON_OPERATING }.values.sum()
+        val operatingExp = expenses.filterKeys { it !in NON_OPERATING }.values.sum()
+        val record = DayRecord(finishedDay, income, expenses, income - operatingExp, s.player.money, e.netWorth(), s.businesses.size)
         s.history += record
         if (s.history.size > 60) s.history.removeAt(0)
         s.ledgerToday.clear()
@@ -452,6 +466,8 @@ class Economy(private val e: GameEngine) {
     }
 
     companion object {
+        val NON_OPERATING = setOf("in:Loans", "Loan repayment", "Vehicles", "Real estate", "Furniture", "in:Sold assets", "in:Refunds")
+
         fun minutesUntil(currentMinute: Long, hour: Int): Long {
             val dayStart = (currentMinute / MINUTES_PER_DAY) * MINUTES_PER_DAY
             var t = dayStart + hour * 60

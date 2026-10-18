@@ -27,11 +27,11 @@ object Objectives {
                     e.state.rentals.any { e.city.building(it.buildingId)?.kind == BKind.RETAIL }
                 },
                 Objective("start", "Start a business in your new building", "biz") { e -> e.state.businesses.isNotEmpty() },
-                Objective("furniture", "Buy furniture at an appliance store", "essentials", flag("furniture")),
+                Objective("furniture", "Buy furniture at an appliance store", "furniture", flag("furniture")),
                 Objective("requirements", "Place furniture to meet all requirements", "biz") { e ->
                     e.state.businesses.any { BizCalc.requirementsMet(it) }
                 },
-                Objective("stock", "Buy products at a wholesaler", "metro") { e ->
+                Objective("stock", "Buy products at a wholesaler", "stock") { e ->
                     e.state.businesses.any { b -> b.stock.values.any { it > 0 } || Catalog.product(b.type.products.first().first)?.service == true }
                 },
                 Objective("open", "Open your store (turn off Temporarily Closed)", "biz") { e -> e.state.businesses.any { !it.tempClosed } },
@@ -61,9 +61,17 @@ object Objectives {
         ),
     )
 
+    /** Once an objective has been met it stays checked, even if the condition later stops holding. */
+    fun isDone(e: GameEngine, o: Objective) = "obj:${o.id}" in e.state.objectivesDone || o.done(e)
+
+    /** Records newly met objectives so they stay done. */
+    fun latch(e: GameEngine) {
+        for (g in groups) for (o in g.items) if ("obj:${o.id}" !in e.state.objectivesDone && o.done(e)) e.state.objectivesDone += "obj:${o.id}"
+    }
+
     /** Index of the first group that still has open objectives (or the last group). */
     fun currentGroup(e: GameEngine): Int {
-        for ((i, g) in groups.withIndex()) if (g.items.any { !it.done(e) }) return i
+        for ((i, g) in groups.withIndex()) if (g.items.any { !isDone(e, it) }) return i
         return groups.size - 1
     }
 

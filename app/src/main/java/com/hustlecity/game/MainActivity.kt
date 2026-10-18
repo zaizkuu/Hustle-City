@@ -35,7 +35,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        EngineHolder.current()?.let { if (it.hasGame) it.save() }
+        EngineHolder.current()?.let {
+            it.settings.save()
+            if (it.hasGame) it.save()
+        }
     }
 
     private fun hideSystemBars() {

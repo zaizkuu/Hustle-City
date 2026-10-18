@@ -75,12 +75,12 @@ private fun handleBack(e: GameEngine, onExit: () -> Unit) {
     val ui = e.ui
     when {
         ui.screen == Screen.NEW_GAME -> ui.screen = Screen.MENU
-        ui.screen == Screen.MENU -> if (ui.panel != null) ui.panel = null else onExit()
+        ui.screen == Screen.MENU -> if (ui.info != null) ui.info = null else if (ui.panel != null) { e.settings.save(); ui.panel = null } else onExit()
         e.skip != null -> e.cancelSkip()
         ui.confirm != null -> ui.confirm = null
         ui.info != null -> ui.info = null
         ui.panel != null -> { e.settings.save(); ui.panel = null }
-        ui.designer -> { ui.designer = false; e.interior?.ghostId = null }
+        ui.designer -> { ui.designer = false; e.interior?.cancelGhost() }
         ui.app != null -> { ui.app = null; ui.selected = -1 }
         ui.selected >= 0 -> ui.selected = -1
         else -> ui.panel = com.hustlecity.game.engine.Panel.Settings
@@ -106,7 +106,10 @@ fun MainMenu(e: GameEngine) {
                 HButton("Continue", Modifier.fillMaxWidth().padding(bottom = 8.dp), color = HC.Green) { e.camera.yaw = 0f; e.ui.screen = Screen.GAME }
             } else if (hasSave) {
                 HButton("Continue", Modifier.fillMaxWidth().padding(bottom = 8.dp), color = HC.Green) {
-                    if (!e.loadGame()) e.toast("Couldn't load the save")
+                    if (!e.loadGame()) {
+                        e.ui.info = "Couldn't load your save" to
+                            "The save file is damaged or from an incompatible version. It was kept as save-damaged.json. Start a new game to keep playing."
+                    }
                 }
             }
             HButton("New game", Modifier.fillMaxWidth().padding(bottom = 8.dp)) { e.ui.screen = Screen.NEW_GAME }

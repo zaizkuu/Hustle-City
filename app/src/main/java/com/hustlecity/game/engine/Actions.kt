@@ -15,6 +15,7 @@ import com.hustlecity.game.model.OwnedVehicle
 import com.hustlecity.game.model.PendingRecruit
 import com.hustlecity.game.model.PlacedItem
 import com.hustlecity.game.model.Rental
+import com.hustlecity.game.model.SkipKind
 import com.hustlecity.game.world.BKind
 import com.hustlecity.game.world.City
 import com.hustlecity.game.world.dist
@@ -33,16 +34,8 @@ fun GameEngine.rentBuilding(buildingId: Int): Boolean {
     state.rentals += Rental(buildingId, rent, state.day)
     if (b.kind == BKind.RESIDENTIAL) {
         val oldHome = state.player.home
-        state.player.home = buildingId
         // furniture moves with you; anything that doesn't fit goes to storage
-        val w = b.gridW.coerceAtLeast(7); val d = b.gridD.coerceAtLeast(6)
-        val keep = state.homeFurniture.filter { p ->
-            val def = Catalog.item(p.itemId) ?: return@filter false
-            val (fw, fd) = itemDims(def, p.rot)
-            p.x + fw <= w && p.y + fd <= d
-        }
-        state.homeStorage += state.homeFurniture.filter { it !in keep }.map { it.itemId }
-        state.homeFurniture.retainAll(keep.toSet())
+        moveHomeTo(b)
         toast("You rented ${b.address}. It's your new home!", ToastKind.GOOD)
         if (oldHome >= 0 && oldHome != buildingId) {
             message("Landlord", "Your previous lease at ${city.building(oldHome)?.address} is still active. Cancel it in the Realty app if you don't need it.")
@@ -77,7 +70,7 @@ fun GameEngine.cancelLease(buildingId: Int): Boolean {
     if (buildingId == state.player.home) {
         val other = state.rentals.firstOrNull { it.buildingId != buildingId && city.building(it.buildingId)?.kind == BKind.RESIDENTIAL }
         if (other == null) { toast("You can't cancel the lease on your only home"); return false }
-        state.player.home = other.buildingId
+        city.building(other.buildingId)?.let { moveHomeTo(it) }
     }
     if (r.owned) earn(city.building(buildingId)?.value?.times(.9) ?: 0.0, "Sold assets")
     state.rentals.remove(r)
@@ -112,7 +105,14 @@ fun GameEngine.startBusiness(buildingId: Int, typeId: String, name: String): Bus
 }
 
 fun GameEngine.closeBusiness(biz: Business) {
-    val refund = BizCalc.furnitureValue(biz) * .5 + BizCalc.stockValue(biz) * .3
+    // today's takings and anything still on a delivery truck are paid out, not lost
+    if (biz.revenueToday > 0) {
+        earn(biz.revenueToday, "Sales")
+        state.player.totalEarned += biz.revenueToday
+    }
+    val inTransit = biz.pendingDelivery.sumOf { if (it.isProduct) (Catalog.product(it.id)?.cost ?: 0.0) * it.qty else Catalog.item(it.id)?.price ?: 0.0 }
+    biz.pendingDelivery.clear()
+    val refund = BizCalc.furnitureValue(biz) * .5 + BizCalc.stockValue(biz) * .3 + inTransit
     earn(refund, "Sold assets")
     state.employees.filter { it.businessId == biz.id }.forEach { it.businessId = -1 }
     state.businesses.remove(biz)
@@ -145,20 +145,16 @@ fun GameEngine.toggleWork(biz: Business) {
 
 fun GameEngine.workUntilClosing(biz: Business) {
     if (state.player.inBuilding != biz.buildingId) return
+    if (biz.tempClosed || !BizCalc.isWithinHours(biz, state.hour)) { toast("${biz.name} is closed right now"); return }
     val minutes = Economy.minutesUntil(state.minute, biz.closeHour).toInt()
     state.player.workingAt = biz.id
     state.objectivesDone += "work"
-    startSkip(SkipKind.WORK, minutes, "Working at ${biz.name}…") { e, _ ->
-        e.state.player.workingAt = -1
-    }
+    startSkip(SkipKind.WORK, minutes, "Working at ${biz.name}…", target = biz.id)
 }
 
 fun GameEngine.cleanStore(biz: Business) {
     if (biz.cleanliness >= 99) { toast("Already spotless"); return }
-    startSkip(SkipKind.WAIT, 30, "Cleaning ${biz.name}…") { e, cancelled ->
-        if (!cancelled) biz.cleanliness = (biz.cleanliness + 50).coerceAtMost(100.0)
-        e.toast("Cleanliness ${biz.cleanliness.roundToInt()}%")
-    }
+    startSkip(SkipKind.CLEAN, 30, "Cleaning ${biz.name}…", target = biz.id)
 }
 
 // ---------------------------------------------------------------------- cargo & unloading
@@ -181,6 +177,7 @@ fun GameEngine.unloadHere(): Int {
     if (v != null) sources += v.cargo
     var moved = 0
     var skipped = 0
+    var wrongProduct: String? = null
     for (list in sources) {
         val it = list.iterator()
         while (it.hasNext()) {
@@ -188,7 +185,8 @@ fun GameEngine.unloadHere(): Int {
             if (item.isProduct) {
                 if (biz == null) { skipped++; continue }
                 val pdef = Catalog.product(item.id) ?: continue
-                val room = (BizCalc.capacityFor(biz, item.id) - (biz.stock[item.id] ?: 0)).coerceAtLeast(0)
+                if (biz.type.products.none { it.first == item.id }) { skipped++; wrongProduct = pdef.name; continue }
+                val room = BizCalc.roomFor(biz, item.id)
                 if (room <= 0) { skipped++; continue }
                 val qty = min(room, item.qty)
                 economy.addStock(biz, item.id, qty, pdef.cost)
@@ -205,6 +203,7 @@ fun GameEngine.unloadHere(): Int {
         }
     }
     when {
+        wrongProduct != null && moved == 0 -> toast("${biz?.name} doesn't sell $wrongProduct")
         moved == 0 && skipped == 0 -> toast(if (v == null) "Nothing to unload (park your vehicle within 45 m)" else "Your vehicle is empty")
         skipped > 0 -> toast("Unloaded $moved item(s). $skipped didn't fit — place shelves/displays first", ToastKind.INFO)
         else -> toast("Unloaded $moved item(s)", ToastKind.GOOD)
@@ -319,8 +318,7 @@ fun GameEngine.commitGhost(): Boolean {
         if (!storage.remove(id)) return false
         sc.items += PlacedItem(id, sc.ghostX, sc.ghostY, sc.ghostRot)
     }
-    sc.ghostId = null
-    sc.movingIndex = -1
+    sc.cancelGhost()
     bump()
     return true
 }
@@ -363,11 +361,18 @@ fun GameEngine.sellStored(itemId: String) {
 
 private fun GameEngine.clampStock(biz: Business) {
     var lostValue = 0.0
-    for ((pid, qty) in biz.stock.toList()) {
-        val cap = BizCalc.capacityFor(biz, pid)
-        if (qty > cap) {
-            lostValue += (qty - cap) * (biz.unitCost[pid] ?: 0.0)
-            biz.stock[pid] = cap
+    // displays are shared by every product with the same tag: trim each tag back to its capacity
+    val byTag = biz.stock.keys.groupBy { Catalog.product(it)?.tag ?: "" }
+    for ((tag, pids) in byTag) {
+        val cap = BizCalc.displayCapacity(biz, tag)
+        var total = pids.sumOf { biz.stock[it] ?: 0 }
+        for (pid in pids.sortedByDescending { biz.stock[it] ?: 0 }) {
+            if (total <= cap) break
+            val have = biz.stock[pid] ?: 0
+            val cut = minOf(have, total - cap)
+            lostValue += cut * (biz.unitCost[pid] ?: 0.0)
+            biz.stock[pid] = have - cut
+            total -= cut
         }
     }
     if (lostValue > 0) {
@@ -423,12 +428,7 @@ fun GameEngine.takeCourse(courseId: String) {
     if (courseId in state.player.courses) return
     if (!spend(course.price, "Education")) return
     ui.panel = null
-    startSkip(SkipKind.COURSE, course.hours * 60, "Studying: ${course.name}", cancellable = false) { e, _ ->
-        e.state.player.courses += courseId
-        e.message("Hustle Business School", "Congratulations on completing ${course.name}! ${course.description}")
-        e.toast("Course completed: ${course.name}", ToastKind.GOOD)
-        e.checkObjectives()
-    }
+    startSkip(SkipKind.COURSE, course.hours * 60, "Studying: ${course.name}", cancellable = false, payload = courseId)
 }
 
 fun GameEngine.takeLoan(def: com.hustlecity.game.data.LoanDef) {
@@ -450,10 +450,15 @@ fun GameEngine.repayLoan(loan: Loan) {
 fun GameEngine.startCampaign(biz: Business, campaignId: String, days: Int) {
     val def = Catalog.campaign(campaignId)
     if (def.needsCourse && Catalog.COURSE_MARKETING !in state.player.courses) { toast("Requires the Marketing Fundamentals course"); return }
-    // first day is paid upfront, the rest daily at midnight
-    if (!spend(def.pricePerDay, "Marketing")) return
     val existing = biz.campaigns.firstOrNull { it.campaignId == campaignId }
-    if (existing != null) existing.daysLeft += days else biz.campaigns += Campaign(campaignId, days)
+    if (existing != null) {
+        // extending: the extra days are billed at midnight like the rest
+        existing.daysLeft += days
+    } else {
+        // the first day is paid upfront, the rest daily at midnight
+        if (!spend(def.pricePerDay, "Marketing")) return
+        biz.campaigns += Campaign(campaignId, days)
+    }
     biz.marketing = max(biz.marketing, biz.campaigns.sumOf { Catalog.campaign(it.campaignId).boost }.coerceAtMost(1.0))
     state.objectivesDone += "marketing"
     toast("${def.name} running for ${biz.name} ($days days)", ToastKind.GOOD)
@@ -464,8 +469,8 @@ fun GameEngine.buyVehicle(defId: String, dealerBuildingId: Int) {
     val def = Catalog.vehicle(defId)
     if (!spend(def.price, "Vehicles")) return
     val b = city.building(dealerBuildingId) ?: return
-    val y = City.streetY(b.streetIndex) + if (b.facesNorth) -3f else 3f
-    state.vehicles += OwnedVehicle(state.newId(), defId, b.doorX + 6f, y, (Math.PI / 2).toFloat(), fuel = 1.0, condition = 1.0, color = def.color)
+    val (x, y) = curbSpot(b, 6f + (state.vehicles.size % 3) * 5f)
+    state.vehicles += OwnedVehicle(state.newId(), defId, x, y, (Math.PI / 2).toFloat(), fuel = 1.0, condition = 1.0, color = def.color)
     toast("Your new ${def.name} is parked outside!", ToastKind.GOOD)
     bump()
 }
@@ -532,20 +537,12 @@ fun GameEngine.buyGroceries() {
 fun GameEngine.sleepMinutes(minutes: Int) {
     if (state.homeFurniture.none { Catalog.item(it.itemId)?.fn == ItemFn.BED }) { toast("Place a bed in your home first"); return }
     ui.panel = null
-    startSkip(SkipKind.SLEEP, minutes, "Sleeping…") { e, _ ->
-        e.toast("Good morning! Energy ${e.state.player.energy.roundToInt()}%")
-    }
+    startSkip(SkipKind.SLEEP, minutes, "Sleeping…")
 }
 
 fun GameEngine.sideJob(hours: Int, wage: Double, where: String) {
     ui.panel = null
-    val startMinute = state.minute
-    startSkip(SkipKind.SIDE_JOB, hours * 60, "Working a shift at $where…") { e, _ ->
-        val worked = ((e.state.minute - startMinute) / 60.0)
-        val pay = worked * wage
-        e.earn(pay, "Side jobs")
-        e.toast("Shift done: earned ${e.money(pay)}", ToastKind.GOOD)
-    }
+    startSkip(SkipKind.SIDE_JOB, hours * 60, "Working a shift at $where…", amount = wage)
 }
 
 fun GameEngine.taxiTo(buildingId: Int) {
@@ -559,13 +556,7 @@ fun GameEngine.taxiTo(buildingId: Int) {
     ui.app = null
     ui.selected = -1
     val minutes = max(5, (d / 22f).roundToInt())
-    startSkip(SkipKind.TAXI, minutes, "Taking a taxi to ${buildingName(b)}…", cancellable = false) { e, _ ->
-        e.state.player.x = b.doorX
-        e.state.player.y = b.doorY + if (b.facesNorth) -1.5f else 1.5f
-        e.camera.tx = e.state.player.x; e.camera.ty = e.state.player.y
-        e.camera.panX = 0f; e.camera.panY = 0f
-        e.traffic.update(0f, e.camera.tx, e.camera.ty, 230f, -9999f, -9999f, initial = true)
-    }
+    startSkip(SkipKind.TAXI, minutes, "Taking a taxi to ${buildingName(b)}…", cancellable = false, target = b.id)
 }
 
 fun taxiFare(distance: Float) = 6.0 + distance / 100.0 * 2.6

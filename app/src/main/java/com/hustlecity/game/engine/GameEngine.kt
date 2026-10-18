@@ -13,6 +13,8 @@ import com.hustlecity.game.model.PlayerState
 import com.hustlecity.game.model.Rental
 import com.hustlecity.game.model.Rival
 import com.hustlecity.game.model.RivalBusiness
+import com.hustlecity.game.model.SkipJob
+import com.hustlecity.game.model.SkipKind
 import com.hustlecity.game.world.BKind
 import com.hustlecity.game.world.Building
 import com.hustlecity.game.world.City
@@ -50,17 +52,6 @@ class CameraRig {
     var mapDist = 900f
 }
 
-enum class SkipKind { SLEEP, COURSE, WORK, SIDE_JOB, TAXI, WAIT, HOSPITAL }
-
-class SkipJob(
-    val kind: SkipKind,
-    val start: Long,
-    val end: Long,
-    val title: String,
-    val cancellable: Boolean,
-    val onDone: (GameEngine, Boolean) -> Unit = { _, _ -> },
-)
-
 class GameEngine(context: Context?) {
     val settings = Settings(context)
     val ui = UiState()
@@ -80,7 +71,8 @@ class GameEngine(context: Context?) {
 
     /** 0 = paused, 1 = 1x, 2 = 2x, 3 = 4x. */
     var speedIndex = 1
-    var skip: SkipJob? = null
+    /** The fast-forward in progress, stored in the save so it survives the app closing. */
+    val skip: SkipJob? get() = if (::state.isInitialized) state.skip else null
     private var minuteAcc = 0.0
     var realTime = 0f
     var summaryShownAt = -100f
@@ -120,7 +112,8 @@ class GameEngine(context: Context?) {
         s.homeFurniture += PlacedItem("bed", 0, 0, 0)
         s.homeFurniture += PlacedItem("home_fridge", 3, 0, 0)
         // a used starter car parked on the street in front of home
-        s.vehicles += OwnedVehicle(s.newId(), "tico", home.doorX + 4f, City.streetY(home.streetIndex) + 3f, (Math.PI / 2).toFloat(), fuel = .6, condition = .75)
+        val spot = curbSpot(home, 4f)
+        s.vehicles += OwnedVehicle(s.newId(), "tico", spot.first, spot.second, (Math.PI / 2).toFloat(), fuel = .6, condition = .75)
         // rivals and their businesses
         val rivalRnd = Random(seed + 7)
         for ((i, pair) in Catalog.rivalCompanies.withIndex()) {
@@ -143,7 +136,8 @@ class GameEngine(context: Context?) {
         camera.yaw = 0f; camera.panX = 0f; camera.panY = 0f
         camera.tx = s.player.x; camera.ty = s.player.y
         interior = null
-        skip = null
+        minuteAcc = 0.0
+        ui.skipping = false
         speedIndex = 1
         hasGame = true
         menuMode = false
@@ -162,8 +156,9 @@ class GameEngine(context: Context?) {
         city = City(s.seed)
         rnd = Random(System.nanoTime())
         interior = null
-        skip = null
-        s.player.workingAt = -1
+        minuteAcc = 0.0
+        s.player.workingAt = if (s.skip?.kind == SkipKind.WORK) s.skip!!.target else -1
+        ui.skipping = s.skip != null
         if (s.player.inBuilding >= 0) {
             val b = city.building(s.player.inBuilding)
             s.player.inBuilding = -1
@@ -335,6 +330,7 @@ class GameEngine(context: Context?) {
                 simulateMinute()
             }
             if (state.minute >= job.end && skip === job) finishSkip(false)
+            minuteAcc = minuteAcc.coerceAtMost(1.0)
         } else if (!simPaused()) {
             minuteAcc += speedMultiplier() * dt
             var guard = 0
@@ -345,12 +341,18 @@ class GameEngine(context: Context?) {
         }
 
         val inside = state.player.inBuilding >= 0
-        if (!inside && skip == null && ui.app != AppId.MAPS) updateMovement(dt)
+        // the car and player hold still while a phone app, the map or a panel covers the controls
+        if (!inside && skip == null && ui.app == null && ui.panel == null) updateMovement(dt)
         updateCamera(dt)
         val (fx, fy) = focusPoint()
         if (!inside) {
             val bx = if (state.player.driving >= 0) fx else state.player.x
             val by = if (state.player.driving >= 0) fy else state.player.y
+            val parked = state.vehicles.size
+            if (traffic.obstacles.size < parked * 2) traffic.obstacles = FloatArray(parked * 2 + 8)
+            var n = 0
+            for (v in state.vehicles) if (v.id != state.player.driving) { traffic.obstacles[n * 2] = v.x; traffic.obstacles[n * 2 + 1] = v.y; n++ }
+            traffic.obstacleCount = n
             traffic.update(dt, camera.tx, camera.ty, 230f, bx, by)
         }
         interior?.update(dt, !simPaused() || skip != null)
@@ -439,16 +441,19 @@ class GameEngine(context: Context?) {
         spend(400.0, "Medical", allowDebt = true, silent = true)
         p.happiness = (p.happiness - 15).coerceAtLeast(0.0)
         message("City Hospital", "You collapsed from exhaustion and were brought to City Hospital. Bill: \$400. Remember to sleep!")
-        startSkip(SkipKind.HOSPITAL, 6 * 60, "Recovering at City Hospital…", cancellable = false) { e, _ ->
-            e.state.player.energy = max(e.state.player.energy, 35.0)
-        }
+        startSkip(SkipKind.HOSPITAL, 6 * 60, "Recovering at City Hospital…", cancellable = false)
     }
 
     // ------------------------------------------------------------------ skipping time
 
-    fun startSkip(kind: SkipKind, minutes: Int, title: String, cancellable: Boolean = true, onDone: (GameEngine, Boolean) -> Unit = { _, _ -> }) {
-        if (minutes <= 0) { onDone(this, false); return }
-        skip = SkipJob(kind, state.minute, state.minute + minutes, title, cancellable, onDone)
+    fun startSkip(
+        kind: SkipKind, minutes: Int, title: String, cancellable: Boolean = true,
+        target: Int = -1, payload: String = "", amount: Double = 0.0,
+    ) {
+        val job = SkipJob(kind, state.minute, state.minute + minutes.coerceAtLeast(0), title, cancellable, target, payload, amount)
+        if (minutes <= 0) { completeSkip(job, false); return }
+        if (state.skip != null) finishSkip(true, force = true)
+        state.skip = job
         minuteAcc = 0.0
         ui.skipping = true
         bump()
@@ -460,12 +465,59 @@ class GameEngine(context: Context?) {
         finishSkip(true)
     }
 
-    private fun finishSkip(cancelled: Boolean) {
-        val job = skip ?: return
-        skip = null
+    private fun finishSkip(cancelled: Boolean, force: Boolean = false) {
+        val job = state.skip ?: return
+        if (cancelled && !job.cancellable && !force) return
+        state.skip = null
         ui.skipping = false
-        job.onDone(this, cancelled)
+        minuteAcc = 0.0
+        completeSkip(job, cancelled)
         bump()
+    }
+
+    /** Applies the result of a finished (or cancelled) skip. */
+    private fun completeSkip(job: SkipJob, cancelled: Boolean) {
+        val p = state.player
+        val elapsedHours = (state.minute - job.start) / 60.0
+        when (job.kind) {
+            SkipKind.SLEEP -> toast("Good morning! Energy ${p.energy.roundToInt()}%")
+            SkipKind.HOSPITAL -> p.energy = max(p.energy, 35.0)
+            SkipKind.COURSE -> {
+                val course = Catalog.courses.firstOrNull { it.id == job.payload } ?: return
+                p.courses += course.id
+                message("Hustle Business School", "Congratulations on completing ${course.name}! ${course.description}")
+                toast("Course completed: ${course.name}", ToastKind.GOOD)
+                checkObjectives()
+            }
+            SkipKind.WORK -> if (p.workingAt == job.target) p.workingAt = -1
+            SkipKind.SIDE_JOB -> {
+                val pay = elapsedHours * job.amount
+                earn(pay, "Side jobs")
+                toast("Shift done: earned ${money(pay)}", ToastKind.GOOD)
+            }
+            SkipKind.TAXI -> {
+                val b = city.building(job.target) ?: return
+                p.x = b.doorX
+                p.y = b.doorY + if (b.facesNorth) -1.5f else 1.5f
+                camera.tx = p.x; camera.ty = p.y
+                camera.panX = 0f; camera.panY = 0f
+                traffic.update(0f, camera.tx, camera.ty, 230f, -9999f, -9999f, initial = true)
+            }
+            SkipKind.CLEAN -> {
+                val biz = state.business(job.target) ?: return
+                if (!cancelled) biz.cleanliness = (biz.cleanliness + 50).coerceAtMost(100.0)
+                toast("Cleanliness ${biz.cleanliness.roundToInt()}%")
+            }
+            SkipKind.REST -> if (!cancelled) {
+                p.energy = (p.energy + 25).coerceAtMost(100.0)
+                p.happiness = (p.happiness + 3).coerceAtMost(100.0)
+            }
+            SkipKind.WORKOUT -> if (!cancelled) {
+                p.happiness = (p.happiness + 8).coerceAtMost(100.0)
+                p.energy = (p.energy - 8).coerceAtLeast(1.0)
+            }
+            SkipKind.WAIT -> {}
+        }
     }
 
     // ------------------------------------------------------------------ movement
@@ -485,8 +537,8 @@ class GameEngine(context: Context?) {
         } else {
             if (mag > .08f) {
                 val speed = 6.5f * mag
-                val nx = p.x + wx / mag * speed * dt * mag
-                val ny = p.y + wy / mag * speed * dt * mag
+                val nx = p.x + wx / mag * speed * dt
+                val ny = p.y + wy / mag * speed * dt
                 city.collide(nx, ny, .45f, tmp)
                 var px = tmp[0]; var py = tmp[1]
                 if (traffic.bump(px, py, .45f, tmp)) { px = tmp[0]; py = tmp[1] }
@@ -524,7 +576,8 @@ class GameEngine(context: Context?) {
         }
         if (input.brake) {
             if (carSpeed > .4f) { carSpeed = max(0f, carSpeed - 18f * dt); throttle = 0f }
-            else { throttle = -.8f; steer = 0f }
+            else if (v.fuel > 0.0) { throttle = -.8f; steer = 0f }
+            else throttle = 0f
         }
         val maxSpeed = def.maxSpeed * (.75f + .25f * v.condition.toFloat())
         if (throttle != 0f) {
@@ -593,9 +646,9 @@ class GameEngine(context: Context?) {
         // move hand-carried goods into the trunk
         val free = v.def.cargo - v.cargo.size
         if (p.hand.isNotEmpty() && free > 0) {
-            val moved = p.hand.take(free)
-            v.cargo += moved
-            p.hand.removeAll(moved.toSet())
+            val n = minOf(free, p.hand.size)
+            v.cargo += p.hand.take(n)
+            repeat(n) { p.hand.removeAt(0) }
         }
         bump()
     }
@@ -612,6 +665,26 @@ class GameEngine(context: Context?) {
         city.collide(sx, sy, .45f, tmp)
         p.x = tmp[0]; p.y = tmp[1]
         bump()
+    }
+
+    /** Curbside parking spot in front of a building, clear of the traffic lanes. */
+    fun curbSpot(b: Building, along: Float): Pair<Float, Float> {
+        val streetY = City.streetY(b.streetIndex)
+        val y = streetY + if (b.facesNorth) City.ST_HALF - 1.1f else -(City.ST_HALF - 1.1f)
+        return (b.doorX + along) to y
+    }
+
+    /** Makes [b] the player's home; furniture that doesn't fit the new place goes to storage. */
+    fun moveHomeTo(b: Building) {
+        state.player.home = b.id
+        val w = b.gridW.coerceAtLeast(7); val d = b.gridD.coerceAtLeast(6)
+        val keep = state.homeFurniture.filter { p ->
+            val def = Catalog.item(p.itemId) ?: return@filter false
+            val (fw, fd) = itemDims(def, p.rot)
+            p.x + fw <= w && p.y + fd <= d
+        }
+        state.homeStorage += state.homeFurniture.filter { it !in keep }.map { it.itemId }
+        state.homeFurniture.retainAll(keep.toSet())
     }
 
     fun nearbyVehicle(x: Float, y: Float, radius: Float): OwnedVehicle? {
@@ -645,7 +718,7 @@ class GameEngine(context: Context?) {
         }
         if (mode == InteriorMode.HOME && b.id != p.home) {
             // a second residential rental: make it the new home
-            p.home = b.id
+            moveHomeTo(b)
             toast("You moved into ${b.address}")
         }
         p.inBuilding = b.id
@@ -702,18 +775,26 @@ class GameEngine(context: Context?) {
     }
 
     private fun rayBox(ox: Float, oy: Float, oz: Float, dx: Float, dy: Float, dz: Float, x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float): Float {
-        var tmin = -Float.MAX_VALUE; var tmax = Float.MAX_VALUE
-        val o = floatArrayOf(ox, oy, oz); val d = floatArrayOf(dx, dy, dz)
-        val lo = floatArrayOf(x0, y0, z0); val hi = floatArrayOf(x1, y1, z1)
-        for (i in 0 until 3) {
-            if (abs(d[i]) < 1e-6f) {
-                if (o[i] < lo[i] || o[i] > hi[i]) return -1f
-            } else {
-                var t1 = (lo[i] - o[i]) / d[i]; var t2 = (hi[i] - o[i]) / d[i]
-                if (t1 > t2) { val t = t1; t1 = t2; t2 = t }
-                tmin = max(tmin, t1); tmax = min(tmax, t2)
-                if (tmin > tmax) return -1f
-            }
+        var tmin = -Float.MAX_VALUE
+        var tmax = Float.MAX_VALUE
+        // slab test per axis, without allocations (this runs per building per frame)
+        if (abs(dx) < 1e-6f) { if (ox < x0 || ox > x1) return -1f } else {
+            var t1 = (x0 - ox) / dx; var t2 = (x1 - ox) / dx
+            if (t1 > t2) { val t = t1; t1 = t2; t2 = t }
+            tmin = max(tmin, t1); tmax = min(tmax, t2)
+            if (tmin > tmax) return -1f
+        }
+        if (abs(dy) < 1e-6f) { if (oy < y0 || oy > y1) return -1f } else {
+            var t1 = (y0 - oy) / dy; var t2 = (y1 - oy) / dy
+            if (t1 > t2) { val t = t1; t1 = t2; t2 = t }
+            tmin = max(tmin, t1); tmax = min(tmax, t2)
+            if (tmin > tmax) return -1f
+        }
+        if (abs(dz) < 1e-6f) { if (oz < z0 || oz > z1) return -1f } else {
+            var t1 = (z0 - oz) / dz; var t2 = (z1 - oz) / dz
+            if (t1 > t2) { val t = t1; t1 = t2; t2 = t }
+            tmin = max(tmin, t1); tmax = min(tmax, t2)
+            if (tmin > tmax) return -1f
         }
         return if (tmax < 0) -1f else max(tmin, 0f)
     }
@@ -731,6 +812,7 @@ class GameEngine(context: Context?) {
 
     fun checkObjectives() {
         if (!hasGame) return
+        Objectives.latch(this)
         val g = Objectives.currentGroup(this)
         if (lastGroup in 0 until g) {
             val group = Objectives.groups[g]
@@ -744,6 +826,18 @@ class GameEngine(context: Context?) {
             null -> null
             "biz" -> state.businesses.firstOrNull()?.buildingId ?: state.rentals.firstOrNull { city.building(it.buildingId)?.kind == BKind.RETAIL }?.buildingId
             "realty" -> { ui.app = AppId.REALTY; null }
+            "furniture" -> {
+                // the store that sells the first piece this business is still missing
+                val biz = state.businesses.firstOrNull()
+                val tag = biz?.type?.requirements?.firstOrNull { BizCalc.count(biz, it.tag) == 0 }?.tag
+                val item = tag?.let { itemForTag(it) }
+                val place = item?.let { id -> Catalog.places.firstOrNull { it.kind == PlaceKind.FURNITURE_STORE && id in it.stock } }
+                city.placeBuilding(place?.id ?: "essentials")?.id
+            }
+            "stock" -> {
+                val source = state.businesses.firstOrNull()?.type?.products?.mapNotNull { Catalog.product(it.first) }?.firstOrNull { !it.service }?.source
+                city.placeBuilding(source?.let { Catalog.sourcePlaceId(it) } ?: "metro")?.id
+            }
             else -> city.placeBuilding(target)?.id
         }
     }

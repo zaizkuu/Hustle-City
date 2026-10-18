@@ -34,6 +34,9 @@ class Agent {
 
 class Traffic(private val rnd: Random = Random(7)) {
     val cars = ArrayList<Agent>()
+    /** Parked player vehicles (x, y pairs) that NPC cars stop for. */
+    var obstacles = FloatArray(0)
+    var obstacleCount = 0
     val peds = ArrayList<Agent>()
     var lightClock = 0f
 
@@ -196,6 +199,13 @@ class Traffic(private val rnd: Random = Random(7)) {
             val ahead = dx * fwdX + dy * fwdY
             val side = abs(-dx * fwdY + dy * fwdX)
             if (ahead > 0 && ahead < 12f && side < 2.2f) target = min(target, (ahead - 5f).coerceAtLeast(0f))
+        }
+        for (k in 0 until obstacleCount) {
+            val dx = obstacles[k * 2] - a.x; val dy = obstacles[k * 2 + 1] - a.y
+            if (abs(dx) > 14f || abs(dy) > 14f) continue
+            val ahead = dx * fwdX + dy * fwdY
+            val side = abs(-dx * fwdY + dy * fwdX)
+            if (ahead > 0 && ahead < 12f && side < 2.2f) target = min(target, (ahead - 5.5f).coerceAtLeast(0f))
         }
         a.speed += ((target - a.speed).coerceIn(-14f * dt, 5f * dt))
         steer(a, dt, 7f, 2.2f)

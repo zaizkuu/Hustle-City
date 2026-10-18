@@ -326,7 +326,9 @@ private fun InventoryTab(e: GameEngine, biz: Business) {
                         if (p.service) Text(if (BizCalc.count(biz, p.tag) > 0) "Available" else "Missing equipment", style = HT.small, color = if (BizCalc.count(biz, p.tag) > 0) HC.Green else HC.Red)
                         else if (cap == 0) Text("No display: needs ${Catalog.item(com.hustlecity.game.engine.itemForTag(p.tag))?.name}", style = HT.small, color = HC.Red)
                         else {
-                            Text("Stock $stock / $cap", style = HT.small, color = if (stock == 0) HC.Red else HC.Ink)
+                            val shared = biz.type.products.count { (other, _) -> Catalog.product(other)?.tag == p.tag } > 1
+                            val free = BizCalc.roomFor(biz, pid)
+                            Text("Stock $stock · ${free} free" + if (shared) " (shared)" else " / $cap", style = HT.small, color = if (stock == 0) HC.Red else HC.Ink)
                             Bar(stock / cap.toFloat(), if (stock < cap * .2f) HC.Orange else HC.Green, Modifier.fillMaxWidth().padding(end = 10.dp), track = HC.Line, height = 7.dp)
                         }
                         Text("Sold today: ${biz.soldToday[pid] ?: 0}", style = HT.small, color = HC.InkSoft)

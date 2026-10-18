@@ -98,6 +98,7 @@ data class Business(
     var customersToday: Int = 0,
     var lostToday: Int = 0,
     var custAcc: Double = 0.0,
+    var lostAcc: Double = 0.0,
     val hourlyToday: MutableList<Int> = MutableList(24) { 0 },
     val hourlyYesterday: MutableList<Int> = MutableList(24) { 0 },
     val soldToday: MutableMap<String, Int> = mutableMapOf(),
@@ -140,8 +141,10 @@ data class Employee(
     var expiresDay: Int = 0,
 ) {
     fun worksAt(hour: Int, weekday: Int): Boolean {
-        if ((days shr weekday) and 1 == 0) return false
-        return if (shiftStart <= shiftEnd) hour in shiftStart until shiftEnd else hour >= shiftStart || hour < shiftEnd
+        if (shiftStart <= shiftEnd) return (days shr weekday) and 1 == 1 && hour in shiftStart until shiftEnd
+        // overnight shift: the hours after midnight belong to the shift that started the day before
+        return if (hour >= shiftStart) (days shr weekday) and 1 == 1
+        else hour < shiftEnd && (days shr ((weekday + 6) % 7)) and 1 == 1
     }
 
     val weeklyHours: Int
@@ -196,6 +199,25 @@ data class Message(val day: Int, val minute: Int, val from: String, val text: St
 data class PendingRecruit(val role: StaffRole, val count: Int, val readyAt: Long)
 
 @Serializable
+enum class SkipKind { SLEEP, COURSE, WORK, SIDE_JOB, TAXI, WAIT, HOSPITAL, CLEAN, REST, WORKOUT }
+
+/** A fast-forward in progress. Saved with the game so a course or taxi ride survives the app being closed. */
+@Serializable
+data class SkipJob(
+    val kind: SkipKind,
+    val start: Long,
+    val end: Long,
+    val title: String,
+    val cancellable: Boolean,
+    /** Building or business id the skip is about (taxi destination, store being worked/cleaned). */
+    val target: Int = -1,
+    /** Extra data, e.g. the course id. */
+    val payload: String = "",
+    /** Hourly wage for side jobs. */
+    val amount: Double = 0.0,
+)
+
+@Serializable
 data class GameState(
     val seed: Long,
     var minute: Long,
@@ -219,6 +241,7 @@ data class GameState(
     val recruits: MutableList<PendingRecruit> = mutableListOf(),
     var nextId: Int = 1,
     var radioIndex: Int = 0,
+    var skip: SkipJob? = null,
 ) {
     val day: Int get() = (minute / MINUTES_PER_DAY).toInt() + 1
     val hour: Int get() = ((minute % MINUTES_PER_DAY) / 60).toInt()

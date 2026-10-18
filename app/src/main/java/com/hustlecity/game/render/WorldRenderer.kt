@@ -66,6 +66,8 @@ class WorldRenderer(private val e: GameEngine) {
 
     private fun vacant(b: Building) = b.rentable && b.placeId == null && b.id !in rentedBuildings && b.id !in rivalByBuilding
 
+    private var focusX = 0f
+    private var focusY = 0f
     private var shadowDX = 0f
     private var shadowDY = 0f
     private var playerKey = 0f
@@ -128,6 +130,7 @@ class WorldRenderer(private val e: GameEngine) {
 
         canvas.drawColor(scene.lit(WATER, 1f))
         rebuildLookups()
+        if (e.hasGame) { val f = e.focusPoint(); focusX = f.first; focusY = f.second }
         proj.visibleGround(bbox, 30f)
         batch.begin(canvas)
         for (l in labels) labelPool += l
@@ -456,9 +459,8 @@ class WorldRenderer(private val e: GameEngine) {
         val s = e.state
         val p = s.player
         var alpha = 1f
-        if (!mapMode && p.inBuilding < 0 && b.height > 5f && keyForRect(b) < playerKey) {
-            val (fx, fy) = e.focusPoint()
-            if (e.occludes(proj, b, fx, fy, 1.2f)) alpha = .3f
+        if (!mapMode && e.hasGame && p.inBuilding < 0 && b.height > 5f && keyForRect(b) < playerKey) {
+            if (e.occludes(proj, b, focusX, focusY, 1.2f)) alpha = .3f
         }
         var roof = b.roof
         var facade = b.facade

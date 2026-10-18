@@ -248,7 +248,7 @@ fun ObjectivesPanel(e: GameEngine, modifier: Modifier = Modifier) {
             val group = Objectives.groups[gIdx]
             SectionLabel(group.title)
             for (o in group.items) {
-                val done = o.done(e)
+                val done = Objectives.isDone(e, o)
                 Row(
                     Modifier.fillMaxWidth().clickable {
                         val t = e.objectiveTarget(o.target)
@@ -567,7 +567,7 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                     val biz = sc.business!!
                     HButton("Open in BizHub", full, small = true) { e.ui.bizHubSel = biz.id; e.ui.app = AppId.BIZHUB }
                     HButton("Toggle walls", full, small = true, color = HC.GlassLight) { sc.showWalls = !sc.showWalls; e.bump() }
-                    HButton("Interior designer", full, small = true, color = HC.GlassLight) { e.ui.designer = !e.ui.designer; sc.selectedIndex = -1; sc.ghostId = null; e.bump() }
+                    HButton("Interior designer", full, small = true, color = HC.GlassLight) { e.ui.designer = !e.ui.designer; sc.selectedIndex = -1; sc.cancelGhost(); e.bump() }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(if (biz.tempClosed) "TEMPORARILY CLOSED" else "OPEN", color = if (biz.tempClosed) HC.Red else HC.GreenLight, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -584,7 +584,7 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                 InteriorMode.HOME -> {
                     HButton("Sleep", full, small = true) { e.ui.panel = Panel.Sleep }
                     HButton("Eat (${e.state.player.fridgeMeals} meals)", full, small = true, color = HC.Green) { e.eatAtHome() }
-                    HButton("Interior designer", full, small = true, color = HC.GlassLight) { e.ui.designer = !e.ui.designer; sc.selectedIndex = -1; sc.ghostId = null; e.bump() }
+                    HButton("Interior designer", full, small = true, color = HC.GlassLight) { e.ui.designer = !e.ui.designer; sc.selectedIndex = -1; sc.cancelGhost(); e.bump() }
                     HButton("Toggle walls", full, small = true, color = HC.GlassLight) { sc.showWalls = !sc.showWalls; e.bump() }
                     if (unload > 0) HButton("Unload ($unload)", full, small = true, color = HC.Orange) { e.unloadHere() }
                 }
@@ -612,7 +612,7 @@ fun DesignerBar(e: GameEngine, modifier: Modifier = Modifier) {
                 for ((i, col) in WALL_COLORS.withIndex()) Swatch(col.toColor(), biz.wallColor == i) { biz.wallColor = i; e.bump() }
             }
             Spacer(Modifier.width(8.dp))
-            HButton("Done", small = true, color = HC.Green) { e.ui.designer = false; sc.ghostId = null; sc.selectedIndex = -1; e.bump() }
+            HButton("Done", small = true, color = HC.Green) { e.ui.designer = false; sc.cancelGhost(); sc.selectedIndex = -1; e.bump() }
         }
         Box(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
             val ghost = sc.ghostId
@@ -624,7 +624,7 @@ fun DesignerBar(e: GameEngine, modifier: Modifier = Modifier) {
                     Text("Tap the floor to move", color = Color.White.copy(alpha = .7f), fontSize = 11.sp)
                     HButton("Rotate", small = true, color = HC.GlassLight) { sc.rotateGhost(); e.bump() }
                     HButton("Place", small = true, color = HC.Green, enabled = sc.ghostValid) { e.commitGhost() }
-                    HButton("Cancel", small = true, color = HC.Red) { sc.ghostId = null; sc.movingIndex = -1; e.bump() }
+                    HButton("Cancel", small = true, color = HC.Red) { sc.cancelGhost(); e.bump() }
                 }
                 sel != null -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val def = Catalog.item(sel.itemId)
