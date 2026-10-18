@@ -137,6 +137,15 @@ data class Business(
     var dirt: MutableList<Float> = mutableListOf(),
     /** Cost of stock shoplifted today. */
     var stolenToday: Double = 0.0,
+    /** Units of each product boxed up on the back room's storage shelves (not on display yet). */
+    val backStock: MutableMap<String, Int> = mutableMapOf(),
+    /**
+     * Rows at the back of the store walled off as a staff-only back room: -1 until the interior is first laid out
+     * (old saves), 0 for none.
+     */
+    var backRoom: Int = -1,
+    /** First tile (x) of the doorway in the back room's wall. */
+    var backDoor: Int = -1,
 ) {
     val type get() = Catalog.type(typeId)
 }

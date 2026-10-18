@@ -3,9 +3,11 @@ package com.hustlecity.game.engine
 import com.hustlecity.game.audio.Audio
 import com.hustlecity.game.audio.Sfx
 import com.hustlecity.game.data.Catalog
+import com.hustlecity.game.data.ItemFn
 import com.hustlecity.game.model.CargoItem
 import com.hustlecity.game.model.OwnedVehicle
 import com.hustlecity.game.world.dist
+import kotlin.math.min
 
 /*
  * Walk-in shopping and carrying boxes, the way Big Ambitions does it: bare hands hold one box,
@@ -298,6 +300,74 @@ fun GameEngine.carryIn(buildingId: Int, v: OwnedVehicle): Int {
 fun GameEngine.carryMinutes(boxes: Int): Int {
     val per = if (state.player.carrier == Carrier.HANDS) 1 else carryCap()
     return (boxes + per - 1) / per * CARRY_TRIP_MINUTES
+}
+
+// ---------------------------------------------------------------------- stocking your own store
+
+/**
+ * Boxes you carry that can go onto item [index] of the store you're in: products it sells, onto a display of
+ * their kind with room left, or onto a storage shelf in the back room.
+ */
+fun GameEngine.boxesFor(index: Int): List<CargoItem> {
+    val sc = interior ?: return emptyList()
+    val biz = sc.business ?: return emptyList()
+    val def = sc.items.getOrNull(index)?.let { Catalog.item(it.itemId) } ?: return emptyList()
+    return state.player.hand.filter { item ->
+        if (!item.isProduct || item.unpaid || item.qty <= 0 || !BizCalc.sells(biz, item.id)) return@filter false
+        val p = Catalog.product(item.id) ?: return@filter false
+        when {
+            def.fn == ItemFn.STORAGE -> BizCalc.storageRoomFor(biz, item.id) > 0
+            def.fn == ItemFn.DISPLAY && p.tag in def.tags -> BizCalc.roomFor(biz, item.id) > 0
+            else -> false
+        }
+    }
+}
+
+/**
+ * Unpacks the boxes you carry onto display [index] of your store (it fills in item by item), or puts them on a storage
+ * shelf. As much as fits goes on; the rest stays in the box. Returns the units stocked.
+ */
+fun GameEngine.stockFromHands(index: Int): Int {
+    val sc = interior ?: return 0
+    val biz = sc.business ?: return 0
+    val def = sc.items.getOrNull(index)?.let { Catalog.item(it.itemId) } ?: return 0
+    val boxes = boxesFor(index)
+    if (boxes.isEmpty()) return 0
+    sc.shelf?.focusOn(index)
+    var moved = 0
+    for (item in boxes) {
+        val p = Catalog.product(item.id) ?: continue
+        val qty = if (def.fn == ItemFn.STORAGE) economy.stockBack(biz, item.id, item.qty, p.cost)
+        else min(item.qty, BizCalc.roomFor(biz, item.id)).also { economy.addStock(biz, item.id, it, p.cost) }
+        item.qty -= qty
+        moved += qty
+    }
+    val emptied = state.player.hand.count { it.isProduct && it.qty <= 0 }
+    state.player.hand.removeAll { it.isProduct && it.qty <= 0 }
+    if (moved > 0) {
+        Audio.play(Sfx.TAP)
+        toast(if (def.fn == ItemFn.STORAGE) "Put $emptied box(es) on the storage shelf" else "Stocked $moved on the ${def.name}" +
+            if (emptied < boxes.size) " (it's full: the rest stays in the box)" else "", ToastKind.GOOD, "cargo_boxes")
+    }
+    bump()
+    return moved
+}
+
+/**
+ * Walks to the nearest display (then storage shelf) that takes a box you carry and stocks it, and keeps going
+ * until the boxes are unpacked or nothing has room. Returns false when no display takes what you carry.
+ */
+fun GameEngine.stockShelves(): Boolean {
+    val sc = interior ?: return false
+    if (sc.business == null) return false
+    val target = sc.items.indices.filter { boxesFor(it).isNotEmpty() }.minByOrNull { i ->
+        val p = sc.items[i]
+        val storage = Catalog.item(p.itemId)?.fn == ItemFn.STORAGE
+        (if (storage) 1000f else 0f) + kotlin.math.abs(p.x + .5f - sc.px) + kotlin.math.abs(p.y + .5f - sc.py)
+    } ?: return false
+    sc.inspect = target
+    sc.walkToItem(target) { if (stockFromHands(target) > 0) stockShelves() }
+    return true
 }
 
 /** How the player model holds things, for [com.hustlecity.game.render.PersonPainter]: 0 nothing, 1 a box, 2 hand truck, 3 cart. */

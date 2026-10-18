@@ -1,0 +1,212 @@
+package com.hustlecity.game.render
+
+import com.hustlecity.game.data.Catalog
+import com.hustlecity.game.data.FurnitureDef
+import com.hustlecity.game.data.StockLayout
+import com.hustlecity.game.data.StockLayouts
+import com.hustlecity.game.data.StockShape
+import com.hustlecity.game.data.c
+import com.hustlecity.game.engine.ShelfStock
+import com.hustlecity.game.model.PlacedItem
+import kotlin.math.min
+
+/**
+ * Draws a display of your store with what it holds: the model (without its placeholder goods, hollowed out where
+ * you need to see inside), one small shape per filled product slot, and see-through glass over them. New items
+ * drop into place; far away, each run of the same product becomes a single block so it stays cheap.
+ */
+class StockPainter(private val scene: Scene3D, private val parts: PartSorter) {
+    companion object {
+        private val KRAFT = c(0xFFC8A165)
+        private val KRAFT_TOP = c(0xFFD9B98A)
+        private val KRAFT_DARK = c(0xFFB38A55)
+        private val SILVER = c(0xFFC9D1D9)
+        private val PAPER = c(0xFFF2EEE6)
+        private val BLACK = c(0xFF26292E)
+        private val STEM = c(0xFF3E8E41)
+        private val BUCKET = c(0xFF4F5A64)
+        private val GOLD = c(0xFFE8C04A)
+        private val VELVET = c(0xFF3A1420)
+        private val RED = c(0xFFD0392B)
+        private val WHITE = c(0xFFF5F5F5)
+        private const val DROP = .3f
+    }
+
+    private val pt = FloatArray(3)
+    private var def: FurnitureDef? = null
+    private var px = 0f; private var py = 0f; private var rot = 0
+
+    /** Draws placed display [p] (item [index] of the scene) with the stock [shelf] says it shows. */
+    fun draw(def: FurnitureDef, p: PlacedItem, index: Int, shelf: ShelfStock, lay: StockLayout, alpha: Float) {
+        this.def = def; px = p.x.toFloat(); py = p.y.toFloat(); rot = p.rot
+        parts.begin()
+        for ((k, part) in def.parts.withIndex()) {
+            if (k < 64 && (lay.hideMask ushr k) and 1L == 1L) continue
+            box(part.x0, part.y0, part.z0, part.x1, part.y1, part.z1, part.color)
+        }
+        for (part in lay.shell) box(part.x0, part.y0, part.z0, part.x1, part.y1, part.z1, part.color)
+        val slots = shelf.slots(index)
+        val ages = shelf.ages(index)
+        if (slots != null && ages != null) {
+            val boxed = shelf.boxed(index)
+            if (far(p, def)) blocks(lay, slots, boxed) else for (s in 0 until lay.slots) {
+                val pid = slots[s] ?: continue
+                item(lay, s, pid, ages[s], boxed)
+            }
+        }
+        for (g in lay.glass) box(g.x0, g.y0, g.z0, g.x1, g.y1, g.z1, scene.withAlpha(StockLayouts.GLASS, .26f))
+        parts.end(alpha)
+    }
+
+    /** True when the display is so small on screen that single products wouldn't show (one block per run instead). */
+    private fun far(p: PlacedItem, def: FurnitureDef): Boolean {
+        val zc = scene.proj.camZOf(p.x + def.w * .5f, p.y + def.d * .5f, 1f)
+        return zc > 0f && scene.proj.focal * .12f / zc < 3.5f
+    }
+
+    private fun box(x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float, color: Int, top: Int = color) =
+        parts.add(def!!, px, py, rot, x0, y0, z0, x1, y1, z1, color, top)
+
+    /** A box centered on (cx, cy) in the item's units, [w] across and [d] deep, from z0 to z1. */
+    private fun cbox(cx: Float, cy: Float, w: Float, d: Float, z0: Float, z1: Float, color: Int, top: Int = color) =
+        box(cx - w / 2, cy - d / 2, z0, cx + w / 2, cy + d / 2, z1, color, top)
+
+    /** Neighboring items of the same product alternate a little in shade so they read as separate things. */
+    private fun shade(color: Int, s: Int) = if (s % 2 == 0) color else scene.mix(color, 0xFF000000.toInt(), .1f)
+
+    private fun item(lay: StockLayout, s: Int, pid: String, age: Float, boxed: Boolean) {
+        lay.slotCenter(s, pt)
+        val row = lay.row(s)
+        val cw = lay.cellW(s); val cd = lay.cellD(s)
+        val cx = pt[0]; val cy = pt[1]
+        // new stock drops into place
+        val k = if (age < DROP) 1f - age / DROP else 0f
+        val z = pt[2] + k * k * .22f
+        val prod = Catalog.product(pid)
+        val color = shade(prod?.color ?: KRAFT, s)
+        val h = row.h
+        if (boxed) {
+            // a cardboard box of stock with the product's label on the front
+            val bw = cw * .9f; val bd = cd * .9f; val bh = h * .92f
+            cbox(cx, cy, bw, bd, z, z + bh, if (s % 2 == 0) KRAFT else KRAFT_DARK, KRAFT_TOP)
+            cbox(cx, cy + bd / 2 + .006f, bw * .5f, .012f, z + bh * .35f, z + bh * .75f, prod?.color ?: RED)
+            return
+        }
+        if (row.hang) {
+            // clothes on hangers: thin across the rail, hanging down from it
+            val len = min(h, if (s % 3 == 1) .7f else .55f)
+            val gw = min(cw * .6f, .07f); val gd = min(cd * .95f, .4f)
+            cbox(cx, cy, .02f, .02f, z - .07f, z, SILVER)
+            cbox(cx, cy, gw, gd, z - .07f - len, z - .07f, color, scene.mix(color, 0xFFFFFFFF.toInt(), .15f))
+            return
+        }
+        when (StockLayouts.shapeOf(pid)) {
+            StockShape.CAN -> { val w = min(cw * .72f, .085f); cbox(cx, cy, w, min(cd * .8f, w), z, z + min(h * .85f, .15f), color, SILVER) }
+            StockShape.BOTTLE -> {
+                val w = min(cw * .62f, .085f); val bh = min(h * .6f, .22f)
+                cbox(cx, cy, w, w, z, z + bh, color)
+                cbox(cx, cy, w * .36f, w * .36f, z + bh, z + bh + min(h * .3f, .1f), scene.mix(color, 0xFF000000.toInt(), .25f))
+            }
+            StockShape.BAR -> cbox(cx, cy, min(cw * .85f, .17f), min(cd * .7f, .12f), z, z + min(h * .45f, .1f), color, scene.mix(color, 0xFFFFFFFF.toInt(), .3f))
+            StockShape.ROLLS -> cbox(cx, cy, min(cw * .86f, .2f), min(cd * .8f, .22f), z, z + min(h * .85f, .26f), PAPER, c(0xFF8EC5E8))
+            StockShape.GIFT -> {
+                val g = min(min(cw * .78f, cd * .8f), min(h * .75f, .16f))
+                cbox(cx, cy, g, g, z, z + g, color)
+                cbox(cx, cy, g * 1.04f, g * .22f, z + g * .02f, z + g * 1.03f, GOLD)
+            }
+            StockShape.UMBRELLA -> {
+                cbox(cx, cy, .045f, .045f, z, z + min(h * .92f, .42f), color)
+                cbox(cx, cy, .02f, .06f, z + min(h * .92f, .42f), z + min(h * .92f, .42f) + .03f, BLACK)
+            }
+            StockShape.BOOK -> {
+                val bw = cw * .42f; val bd = min(cd * .85f, .3f); val bh = min(h * .85f, .27f)
+                cbox(cx - bw * .52f, cy, bw, bd, z, z + bh, color, PAPER)
+                cbox(cx + bw * .52f, cy, bw, bd, z, z + bh * (if (s % 3 == 0) .82f else .92f), scene.mix(color, 0xFFFFFFFF.toInt(), .22f), PAPER)
+            }
+            StockShape.MAGAZINE -> cbox(cx, cy, min(cw * .82f, .21f), .02f, z, z + min(h * .9f, .27f), color, PAPER)
+            StockShape.SHOE -> {
+                val sw = cw * .3f; val sd = min(cd * .9f, .25f); val sh = min(h * .8f, .09f)
+                cbox(cx - sw * .58f, cy, sw, sd, z, z + sh, color, scene.mix(color, 0xFFFFFFFF.toInt(), .2f))
+                cbox(cx + sw * .58f, cy, sw, sd, z, z + sh, color, scene.mix(color, 0xFFFFFFFF.toInt(), .2f))
+            }
+            StockShape.FLOWERS -> {
+                val bw = min(min(cw, cd) * .55f, .2f)
+                cbox(cx, cy, bw, bw, z, z + .16f, BUCKET)
+                cbox(cx, cy, bw * .5f, bw * .5f, z + .16f, z + min(h * .7f, .32f), STEM)
+                cbox(cx, cy, bw * 1.2f, bw * 1.2f, z + min(h * .7f, .32f), z + min(h * .7f, .32f) + .09f, color)
+            }
+            StockShape.PRODUCE -> {
+                cbox(cx, cy, cw * .84f, cd * .84f, z, z + min(h * .4f, .07f), color)
+                cbox(cx, cy, cw * .5f, cd * .5f, z + min(h * .4f, .07f), z + min(h * .4f, .07f) + min(h * .3f, .05f), scene.mix(color, 0xFFFFFFFF.toInt(), .12f))
+            }
+            StockShape.TRAY -> cbox(cx, cy, min(cw * .86f, .24f), min(cd * .82f, .17f), z, z + min(h * .3f, .06f), c(0xFFD5DBE2), color)
+            StockShape.TUB -> { val w = min(cw * .76f, .17f); cbox(cx, cy, w, min(cd * .76f, w), z, z + min(h * .55f, .12f), color, WHITE) }
+            StockShape.PASTRY -> {
+                if (pid == "croissant") cbox(cx, cy, min(cw * .75f, .12f), min(cd * .6f, .07f), z, z + .05f, color)
+                else {
+                    cbox(cx, cy, .07f, .07f, z, z + .05f, PAPER)
+                    cbox(cx, cy, .075f, .075f, z + .05f, z + .09f, color)
+                }
+            }
+            StockShape.CUP -> cbox(cx, cy, min(cw * .6f, .07f), min(cd * .6f, .07f), z, z + min(h * .85f, .1f), if (pid == "slushie") color else WHITE, color)
+            StockShape.PATTY -> {
+                if (pid == "hotdog") cbox(cx, cy, min(cw * .8f, .15f), .045f, z, z + .04f, color, scene.mix(color, 0xFFFFFFFF.toInt(), .1f))
+                else cbox(cx, cy, min(cw * .7f, .11f), min(cd * .7f, .11f), z, z + .03f, color, scene.mix(color, 0xFF000000.toInt(), .2f))
+            }
+            StockShape.FRIES -> {
+                cbox(cx, cy, .065f, .05f, z, z + .08f, RED)
+                cbox(cx, cy, .055f, .04f, z + .08f, z + .12f, color)
+            }
+            StockShape.PIZZA -> cbox(cx, cy, min(cw * .82f, .3f), min(cd * .82f, .3f), z, z + .045f, KRAFT, color)
+            StockShape.BUCKET -> {
+                cbox(cx, cy, .085f, .085f, z, z + min(h * .6f, .13f), if (pid == "popcorn") RED else WHITE)
+                cbox(cx, cy, .09f, .09f, z + min(h * .6f, .13f), z + min(h * .6f, .13f) + .035f, color)
+            }
+            StockShape.PHONE -> {
+                cbox(cx, cy, .08f, .06f, z, z + .02f, WHITE)
+                when (pid) {
+                    "earbuds" -> cbox(cx, cy, .055f, .045f, z + .02f, z + .05f, color, WHITE)
+                    "smartwatch" -> cbox(cx, cy, .045f, .02f, z + .02f, z + .07f, color, BLACK)
+                    else -> cbox(cx, cy, .065f, .014f, z + .02f, z + .14f, color, BLACK)
+                }
+            }
+            StockShape.LAPTOP -> {
+                val lw = min(cw * .8f, .24f); val ld = min(cd * .7f, .17f)
+                cbox(cx, cy, lw, ld, z, z + .015f, color)
+                cbox(cx, cy - ld * .48f, lw, .014f, z + .015f, z + .015f + ld * .9f, color, BLACK)
+            }
+            StockShape.HEADPHONES -> {
+                cbox(cx, cy, .03f, .03f, z, z + .12f, WHITE)
+                cbox(cx, cy, min(cw * .7f, .13f), .05f, z + .1f, z + .17f, color, scene.mix(color, 0xFF000000.toInt(), .3f))
+            }
+            StockShape.JEWEL -> {
+                cbox(cx, cy, min(cw * .75f, .08f), min(cd * .75f, .08f), z, z + .025f, VELVET)
+                cbox(cx, cy, .035f, .035f, z + .025f, z + .05f, color, scene.mix(color, 0xFFFFFFFF.toInt(), .35f))
+            }
+            StockShape.GLASS -> cbox(cx, cy, min(cw * .62f, .07f), min(cd * .5f, .07f), z, z + min(h * .5f, .13f), color, if (pid == "draft_beer") WHITE else color)
+            else -> cbox(cx, cy, min(cw * .8f, .15f), min(cd * .8f, .12f), z, z + min(h * .75f, .2f), color, scene.mix(color, 0xFFFFFFFF.toInt(), .25f))
+        }
+    }
+
+    /** Far away: each run of slots showing the same product on a level becomes one block. */
+    private fun blocks(lay: StockLayout, slots: Array<String?>, boxed: Boolean) {
+        var s = 0
+        while (s < lay.slots) {
+            val pid = slots[s]
+            if (pid == null) { s++; continue }
+            val row = lay.row(s)
+            lay.slotCenter(s, pt)
+            val sx0 = pt[0] - lay.cellW(s) / 2; val sy0 = pt[1] - lay.cellD(s) / 2; val z = pt[2]
+            var e = s
+            while (e + 1 < lay.slots && slots[e + 1] == pid && lay.row(e + 1) === row) e++
+            lay.slotCenter(e, pt)
+            val sx1 = pt[0] + lay.cellW(e) / 2; val sy1 = pt[1] + lay.cellD(e) / 2
+            val color = if (boxed) KRAFT else Catalog.product(pid)?.color ?: KRAFT
+            val x0 = minOf(sx0, sx1) + .02f; val x1 = maxOf(sx0, sx1) - .02f
+            val y0 = minOf(sy0, sy1) + .02f; val y1 = maxOf(sy0, sy1) - .02f
+            if (row.hang) box(x0, y0, z - .6f, x1, y1, z - .07f, color)
+            else box(x0, y0, z, x1, y1, z + row.h * (if (boxed) .9f else .6f), color)
+            s = e + 1
+        }
+    }
+}

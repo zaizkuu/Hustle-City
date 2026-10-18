@@ -50,6 +50,14 @@ class Person(var x: Float, var y: Float, var shirt: Int, var skin: Int) {
     var seated = false
     /** Item index being used (to face it). */
     var item = -1
+    /** What a customer has picked up: a product color (0 = nothing yet) shown in their hand once [heldIn] runs out. */
+    var held = 0
+    var heldCount = 0
+    var heldIn = 0f
+    /** True once they've paid: the goods go into a paper bag. */
+    var bagged = false
+    /** Staff carrying a box to a display ([com.hustlecity.game.render.PersonPainter] carry pose 1). */
+    var carry = 0
 }
 
 /** A place to sit or exercise on a piece of furniture, in room coordinates. */
@@ -135,6 +143,13 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     private var onArrive: (() -> Unit)? = null
     val walkIn: Boolean get() = mode == InteriorMode.PLACE && placeKind == PlaceKind.FURNITURE_STORE
 
+    /** The staff-only back room of your store, or null for an open floor. */
+    var backRoom: BackRoom? = null
+        private set
+
+    /** What your store's displays visibly hold (null outside your own businesses). */
+    val shelf: ShelfStock? = business?.let { ShelfStock(this, it) }
+
     init {
         when {
             mode == InteriorMode.HOME -> { w = building.gridW.coerceAtLeast(7); d = building.gridD.coerceAtLeast(6) }
@@ -152,6 +167,30 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         // big showrooms start a little closer, following you around
         if (walkIn) zoom = 1.35f
         if (mode == InteriorMode.PLACE || mode == InteriorMode.RIVAL) generateLayout()
+        business?.let { b ->
+            BackRoom.resolve(b, w, d)
+            backRoom = BackRoom.of(b, w, d)
+        }
+        shelf?.onRestock = { item, source -> sendRunner(item, source) }
+    }
+
+    /** True for tiles of the back room (customers never go there). */
+    fun inBackRoom(x: Int, y: Int) = backRoom?.contains(y) == true && x in 0 until w && y >= 0
+
+    /**
+     * Builds or removes the back room wall (Interior designer). Building it needs the back of the store free of
+     * displays, registers and seats; returns false (with the reason in a toast) when it can't be done.
+     */
+    fun setBackRoom(on: Boolean): Boolean {
+        val b = business ?: return false
+        if (!on) { b.backRoom = 0; b.backDoor = -1; backRoom = null; return true }
+        if (!BackRoom.eligible(b)) { e.toast("${b.type.name}s don't have a back room"); return false }
+        if (BackRoom.preferredDepth(w, d) < 3) { e.toast("This store isn't deep enough for a back room"); return false }
+        val fit = BackRoom.fit(items, w, d)
+        if (fit == null) { e.toast("Move displays, registers and seats away from the back wall first", ToastKind.BAD); return false }
+        b.backRoom = fit.first; b.backDoor = fit.second
+        backRoom = BackRoom.of(b, w, d)
+        return true
     }
 
     val items: MutableList<PlacedItem>
@@ -196,11 +235,20 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         val def = Catalog.item(itemId) ?: return false
         val (fw, fd) = itemDims(def, rot)
         if (x < 0 || y < 0 || x + fw > w || y + fd > d) return false
+        if (backRoom?.problem(def, x, y, fw, fd) != null) return false
         val occ = occupancy(ignore)
         for (yy in y until y + fd) for (xx in x until x + fw) {
             if (occ[yy * w + xx] || isDoorTile(xx, yy)) return false
         }
         return true
+    }
+
+    /** Why an item can't go here because of the back room (customer furniture inside it, the wall, the doorway), or null. */
+    fun backRoomProblem(itemId: String, x: Int, y: Int, rot: Int): String? {
+        val room = backRoom ?: return null
+        val def = Catalog.item(itemId) ?: return null
+        val (fw, fd) = itemDims(def, rot)
+        return room.problem(def, x, y, fw, fd)
     }
 
     fun itemAt(x: Int, y: Int): Int {
@@ -237,6 +285,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         var head = 0; var tail = 0
         queue[tail++] = from
         prev[from] = from
+        val wall = backRoom
         while (head < tail) {
             val cur = queue[head++]
             if (cur == to) break
@@ -244,6 +293,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             for (k in 0 until 4) {
                 val nx = cx + DX[k]; val ny = cy + DY[k]
                 if (nx !in 0 until w || ny !in 0 until d) continue
+                if (wall != null && wall.blocks(cx, cy, nx, ny)) continue
                 val ni = ny * w + nx
                 if (prev[ni] != -1 || (occ[ni] && ni != to)) continue
                 prev[ni] = cur
@@ -294,10 +344,13 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             val cur = queue[head++]
             val cx = cur % w; val cy = cur / w
             val touches = (cx in p.x - 1..p.x + fw && cy in p.y until p.y + fd) || (cy in p.y - 1..p.y + fd && cx in p.x until p.x + fw)
-            if (touches && !occ[cur]) { goal = cur; break }
+            // the tile must be on the item's side of the back room wall
+            val sameSide = backRoom?.let { it.contains(cy) == it.contains(p.y) } ?: true
+            if (touches && sameSide && !occ[cur]) { goal = cur; break }
             for (k in 0 until 4) {
                 val nx = cx + DX[k]; val ny = cy + DY[k]
                 if (nx !in 0 until w || ny !in 0 until d) continue
+                if (backRoom?.blocks(cx, cy, nx, ny) == true) continue
                 val ni = ny * w + nx
                 if (prev[ni] != -1 || occ[ni]) continue
                 prev[ni] = cur
@@ -370,7 +423,8 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             spawnAcc = 0f
             if (visitors.size < 16) spawnVisitor()
         }
-        val occ = walkOcc()
+        val staffOcc = walkOcc()
+        val occ = customerOcc(staffOcc)
         refreshQueues(occ)
         playerMoving *= .7f
         for (v in visitors) v.moving *= .7f
@@ -378,7 +432,8 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         for (v in visitors) stepVisitor(v, step, occ)
         for (v in visitors) if (v.done) leaveQueue(v)
         visitors.removeAll { it.done }
-        updateStaff(step, occ)
+        updateStaff(step, staffOcc)
+        shelf?.update(dt)
     }
 
     private fun moveToward(tx: Float, ty: Float, maxStep: Float, isPlayer: Boolean, person: Person? = null): Boolean {
@@ -423,13 +478,21 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         return occ
     }
 
+    /** Where customers may walk: [walkOcc] with the staff-only back room closed off. */
+    private fun customerOcc(base: BooleanArray): BooleanArray {
+        val room = backRoom ?: return base
+        val occ = base.copyOf()
+        for (i in 0 until room.depth * w) occ[i] = true
+        return occ
+    }
+
     private fun itemsWith(tag: String) = items.withIndex().filter { Catalog.item(it.value.itemId)?.tags?.contains(tag) == true }
 
     private fun frontTile(p: PlacedItem, occ: BooleanArray): Int = frontTiles(p, occ).let { if (it.isEmpty()) -1 else it[e.rnd.nextInt(it.size)] }
 
     /** A random item (index) carrying one of these tags, -1 if there is none. */
     private fun stopAt(vararg tags: String): Int {
-        val cands = items.withIndex().filter { (_, p) -> Catalog.item(p.itemId)?.tags?.any { it in tags } == true }
+        val cands = items.withIndex().filter { (_, p) -> !inBackRoom(p.x, p.y) && Catalog.item(p.itemId)?.tags?.any { it in tags } == true }
         return if (cands.isEmpty()) -1 else cands[e.rnd.nextInt(cands.size)].index
     }
 
@@ -533,7 +596,6 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     }
 
     private fun spawnVisitor() {
-        val occ = walkOcc()
         val start = idx(doorX, d - 1)
         if (start < 0) return
         val stops = ArrayList<Int>()
@@ -550,7 +612,9 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             t == "gym" -> { stops += stopAt("locker"); repeat(1 + r.nextInt(2)) { stops += stopAt("workout") }; if (r.nextFloat() < .6f) stops += stopAt("shower"); pays = false }
             t != null && Catalog.type(t).office -> { stops += stopAt("desk"); pays = false } // a client meeting
             else -> {
-                val targets = if (forSale.isNotEmpty()) forSale.keys.toList() else items.indices.filter { i -> Catalog.item(items[i].itemId)?.fn.let { it == ItemFn.DISPLAY || it == ItemFn.EQUIPMENT || it == ItemFn.OFFICE || it == ItemFn.LOCKER } }
+                val targets = if (forSale.isNotEmpty()) forSale.keys.toList() else items.indices.filter { i ->
+                    !inBackRoom(items[i].x, items[i].y) && Catalog.item(items[i].itemId)?.fn.let { it == ItemFn.DISPLAY || it == ItemFn.EQUIPMENT || it == ItemFn.OFFICE || it == ItemFn.LOCKER }
+                }
                 repeat(1 + r.nextInt(3)) { targets.randomOrNull(r)?.let { stops += it } }
             }
         }
@@ -634,6 +698,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         val dx = bx - ax; val dy = by - ay
         val len = sqrt(dx * dx + dy * dy)
         if (len < 1e-3f) return true
+        if (backRoom?.cuts(ax, ay, bx, by) == true) return false
         val nx = -dy / len * .3f; val ny = dx / len * .3f
         var t = 0f
         while (t <= len) {
@@ -680,6 +745,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
 
     private fun stepVisitor(v: Person, dt: Float, occ: BooleanArray) {
         if (dt <= 0f) return
+        if (v.heldIn > 0f) v.heldIn -= dt
         if (v.wait > 0f) { v.wait -= dt; if (v.pose == 2 || v.pose == 3) v.phase += dt * 5f; return }
         if (v.goal < 0 || v.stage == 3) standUp(v)
         when (v.stage) {
@@ -700,6 +766,12 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 }
                 if (walk(v, dt, occ) && settle(v, dt)) {
                     v.stopIdx++
+                    // shoppers take an item off the display (it shows one fewer) and carry it to the register
+                    shelf?.customerTakes(v.item, v)?.let { pid ->
+                        v.held = Catalog.product(pid)?.color ?: c(0xFFC8A165)
+                        v.heldCount++
+                        v.heldIn = ShelfStock.TAKE_TIME
+                    }
                     v.wait = when (typeId) {
                         "gym", "hairdresser" -> 7f + e.rnd.nextFloat() * 5f
                         else -> if (typeId?.let { Catalog.type(it).office } == true) 10f + e.rnd.nextFloat() * 6f else 1.2f + e.rnd.nextFloat() * 2.5f
@@ -736,6 +808,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                         com.hustlecity.game.audio.Audio.play(com.hustlecity.game.audio.Sfx.CASH)
                     }
                     v.blockedFor = 0f
+                    if (v.heldCount > 0) v.bagged = true
                     leaveQueue(v)
                     v.counter = -2
                     v.stage = if (v.stopIdx < v.stops.size) 0 else 4
@@ -808,11 +881,11 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                     val post: Post? = when (emp.role) {
                         StaffRole.CUSTOMER_SERVICE -> behind(counters.getOrNull(regIdx++))
                         StaffRole.CLEANER -> {
-                            // head for the dirtiest floor, scrub it, move on
+                            // head for the dirtiest floor, scrub it, move on; with nothing to clean, wait in the back room
                             val cur = staffGoal[emp.id]
                             val t = staffTimer[emp.id] ?: 0f
                             if (cur != null && cur >= 0 && t > 0f) Post(cur)
-                            else (e.economy.dirt.dirtiest(b, 6).randomOrNull(e.rnd) ?: freeTile(occFull, e.rnd.nextInt(w * d))).let { staffTimer[emp.id] = 4f; Post(it) }
+                            else (e.economy.dirt.dirtiest(b, 6).randomOrNull(e.rnd) ?: cleanerRest(occFull) ?: freeTile(occFull, e.rnd.nextInt(w * d))).let { staffTimer[emp.id] = 4f; Post(it) }
                         }
                         StaffRole.DJ -> behind(itemsWith("dj_booth").firstOrNull()?.index)
                         StaffRole.ACTOR -> itemsWith("stage").firstOrNull()?.let { st -> frontTiles(st.value, occFull).getOrNull(n % 4)?.let { Post(it, -1) } }
@@ -820,7 +893,9 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                         else -> if (b.type.office) desks.getOrNull(desk++)?.let { di -> deskSeat(di)?.let { Post(it.tile, di, it) } ?: behind(di) }
                             else browseTargets().getOrNull(n)?.let { it2 -> items.indexOf(it2).let { ii -> frontTiles(it2, occFull).lastOrNull()?.let { Post(it, ii) } } }
                     }
-                    val p = post ?: freeTile(occFull, n * 7 + 3).takeIf { it >= 0 }?.let { Post(it) } ?: continue
+                    val base = post ?: freeTile(occFull, n * 7 + 3).takeIf { it >= 0 }?.let { Post(it) } ?: continue
+                    // someone bringing a box of stock goes to the box, then to the display
+                    val p = runs[emp.id]?.let { r -> if (r.stage <= 1) Post(r.from) else Post(r.to, r.display) } ?: base
                     posts[emp.id] = p
                     looks[emp.id] = SHIRT_COLORS[emp.id % SHIRT_COLORS.size] to SKIN_TONES[emp.id % SKIN_TONES.size]
                     if (emp.role == StaffRole.CLEANER && dt > 0f) {
@@ -842,6 +917,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             else -> {}
         }
         staffById.keys.retainAll(posts.keys)
+        runs.entries.removeAll { (k, r) -> (k !in posts || r.display !in items.indices).also { gone -> if (gone) shelf?.release(r.display) } }
         for ((key, post) in posts) {
             val (shirt, skin) = looks[key]!!
             val p = staffById.getOrPut(key) {
@@ -860,6 +936,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 val t = p.path[p.pathIdx]
                 if (moveToward(t % w + .5f, t / w + .5f, p.speed * dt, false, p)) p.pathIdx++
             } else if (p.pathIdx >= p.path.size) {
+                runs[key]?.let { if (p.goal == post.tile) advanceRun(key, it, p, dt) }
                 val seat = post.seat
                 if (seat != null && !p.seated) {
                     if (dt <= 0f || moveToward(seat.x, seat.y, p.speed * dt, false, p)) { p.x = seat.x; p.y = seat.y; p.seated = true; p.pose = 1; p.z = seat.z; p.heading = seat.heading }
@@ -875,6 +952,69 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         }
         staff.clear()
         staff.addAll(staffById.values)
+    }
+
+    /** A staff member bringing a box: to the box ([from]: a storage shelf or the door), pick it up, to the display, unpack. */
+    private class Run(val display: Int, val from: Int, val to: Int) { var stage = 0; var t = 0f }
+    private val runs = HashMap<Int, Run>()
+
+    /**
+     * Sends someone on shift to bring new stock to display [item]: from the back room's storage shelves, or in from the
+     * door for a delivery. Prefers staff who aren't serving anyone. Returns false when nobody can go (it just fills in).
+     */
+    private fun sendRunner(item: Int, source: ShelfStock.Source): Boolean {
+        if (mode != InteriorMode.BUSINESS || staffById.isEmpty()) return false
+        val p = items.getOrNull(item) ?: return false
+        val occ = occupancy()
+        val to = frontTiles(p, occ).firstOrNull() ?: return false
+        val from = if (source == ShelfStock.Source.BACK_ROOM) storageSpot(occ) ?: return false else idx(doorX, d - 1)
+        if (from < 0) return false
+        val emps = e.state.employees
+        val busyTills = queues.values.any { it.isNotEmpty() }
+        val key = staffById.keys.filter { it !in runs }.mapNotNull { id ->
+            val score = when (emps.firstOrNull { it.id == id }?.role) {
+                StaffRole.DJ, StaffRole.ACTOR, StaffRole.PROJECTIONIST, null -> return@mapNotNull null
+                StaffRole.CUSTOMER_SERVICE -> if (busyTills) return@mapNotNull null else 2
+                StaffRole.CLEANER -> 1
+                else -> 0
+            }
+            id to score
+        }.minByOrNull { it.second }?.first ?: return false
+        runs[key] = Run(item, from, to)
+        return true
+    }
+
+    private fun advanceRun(key: Int, r: Run, p: Person, dt: Float) {
+        when (r.stage) {
+            0 -> { r.stage = 1; r.t = 0f } // at the box
+            1 -> { r.t += dt; if (r.t > .7f) { r.stage = 2; p.carry = 1 } } // picked it up: off to the display
+            2 -> { shelf?.release(r.display); p.carry = 0; r.stage = 3; r.t = 0f } // unpacking: the items fill in
+            else -> { r.t += dt; if (r.t > 1.4f) runs.remove(key) }
+        }
+    }
+
+    /** Where staff stand to take a box off a storage shelf. */
+    private fun storageSpot(occ: BooleanArray): Int? {
+        for (p in items) {
+            if (Catalog.item(p.itemId)?.fn != ItemFn.STORAGE) continue
+            frontTiles(p, occ).firstOrNull()?.let { return it }
+        }
+        return null
+    }
+
+    /** Where an idle cleaner waits: by the cleaning station, or anywhere in the back room. */
+    private fun cleanerRest(occ: BooleanArray): Int? {
+        for (p in items) {
+            if (Catalog.item(p.itemId)?.fn != ItemFn.CLEANING) continue
+            frontTiles(p, occ).firstOrNull()?.let { return it }
+            for (k in 0 until 4) idx(p.x + DX[k], p.y + DY[k]).let { if (it >= 0 && !occ[it]) return it }
+        }
+        val room = backRoom ?: return null
+        for (y in 0 until room.depth) for (x in 0 until w) {
+            val i = y * w + x
+            if (!occ[i] && !room.isDoorTile(x, y)) return i
+        }
+        return null
     }
 
     private fun freeTile(occ: BooleanArray, seed: Int): Int {

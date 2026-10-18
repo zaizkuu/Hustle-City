@@ -50,6 +50,36 @@ object BizCalc {
         return b.type.products.any { it.first == productId }
     }
 
+    /** Boxes the back room's storage shelves hold (warehouses keep everything on their pallet racks instead). */
+    fun storageBoxes(b: Business) = if (isWarehouse(b)) 0 else b.furniture.sumOf { p ->
+        Catalog.item(p.itemId)?.takeIf { it.fn == ItemFn.STORAGE }?.displayUnits ?: 0
+    }
+
+    /** Boxes needed for [units] of a product (a part-full box still takes a whole space). */
+    fun boxesOf(pid: String, units: Int): Int {
+        val per = (Catalog.product(pid)?.unitsPerBox ?: 1).coerceAtLeast(1)
+        return if (units <= 0) 0 else (units + per - 1) / per
+    }
+
+    /** Boxes on the back room's storage shelves: each product is boxed on its own. */
+    fun storageBoxesUsed(b: Business) = b.backStock.entries.sumOf { (id, q) -> boxesOf(id, q) }
+
+    /** Units of a product that still fit on the storage shelves, topping up its part-full box first. */
+    fun storageRoomFor(b: Business, productId: String): Int {
+        val p = Catalog.product(productId) ?: return 0
+        if (p.service || isWarehouse(b)) return 0
+        val per = p.unitsPerBox.coerceAtLeast(1)
+        val have = b.backStock[productId] ?: 0
+        val partial = if (have % per == 0) 0 else per - have % per
+        return (storageBoxes(b) - storageBoxesUsed(b)).coerceAtLeast(0) * per + partial
+    }
+
+    /** Everything of a product the store has: on its displays plus boxed in the back room. */
+    fun onHand(b: Business, productId: String) = (b.stock[productId] ?: 0) + (b.backStock[productId] ?: 0)
+
+    /** Units of a product the store can take in: room on its displays, then on the back room's storage shelves. */
+    fun intakeRoom(b: Business, productId: String) = roomFor(b, productId) + storageRoomFor(b, productId)
+
     fun isWarehouse(b: Business) = b.typeId == "warehouse"
     fun isHq(b: Business) = b.typeId == "hq"
 
@@ -204,7 +234,8 @@ object BizCalc {
 
     fun furnitureValue(b: Business) = b.furniture.sumOf { Catalog.item(it.itemId)?.price ?: 0.0 } + b.storage.sumOf { Catalog.item(it)?.price ?: 0.0 }
 
-    fun stockValue(b: Business) = b.stock.entries.sumOf { (id, q) -> (b.unitCost[id] ?: Catalog.product(id)?.cost ?: 0.0) * q }
+    fun stockValue(b: Business) = b.stock.entries.sumOf { (id, q) -> (b.unitCost[id] ?: Catalog.product(id)?.cost ?: 0.0) * q } +
+        b.backStock.entries.sumOf { (id, q) -> (b.unitCost[id] ?: Catalog.product(id)?.cost ?: 0.0) * q }
 }
 
 /** Minute-by-minute business, staff, rival and finance simulation. */
@@ -220,6 +251,7 @@ class Economy(private val e: GameEngine) {
         val hour = s.hour
         val weekday = s.weekday
         for (b in s.businesses) simulateBusiness(b, hour, weekday)
+        for (b in s.businesses) if (b.backStock.isNotEmpty()) restockTick(b, hour, weekday)
         if (s.minuteOfHour == 0) hourly(hour, weekday)
         // deliveries arriving
         for (b in s.businesses) {
@@ -345,6 +377,8 @@ class Economy(private val e: GameEngine) {
                 dirt.clean(b, cleaners * 30.0 * boost)
             }
         }
+        // the store restocks its displays from the back room when it closes for the night
+        for (b in s.businesses) if (hour == b.closeHour && b.backStock.isNotEmpty()) restockFromBack(b, Int.MAX_VALUE, eager = true)
         if (hour == 6) purchasingRun()
         e.weather.hourly()
         // scheduled deliveries
@@ -364,8 +398,8 @@ class Economy(private val e: GameEngine) {
         for ((pid, target) in c.targets) {
             val p = Catalog.product(pid) ?: continue
             if (p.service) continue
-            val have = b.stock[pid] ?: 0
-            val need = min((target - have).coerceAtLeast(0), BizCalc.roomFor(b, pid))
+            val have = BizCalc.onHand(b, pid)
+            val need = min((target - have).coerceAtLeast(0), BizCalc.intakeRoom(b, pid))
             if (need == 0) continue
             val r = supply(b, pid, need, 1.12)
             cost += r.first; units += r.second
@@ -389,19 +423,19 @@ class Economy(private val e: GameEngine) {
             if (!BizCalc.isWarehouse(w)) continue
             val have = w.stock[pid] ?: 0
             if (have <= 0) continue
-            val take = min(have, left)
-            val unitCost = w.unitCost[pid] ?: p.cost
+            val take = stockIn(b, pid, min(have, left), w.unitCost[pid] ?: p.cost)
+            if (take <= 0) break
             w.stock[pid] = have - take
-            addStock(b, pid, take, unitCost)
             left -= take; units += take
         }
         var cost = 0.0
         if (left > 0) {
             if (p.source == com.hustlecity.game.data.Source.IMPORT && Catalog.COURSE_IMPORT !in e.state.player.courses) return 0.0 to units
+            left = min(left, BizCalc.intakeRoom(b, pid))
             val price = left * p.cost * markup
-            if (e.state.player.money >= price) {
+            if (left > 0 && e.state.player.money >= price) {
                 e.spend(price, "Inventory", silent = true)
-                addStock(b, pid, left, price / left)
+                stockIn(b, pid, left, price / left)
                 cost = price; units += left
             }
         }
@@ -420,7 +454,7 @@ class Economy(private val e: GameEngine) {
             for ((pid, _) in b.type.products) {
                 val p = Catalog.product(pid) ?: continue
                 if (p.service) continue
-                val room = BizCalc.roomFor(b, pid)
+                val room = BizCalc.intakeRoom(b, pid)
                 if (room <= 0) continue
                 val r = supply(b, pid, room, 1.08)
                 total += r.first; units += r.second
@@ -430,13 +464,83 @@ class Economy(private val e: GameEngine) {
         if (count > 0) e.toast("Purchasing restocked $count store(s) for ${e.money(total)}", ToastKind.INFO)
     }
 
+    /** Puts [qty] units straight onto the displays (the caller checked they fit). */
     fun addStock(b: Business, pid: String, qty: Int, unitCost: Double) {
         if (qty <= 0) return
-        val have = b.stock[pid] ?: 0
+        blendCost(b, pid, qty, unitCost)
+        b.stock[pid] = (b.stock[pid] ?: 0) + qty
+    }
+
+    /** Keeps the average purchase cost per unit over everything the store holds of a product. */
+    private fun blendCost(b: Business, pid: String, qty: Int, unitCost: Double) {
+        val have = BizCalc.onHand(b, pid)
         val oldCost = b.unitCost[pid] ?: unitCost
         b.unitCost[pid] = (oldCost * have + unitCost * qty) / (have + qty)
-        b.stock[pid] = have + qty
         if (b.prices[pid] == null) b.prices[pid] = Catalog.product(pid)?.price ?: 1.0
+    }
+
+    /**
+     * Takes stock into a store the way Big Ambitions does: onto its displays while they have room, and what doesn't
+     * fit boxed on the back room's storage shelves. Returns the units taken (the rest fits nowhere).
+     */
+    fun stockIn(b: Business, pid: String, qty: Int, unitCost: Double): Int {
+        if (qty <= 0) return 0
+        val shelf = min(qty, BizCalc.roomFor(b, pid))
+        val back = min(qty - shelf, BizCalc.storageRoomFor(b, pid))
+        if (shelf + back <= 0) return 0
+        blendCost(b, pid, shelf + back, unitCost)
+        if (shelf > 0) b.stock[pid] = (b.stock[pid] ?: 0) + shelf
+        if (back > 0) b.backStock[pid] = (b.backStock[pid] ?: 0) + back
+        return shelf + back
+    }
+
+    /** Boxes [qty] units on the back room's storage shelves only. Returns the units that fit. */
+    fun stockBack(b: Business, pid: String, qty: Int, unitCost: Double): Int {
+        val take = min(qty, BizCalc.storageRoomFor(b, pid))
+        if (take <= 0) return 0
+        blendCost(b, pid, take, unitCost)
+        b.backStock[pid] = (b.backStock[pid] ?: 0) + take
+        return take
+    }
+
+    /** People who can carry boxes out of the back room right now: staff on shift, and you while you're in the store. */
+    fun crew(b: Business, hour: Int, weekday: Int): Int {
+        var n = if (e.state.player.inBuilding == b.buildingId) 1 else 0
+        for (emp in e.state.employees) if (emp.businessId == b.id && emp.worksAt(hour, weekday)) n++
+        return n
+    }
+
+    private fun restockTick(b: Business, hour: Int, weekday: Int) {
+        if (b.type.facility) return
+        val crew = crew(b, hour, weekday)
+        if (crew > 0) restockFromBack(b, crew)
+    }
+
+    /**
+     * Carries up to [boxes] boxes from the back room to the displays: a product's box goes out once it fits (or the
+     * product has sold out on the shelf), emptiest displays first. When [eager], anything that fits goes out, part
+     * boxes too (the night restock at closing time). Returns the units moved.
+     */
+    fun restockFromBack(b: Business, boxes: Int, eager: Boolean = false): Int {
+        if (b.backStock.isEmpty() || boxes <= 0) return 0
+        var left = boxes
+        var moved = 0
+        for (pid in b.backStock.keys.sortedBy { b.stock[it] ?: 0 }) {
+            val per = (Catalog.product(pid)?.unitsPerBox ?: 1).coerceAtLeast(1)
+            while (left > 0) {
+                val back = b.backStock[pid] ?: 0
+                val room = BizCalc.roomFor(b, pid)
+                if (back <= 0 || room <= 0) break
+                if (!eager && (b.stock[pid] ?: 0) > 0 && room < min(per, back)) break
+                val take = if (eager) min(back, room) else minOf(back, room, per)
+                b.stock[pid] = (b.stock[pid] ?: 0) + take
+                if (back > take) b.backStock[pid] = back - take else b.backStock.remove(pid)
+                moved += take
+                if (eager) break else left--
+            }
+            if (left <= 0) break
+        }
+        return moved
     }
 
     private fun receiveDelivery(b: Business) {
@@ -444,9 +548,8 @@ class Economy(private val e: GameEngine) {
         for (item in b.pendingDelivery) {
             if (item.isProduct) {
                 val p = Catalog.product(item.id) ?: continue
-                val room = if (BizCalc.sells(b, item.id)) BizCalc.roomFor(b, item.id) else 0
-                val qty = min(room, item.qty)
-                addStock(b, item.id, qty, p.cost)
+                // displays first, then the back room; only what fits nowhere is refunded
+                val qty = if (BizCalc.sells(b, item.id)) stockIn(b, item.id, item.qty, p.cost) else 0
                 refund += (item.qty - qty) * p.cost
             } else {
                 b.storage += item.id
