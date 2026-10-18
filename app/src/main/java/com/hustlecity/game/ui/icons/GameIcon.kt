@@ -52,7 +52,7 @@ interface IconSet {
 
 /** Every icon in the game, by id. Unknown ids fall back to a neutral dot so a typo never crashes the UI. */
 object GameIcons {
-    private val sets: List<IconSet> get() = listOf(PlaceIcons, UiIcons, ProductIconsA, ProductIconsB)
+    private val sets: List<IconSet> get() = listOf(PlaceIcons, UiIcons, UiIcons2, ProductIconsA, ProductIconsB)
     val all: Map<String, GameIcon> by lazy { sets.flatMap { it.icons }.associateBy { it.id } }
     private val fallback = icon("missing", L("M12 7a5 5 0 1 0 0 10a5 5 0 1 0 0-10z"))
 
