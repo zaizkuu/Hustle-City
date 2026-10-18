@@ -61,4 +61,20 @@ class HudUpdateTest {
         assertEquals("driving controls gone after getting out", 0, count("GAS"))
         assertTrue("walking buttons are back", count("Get in") > 0)
     }
+
+    @Test
+    fun arrowKeyControls() {
+        val e = GameEngine(null)
+        e.newGame("T", 0, 0, 1)
+        e.ui.tip = null
+        e.settings.carControls = 2
+        rule.mainClock.autoAdvance = false
+        rule.setContent { HustleCityApp(e, onExit = {}) }
+        e.enterVehicle(e.state.vehicles.first())
+        e.ui.phoneOpen = false
+        e.ui.tip = null
+        step(e)
+        assertTrue(count("LEFT") > 0 && count("RIGHT") > 0 && count("GAS") > 0 && count("BRAKE") > 0)
+        assertEquals("no steering wheel in arrow mode", 0, count("STEER"))
+    }
 }

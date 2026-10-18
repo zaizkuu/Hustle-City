@@ -56,7 +56,7 @@ Native Kotlin + Jetpack Compose. The 3D city is rendered with a small custom eng
 | Action | Touch |
 | --- | --- |
 | Walk | Left joystick |
-| Drive | Steering wheel (drag left/right), GAS and BRAKE pedals; hold BRAKE when stopped to reverse |
+| Drive | Steering wheel (drag left/right) with GAS and BRAKE pedals, or arrow keys (◀ ▶ steer, ▲ gas, ▼ brake), or a joystick: pick in Settings. Hold BRAKE / ▼ when stopped to reverse. Keyboard arrow keys or W A S D also work |
 | Park / get out | PARK and GET OUT buttons on the dashboard |
 | Navigate | Navigate on a building card, then follow the blue GPS line |
 | Look around | Drag the city |

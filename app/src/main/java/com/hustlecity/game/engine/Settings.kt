@@ -20,7 +20,7 @@ class Settings(context: Context?) {
     var sfxVolume by mutableStateOf(prefs?.getFloat("sfxVolume", .8f) ?: .8f)
     var radioOn by mutableStateOf(prefs?.getBoolean("radioOn", true) ?: true)
     var station by mutableIntStateOf(prefs?.getInt("station", 0) ?: 0)
-    /** Car controls: 0 = steering wheel and pedals, 1 = joystick. */
+    /** Car controls: 0 = steering wheel and pedals, 1 = joystick, 2 = arrow keys. */
     var carControls by mutableIntStateOf(prefs?.getInt("carControls", 0) ?: 0)
     var minimap by mutableStateOf(prefs?.getBoolean("minimap", true) ?: true)
 

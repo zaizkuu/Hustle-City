@@ -29,6 +29,14 @@ class MainActivity : ComponentActivity() {
         setContent { HustleCityApp(engine, onExit = { finish() }) }
     }
 
+    /** Arrow keys and W A S D on a keyboard walk and drive. */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        val down = event.action == android.view.KeyEvent.ACTION_DOWN
+        val up = event.action == android.view.KeyEvent.ACTION_UP
+        if ((down || up) && EngineHolder.current()?.onKey(event.keyCode, down) == true) return true
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemBars()

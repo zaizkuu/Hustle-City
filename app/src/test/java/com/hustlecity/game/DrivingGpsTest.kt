@@ -96,4 +96,37 @@ class DrivingGpsTest {
         assertEquals(-1, p.waypoint)
         assertTrue(e.ui.toasts.any { it.text.startsWith("You have arrived") })
     }
+
+    @Test
+    fun arrowKeysAndKeyboardDrive() {
+        val e = game()
+        e.settings.carControls = 2
+        val v = e.state.vehicles.first()
+        // walking with the keyboard
+        assertTrue(e.onKey(android.view.KeyEvent.KEYCODE_DPAD_RIGHT, true))
+        assertEquals(1f, e.input.jx, 0f)
+        e.onKey(android.view.KeyEvent.KEYCODE_DPAD_RIGHT, false)
+        assertEquals(0f, e.input.jx, 0f)
+        e.enterVehicle(v)
+        // up = gas, left/right steer, eased toward full lock
+        e.onKey(android.view.KeyEvent.KEYCODE_DPAD_UP, true)
+        assertTrue(e.input.gas)
+        run(e, 2f)
+        assertTrue("arrow keys drive the car", e.carSpeed > 3f)
+        val h0 = v.heading
+        e.onKey(android.view.KeyEvent.KEYCODE_D, true)
+        assertEquals(1f, e.input.steer, 0f)
+        run(e, 1f)
+        assertTrue("right arrow turns the car", abs(v.heading - h0) > .15f)
+        e.onKey(android.view.KeyEvent.KEYCODE_D, false)
+        e.onKey(android.view.KeyEvent.KEYCODE_DPAD_UP, false)
+        e.onKey(android.view.KeyEvent.KEYCODE_DPAD_DOWN, true)
+        assertTrue(e.input.brake && !e.input.gas)
+        run(e, 1.5f)
+        assertTrue("down arrow brakes", abs(e.carSpeed) < .5f)
+        e.onKey(android.view.KeyEvent.KEYCODE_DPAD_DOWN, false)
+        // letters are left alone while a menu (with text fields) is open
+        e.ui.panel = com.hustlecity.game.engine.Panel.Settings
+        assertTrue(!e.onKey(android.view.KeyEvent.KEYCODE_W, true))
+    }
 }

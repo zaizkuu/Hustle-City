@@ -86,6 +86,40 @@ class GameEngine(context: Context?) {
     private var publishAcc = 0f
     var carSpeed = 0f
     private var objectivesWereOpen = true
+    private var keySteer = 0f
+    private val heldKeys = HashSet<Int>()
+
+    /**
+     * Hardware keyboard: arrow keys (and W A S D when no menu is open) walk, or steer, accelerate and brake while
+     * driving. Returns true when the key was used.
+     */
+    fun onKey(keyCode: Int, down: Boolean): Boolean {
+        if (!hasGame || ui.screen != Screen.GAME || state.player.inBuilding >= 0) return false
+        val wasd = ui.panel == null && ui.app == null
+        val k = when (keyCode) {
+            android.view.KeyEvent.KEYCODE_DPAD_LEFT -> 0
+            android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> 1
+            android.view.KeyEvent.KEYCODE_DPAD_UP -> 2
+            android.view.KeyEvent.KEYCODE_DPAD_DOWN -> 3
+            android.view.KeyEvent.KEYCODE_A -> if (wasd) 0 else return false
+            android.view.KeyEvent.KEYCODE_D -> if (wasd) 1 else return false
+            android.view.KeyEvent.KEYCODE_W -> if (wasd) 2 else return false
+            android.view.KeyEvent.KEYCODE_S -> if (wasd) 3 else return false
+            else -> return false
+        }
+        if (down) heldKeys += k else heldKeys -= k
+        val x = (if (1 in heldKeys) 1f else 0f) - (if (0 in heldKeys) 1f else 0f)
+        val y = (if (3 in heldKeys) 1f else 0f) - (if (2 in heldKeys) 1f else 0f)
+        if (state.player.driving >= 0 && settings.carControls != 1) {
+            input.steer = x
+            input.gas = 2 in heldKeys
+            input.brake = 3 in heldKeys
+        } else {
+            input.jx = x; input.jy = y
+            if (state.player.driving >= 0) input.brake = false
+        }
+        return true
+    }
     /** Seconds the brake has been held at a standstill (reverse kicks in after a moment). */
     private var stoppedFor = 0f
     var fps = 0f
@@ -695,12 +729,15 @@ class GameEngine(context: Context?) {
         var throttle = 0f
         var steer = 0f
         var wheel = Float.NaN
-        if (settings.carControls == 0) {
-            // steering wheel and pedals: gas accelerates, brake slows down and, once stopped, reverses
+        if (settings.carControls != 1) {
+            // wheel and pedals, or arrow keys: gas accelerates, brake slows down and, once stopped, reverses
             if (v.fuel <= 0.0) {
                 if (crashCooldown <= 0f && input.gas) { toast("Out of fuel! Call roadside assistance from the dashboard.", ToastKind.BAD); crashCooldown = 4f }
             } else if (input.gas) throttle = 1f
-            wheel = input.steer.coerceIn(-1f, 1f)
+            val target = input.steer.coerceIn(-1f, 1f)
+            // arrow keys are all-or-nothing, so ease the wheel toward full lock (and back) like a driver would
+            keySteer = if (settings.carControls == 2) keySteer + (target - keySteer).coerceIn(-5f * dt, 5f * dt) else target
+            wheel = keySteer
         } else if (v.fuel <= 0.0) {
             if (crashCooldown <= 0f && mag > .2f) { toast("Out of fuel! Call roadside assistance from the vehicle panel.", ToastKind.BAD); crashCooldown = 4f }
         } else if (mag > .15f) {
@@ -787,6 +824,8 @@ class GameEngine(context: Context?) {
 
     fun resetInput() {
         input.jx = 0f; input.jy = 0f; input.brake = false; input.steer = 0f; input.gas = false
+        keySteer = 0f
+        heldKeys.clear()
     }
 
     /** Gets out where the car stands (it has to be stopped). */
@@ -853,7 +892,8 @@ class GameEngine(context: Context?) {
         if (p.inBuilding >= 0) return
         resetInput()
         Audio.play(Sfx.CAR_DOOR)
-        tip("drive", "Driving", if (settings.carControls == 0) "Turn the steering wheel on the left; hold GAS to accelerate and BRAKE to slow down (keep holding to reverse). PARK pulls over to the curb and gets you out. Set a destination on the map and follow the blue GPS line. Watch your fuel: Fuel Up stations are on the map."
+        tip("drive", "Driving", if (settings.carControls == 2) "Hold ◀ and ▶ to steer, ▲ to accelerate and ▼ to brake (keep holding ▼ to reverse). Keyboard arrow keys work too. PARK pulls over to the curb and gets you out. Set a destination on the map and follow the blue GPS line."
+            else if (settings.carControls == 0) "Turn the steering wheel on the left; hold GAS to accelerate and BRAKE to slow down (keep holding to reverse). PARK pulls over to the curb and gets you out. Set a destination on the map and follow the blue GPS line. Watch your fuel: Fuel Up stations are on the map."
             else "The joystick steers: push it the way you want to go and the car turns and accelerates. Hold the red pedal to brake, and keep holding to reverse. Watch your fuel; Fuel Up stations are on the map.")
         p.driving = v.id
         p.x = v.x; p.y = v.y

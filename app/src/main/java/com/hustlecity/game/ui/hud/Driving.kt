@@ -74,6 +74,8 @@ fun BoxScope.DrivingControls(e: GameEngine) {
     if (e.settings.carControls == 0) {
         SteeringWheel(e, Modifier.align(if (left) Alignment.BottomEnd else Alignment.BottomStart).padding(start = 20.dp, end = 20.dp, bottom = 14.dp))
         Pedals(e, Modifier.align(if (left) Alignment.BottomStart else Alignment.BottomEnd).padding(end = if (left) 0.dp else 72.dp, start = if (left) 72.dp else 0.dp, bottom = 12.dp))
+    } else if (e.settings.carControls == 2) {
+        ArrowKeys(e, left)
     } else {
         Joystick(e, Modifier.align(if (left) Alignment.BottomEnd else Alignment.BottomStart).padding(18.dp))
         Pedal("BRAKE", HC.Red, brake = true, set = { e.input.brake = it },
@@ -125,6 +127,75 @@ private fun Dashboard(e: GameEngine) {
                 com.hustlecity.game.ui.Bar(v.condition.toFloat(), if (v.condition < .3) HC.Red else HC.GreenLight, Modifier.width(36.dp).padding(start = 2.dp), height = 3.dp)
             }
         }
+    }
+}
+
+/** On-screen arrow keys: ◀ ▶ steer on one side, ▼ brake and ▲ gas on the other. */
+@Composable
+private fun BoxScope.ArrowKeys(e: GameEngine, left: Boolean) {
+    var l by remember { mutableStateOf(false) }
+    var r by remember { mutableStateOf(false) }
+    fun steer() { e.input.steer = (if (r) 1f else 0f) - (if (l) 1f else 0f) }
+    Row(
+        Modifier.align(if (left) Alignment.BottomEnd else Alignment.BottomStart).padding(start = 18.dp, end = 18.dp, bottom = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Bottom,
+    ) {
+        ArrowKey(3, "LEFT", Color(0xFF56B4FF), 76.dp) { l = it; steer() }
+        ArrowKey(1, "RIGHT", Color(0xFF56B4FF), 76.dp) { r = it; steer() }
+    }
+    Row(
+        Modifier.align(if (left) Alignment.BottomStart else Alignment.BottomEnd).padding(end = if (left) 0.dp else 72.dp, start = if (left) 72.dp else 0.dp, bottom = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Bottom,
+    ) {
+        ArrowKey(2, "BRAKE", HC.Red, 70.dp) { e.input.brake = it }
+        ArrowKey(0, "GAS", HC.GreenLight, 82.dp) { e.input.gas = it }
+    }
+}
+
+/** A keyboard-style key with an arrow (0 up, 1 right, 2 down, 3 left) that you hold down. */
+@Composable
+private fun ArrowKey(dir: Int, label: String, glow: Color, size: androidx.compose.ui.unit.Dp, set: (Boolean) -> Unit) {
+    var pressed by remember { mutableStateOf(false) }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier.size(size).padding(top = if (pressed) 3.dp else 0.dp, bottom = if (pressed) 0.dp else 3.dp)
+                .shadow(if (pressed) 1.dp else 5.dp, RoundedCornerShape(14.dp)).clip(RoundedCornerShape(14.dp))
+                .background(Brush.verticalGradient(if (pressed) listOf(Color(0xFF2E333A), Color(0xFF3A4048)) else listOf(Color(0xFF5A626D), Color(0xFF3A4048))))
+                .border(2.dp, if (pressed) glow else Color.White.copy(alpha = .35f), RoundedCornerShape(14.dp))
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        try {
+                            awaitFirstDown().consume()
+                            pressed = true
+                            set(true)
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                if (ev.changes.none { it.pressed }) break
+                            }
+                        } finally {
+                            pressed = false
+                            set(false)
+                        }
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(Modifier.fillMaxSize(.46f)) {
+                val w = this.size.width; val h = this.size.height
+                val tri = Path().apply {
+                    when (dir) {
+                        0 -> { moveTo(w / 2, 0f); lineTo(w, h); lineTo(0f, h) }
+                        1 -> { moveTo(w, h / 2); lineTo(0f, h); lineTo(0f, 0f) }
+                        2 -> { moveTo(w / 2, h); lineTo(0f, 0f); lineTo(w, 0f) }
+                        else -> { moveTo(0f, h / 2); lineTo(w, 0f); lineTo(w, h) }
+                    }
+                    close()
+                }
+                drawPath(tri, if (pressed) glow else Color.White)
+            }
+        }
+        Text(label, color = if (pressed) glow else Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(3.dp)).background(Color(0x99000000)).padding(horizontal = 4.dp, vertical = 1.dp))
     }
 }
 

@@ -426,4 +426,19 @@ class UiSnapshotTest {
         e.camera.mapX = (e.state.player.x + target.doorX) / 2; e.camera.mapY = (e.state.player.y + target.doorY) / 2; e.camera.mapDist = 900f
         shoot(e, "ui_maps_route.png")
     }
+
+    @Test
+    fun drivingArrowKeys() {
+        val e = game()
+        e.ui.tip = null
+        e.settings.carControls = 2
+        weather(e, com.hustlecity.game.model.Sky.CLEAR)
+        e.enterVehicle(e.state.vehicles.first())
+        e.ui.tip = null
+        e.ui.phoneOpen = false
+        e.input.gas = true
+        repeat(45) { e.frame(1 / 30f) }
+        e.input.gas = false
+        shoot(e, "ui_driving_arrows.png")
+    }
 }
