@@ -78,6 +78,20 @@ class RenderSnapshotTest {
         renderWorld(e, "midtown.png")
     }
 
+    /** Each city's starting street, close up and from higher up, to check its look. */
+    @Test
+    fun everyCityStreet() {
+        for (map in com.hustlecity.game.world.Maps.all) {
+            val e = GameEngine(null)
+            e.newGame("Tester", 1, 0, 1, mapId = map.id)
+            e.state.minute = 15L * 60
+            e.camera.zoom = 46f; e.camera.dist = 46f
+            renderWorld(e, "city_${map.id}_street.png")
+            e.camera.zoom = 130f; e.camera.dist = 130f
+            renderWorld(e, "city_${map.id}_wide.png")
+        }
+    }
+
     /** One close-up per architectural style, by day and by night, to check the buildings' personality. */
     @Test
     fun architectureGallery() {

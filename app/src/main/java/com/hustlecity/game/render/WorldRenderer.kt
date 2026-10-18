@@ -18,6 +18,7 @@ import com.hustlecity.game.world.Building
 import com.hustlecity.game.world.City
 import com.hustlecity.game.world.dist
 import com.hustlecity.game.render.gpu.GpuFrame
+import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.ceil
@@ -697,21 +698,19 @@ class WorldRenderer(private val e: GameEngine) {
     private var roadSeen = IntArray(0)
     private var roadStamp = 1
 
-    /** Fills a junction: the corners of every road meeting there, wrapped in a convex outline. */
+    /**
+     * Fills a junction: the end corners of every road meeting there, in order around the node, fanned out from the
+     * node. Neighbouring roads join corner to corner, so sharp-angled junctions stay as tight as the roads they join.
+     */
     private fun junction(n: com.hustlecity.game.world.RoadNode, asphalt: Int) {
         val g = e.city.roads
-        if (roadSeen.size < g.edges.size) roadSeen = IntArray(g.edges.size)
-        var k = 0
+        val m = min(n.edges.size, jOrder.size)
         var any = false
-        for (id in n.edges) {
-            val ed = g.edges[id]
-            val clear = if (ed.a == n.id) ed.clearA else ed.clearB
-            if (clear > 0f) any = true
-            val dx = if (ed.a == n.id) ed.ux else -ed.ux; val dy = if (ed.a == n.id) ed.uy else -ed.uy
-            val hw = ed.cls.halfWidth
-            if (k + 2 > hx.size) break
-            hx[k] = n.x + dx * clear - dy * hw; hy[k] = n.y + dy * clear + dx * hw; k++
-            hx[k] = n.x + dx * clear + dy * hw; hy[k] = n.y + dy * clear - dx * hw; k++
+        for (k in 0 until m) {
+            val ed = g.edges[n.edges[k]]
+            jOrder[k] = k
+            jAngle[k] = g.angleAway(ed, n.id)
+            if ((if (ed.a == n.id) ed.clearA else ed.clearB) > 0f) any = true
         }
         if (!any) {
             // a bend in the road: round the joint off
@@ -719,10 +718,51 @@ class WorldRenderer(private val e: GameEngine) {
             scene.disc(n.x, n.y, .025f, hw, hw, 14, asphalt)
             return
         }
-        val m = hullOf(k)
-        for (i in 0 until m) { hz[i] = .026f }
-        scene.poly(m, hullX, hullY, hz, asphalt)
+        // roads in order of the direction they leave the node
+        for (i in 1 until m) {
+            val v = jOrder[i]; var j = i - 1
+            while (j >= 0 && jAngle[jOrder[j]] > jAngle[v]) { jOrder[j + 1] = jOrder[j]; j-- }
+            jOrder[j + 1] = v
+        }
+        var k = 0
+        for (q in 0 until m) {
+            val ed = g.edges[n.edges[jOrder[q]]]
+            val clear = if (ed.a == n.id) ed.clearA else ed.clearB
+            val dx = if (ed.a == n.id) ed.ux else -ed.ux; val dy = if (ed.a == n.id) ed.uy else -ed.uy
+            val hw = ed.cls.halfWidth
+            // the corner just before this road's direction, then the one just after it
+            if (k + 2 > hx.size) break
+            hx[k] = n.x + dx * clear + dy * hw; hy[k] = n.y + dy * clear - dx * hw; k++
+            hx[k] = n.x + dx * clear - dy * hw; hy[k] = n.y + dy * clear + dx * hw; k++
+            // a wide gap to the next road (the outside of a bend or a fork): sweep round it so the fan stays convex
+            val a0 = jAngle[jOrder[q]]
+            val a1 = if (q + 1 < m) jAngle[jOrder[q + 1]] else jAngle[jOrder[0]] + 2f * PI.toFloat()
+            if (a1 - a0 > 2.6f) {
+                val nextEd = g.edges[n.edges[jOrder[(q + 1) % m]]]
+                val r = max(hw, nextEd.cls.halfWidth)
+                val from = a0 + PI.toFloat() / 2; val to = a1 - PI.toFloat() / 2
+                val steps = ((to - from) / .5f).toInt().coerceIn(1, 8)
+                for (t in 0..steps) {
+                    if (k >= hx.size) break
+                    val a = from + (to - from) * t / steps
+                    hx[k] = n.x + cos(a) * r; hy[k] = n.y + sin(a) * r; k++
+                }
+            }
+        }
+        for (i in 0 until k) {
+            val j = if (i + 1 < k) i + 1 else 0
+            jx[0] = n.x; jy[0] = n.y; jz[0] = .026f
+            jx[1] = hx[i]; jy[1] = hy[i]; jz[1] = .026f
+            jx[2] = hx[j]; jy[2] = hy[j]; jz[2] = .026f
+            scene.poly(3, jx, jy, jz, asphalt)
+        }
     }
+
+    private val jOrder = IntArray(16)
+    private val jAngle = FloatArray(16)
+    private val jx = FloatArray(3)
+    private val jy = FloatArray(3)
+    private val jz = FloatArray(3)
 
     /** Convex hull of the first [k] points of hx/hy into hullX/hullY; returns the point count. */
     private fun hullOf(k: Int): Int {
@@ -768,8 +808,8 @@ class WorldRenderer(private val e: GameEngine) {
         }
     }
 
-    private val hx = FloatArray(32)
-    private val hy = FloatArray(32)
+    private val hx = FloatArray(64)
+    private val hy = FloatArray(64)
     private val hz = FloatArray(40)
     private val hullX = FloatArray(40)
     private val hullY = FloatArray(40)

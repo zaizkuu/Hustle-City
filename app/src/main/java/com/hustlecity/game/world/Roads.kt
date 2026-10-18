@@ -156,8 +156,14 @@ class RoadGraph(val nodes: List<RoadNode>, val edges: List<RoadEdge>) {
                         val ej = edges[j]
                         var d = abs(angleAway(ej, n.id) - ai)
                         if (d > Math.PI) d = (2 * Math.PI - d).toFloat()
-                        val s = kotlin.math.sin(d).coerceAtLeast(.4f)
-                        clear = max(clear, (ej.cls.halfWidth + ej.cls.sidewalk * .5f) / s)
+                        // how far out this road's edge stays inside the other road (plus room for a crosswalk):
+                        // a lot for a sharp fork, nothing for the road carrying straight on
+                        val sn = kotlin.math.sin(d); val cs = kotlin.math.cos(d)
+                        val hj = ej.cls.halfWidth + ej.cls.sidewalk * .5f
+                        val hi = ei.cls.halfWidth
+                        val need = if (cs >= 0f) (hj + hi * cs) / max(sn, .25f)
+                            else min(hi * sn / -cs, (hj + hi * cs) / max(sn, .05f)).coerceAtLeast(0f)
+                        clear = max(clear, need)
                     }
                     clear = clear.coerceAtMost(min(ei.len * .45f, 34f))
                 }
