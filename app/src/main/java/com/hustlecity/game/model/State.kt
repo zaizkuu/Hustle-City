@@ -166,7 +166,7 @@ data class Employee(
 
 @Serializable
 enum class Sky(val label: String, val icon: String) {
-    CLEAR("Clear", "☀"), CLOUDY("Cloudy", "⛅"), RAIN("Rain", "🌧"), STORM("Thunderstorm", "⛈"), SNOW("Snow", "❄"), FOG("Fog", "🌫");
+    CLEAR("Clear", "sun"), CLOUDY("Cloudy", "partly_cloudy"), RAIN("Rain", "rain"), STORM("Thunderstorm", "storm"), SNOW("Snow", "snow"), FOG("Fog", "fog");
 
     val wet get() = this == RAIN || this == STORM || this == SNOW
 }

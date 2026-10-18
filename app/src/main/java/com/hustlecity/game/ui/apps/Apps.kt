@@ -1,5 +1,7 @@
 package com.hustlecity.game.ui.apps
 
+import com.hustlecity.game.ui.icons.IconBadge
+import com.hustlecity.game.ui.icons.GIcon
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -188,7 +190,8 @@ fun PersonaApp(e: GameEngine) {
                 val home = e.city.building(p.home)
                 if (home != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🏠 ${home.address}, ${City.neighborhoods[home.neighborhood].name} · ${home.area} m²", style = HT.body, color = HC.Ink, modifier = Modifier.weight(1f))
+                        GIcon("home", 16.dp, Modifier.padding(end = 6.dp), tint = HC.Ink)
+                        Text("${home.address}, ${City.neighborhoods[home.neighborhood].name} · ${home.area} m²", style = HT.body, color = HC.Ink, modifier = Modifier.weight(1f))
                         HButton("Pin", small = true) { e.setWaypoint(home.id) }
                     }
                 }
@@ -269,7 +272,10 @@ fun RivalsApp(e: GameEngine) {
                 for (rb in wars.take(3)) {
                     val mine = s.businesses.first { it.id == rb.targetBiz }
                     val r = s.rivals.firstOrNull { it.id == rb.rivalId }
-                    Text("⚔ Price war: ${r?.name}'s ${rb.name} vs your ${mine.name} (${((1 - rb.priceFactor) * 100).roundToInt()}% cheaper)", style = HT.small, color = HC.Red, modifier = Modifier.padding(top = 3.dp))
+                    Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                        GIcon("swords", 12.dp, Modifier.padding(end = 4.dp), tint = HC.Red)
+                        Text("Price war: ${r?.name}'s ${rb.name} vs your ${mine.name} (${((1 - rb.priceFactor) * 100).roundToInt()}% cheaper)", style = HT.small, color = HC.Red)
+                    }
                 }
             }
         }
@@ -317,7 +323,12 @@ fun RivalsApp(e: GameEngine) {
                     for (rb in list.take(40)) {
                         val b = e.city.building(rb.buildingId) ?: continue
                         Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("${Catalog.type(rb.typeId).emoji}  ${rb.name} " + "★".repeat(rb.level), style = HT.body, color = HC.Ink, modifier = Modifier.weight(1f))
+                            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                val t = Catalog.type(rb.typeId)
+                                IconBadge(t.icon, 20.dp, Color(t.color))
+                                Text(" ${rb.name} ", style = HT.body, color = HC.Ink, maxLines = 1)
+                                repeat(rb.level) { GIcon("star", 10.dp, tint = HC.Orange) }
+                            }
                             Text("${b.address} · ${City.neighborhoods[b.neighborhood].name}", style = HT.small, color = HC.InkSoft, modifier = Modifier.weight(1f))
                             Text(if (rb.targetBiz >= 0) "price war" else "${(rb.reputation * 100).roundToInt()}% rep", style = HT.small,
                                 color = if (rb.targetBiz >= 0) HC.Red else HC.InkSoft, modifier = Modifier.width(70.dp))
@@ -496,7 +507,10 @@ fun FinanceApp(e: GameEngine) {
                 for (b in s.businesses) {
                     val d = b.history.lastOrNull()
                     Row(Modifier.padding(vertical = 3.dp)) {
-                        Text("${b.type.emoji} ${b.name}", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
+                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            IconBadge(b.type.icon, 20.dp, Color(b.type.color))
+                            Text(" ${b.name}", style = HT.bodyBold, color = HC.Ink)
+                        }
                         if (d == null) Text("no data yet", style = HT.small, color = HC.InkSoft)
                         else {
                             val profit = d.profit
@@ -624,7 +638,7 @@ fun RealtyApp(e: GameEngine) {
                                 Text(
                                     when {
                                         b.id == s.player.home -> "Your home"
-                                        biz != null -> "${biz.type.emoji} ${biz.name}"
+                                        biz != null -> biz.name
                                         b.kind == BKind.RETAIL -> "Empty — go inside to start a business"
                                         else -> "Residential"
                                     }, style = HT.small, color = HC.Ink,

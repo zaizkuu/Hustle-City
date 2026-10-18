@@ -29,7 +29,7 @@ sealed class Panel {
 
 enum class ToastKind { INFO, GOOD, BAD, SAVE }
 
-data class Toast(val id: Long, val text: String, val kind: ToastKind, val bornMs: Long)
+data class Toast(val id: Long, val text: String, val kind: ToastKind, val bornMs: Long, val icon: String? = null)
 
 data class Confirm(val title: String, val text: String, val confirmLabel: String, val action: () -> Unit)
 

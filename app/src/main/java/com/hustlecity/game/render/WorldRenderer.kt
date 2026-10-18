@@ -11,6 +11,7 @@ import com.hustlecity.game.engine.AppId
 import com.hustlecity.game.engine.GameEngine
 import com.hustlecity.game.engine.SHIRT_COLORS
 import com.hustlecity.game.engine.SKIN_TONES
+import com.hustlecity.game.ui.icons.IconCanvas
 import com.hustlecity.game.world.BKind
 import com.hustlecity.game.world.Building
 import com.hustlecity.game.world.City
@@ -42,7 +43,7 @@ class WorldRenderer(private val e: GameEngine) {
     private val order = IntArray(maxDraw)
 
     private val labels = ArrayList<Label>()
-    private class Label(var text: String, var x: Float, var y: Float, var size: Float, var color: Int, var bg: Int)
+    private class Label(var text: String, var x: Float, var y: Float, var size: Float, var color: Int, var bg: Int, var icon: String? = null)
     private val labelPool = ArrayList<Label>()
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD); textAlign = Paint.Align.CENTER }
@@ -110,9 +111,9 @@ class WorldRenderer(private val e: GameEngine) {
         const val PITCH_MAP = 62f
     }
 
-    private fun label(text: String, x: Float, y: Float, size: Float, color: Int, bg: Int = 0) {
+    private fun label(text: String, x: Float, y: Float, size: Float, color: Int, bg: Int = 0, icon: String? = null) {
         val l = if (labelPool.isNotEmpty()) labelPool.removeAt(labelPool.size - 1) else Label("", 0f, 0f, 0f, 0, 0)
-        l.text = text; l.x = x; l.y = y; l.size = size; l.color = color; l.bg = bg
+        l.text = text; l.x = x; l.y = y; l.size = size; l.color = color; l.bg = bg; l.icon = icon
         labels += l
     }
 
@@ -722,7 +723,7 @@ class WorldRenderer(private val e: GameEngine) {
         if (mapMode) return
         if (proj.project(b.cx, if (b.facesNorth) y0 else y1, 6.3f, tmp)) {
             val size = (proj.focal * .8f / tmp[2]).coerceAtMost(14f * density)
-            if (size > 4f * density) label("⛽ Fuel Up", tmp[0], tmp[1], size, 0xFFFFFFFF.toInt())
+            if (size > 4f * density) label("Fuel Up", tmp[0], tmp[1], size, 0xFFFFFFFF.toInt(), icon = "place_gas")
         }
     }
 
@@ -863,10 +864,18 @@ class WorldRenderer(private val e: GameEngine) {
                 textPaint.color = l.color
                 canvas.drawText(l.text, l.x, l.y, textPaint)
             } else {
+                // an icon sits left of the text, the pair centred on the label point
+                val ic = l.icon
+                val shift = if (ic != null) l.size * .65f else 0f
+                if (ic != null) {
+                    val tw = textPaint.measureText(l.text)
+                    IconCanvas.draw(canvas, ic, l.x - tw / 2 - l.size * .1f + shift - l.size * .55f + 1.5f, l.y - l.size * .35f + 1.5f, l.size * 1.1f, 0xAA000000.toInt())
+                    IconCanvas.draw(canvas, ic, l.x - tw / 2 - l.size * .1f + shift - l.size * .55f, l.y - l.size * .35f, l.size * 1.1f, l.color)
+                }
                 textPaint.color = 0xAA000000.toInt()
-                canvas.drawText(l.text, l.x + 1.5f, l.y + 1.5f, textPaint)
+                canvas.drawText(l.text, l.x + shift + 1.5f, l.y + 1.5f, textPaint)
                 textPaint.color = l.color
-                canvas.drawText(l.text, l.x, l.y, textPaint)
+                canvas.drawText(l.text, l.x + shift, l.y, textPaint)
             }
         }
         if (mapMode) drawMapOverlay(canvas)
@@ -877,8 +886,8 @@ class WorldRenderer(private val e: GameEngine) {
                 val d = dist(v.x, v.y, s.player.x, s.player.y)
                 if (d < 400f && proj.project(v.x, v.y, v.def.height + 2.5f, tmp)) {
                     // loaded cars show what's in the trunk
-                    if (v.cargo.isNotEmpty()) waypointPill(canvas, tmp[0], tmp[1] - 6f * density, "📦 ${v.cargo.size}/${v.def.cargo} in the trunk", c(0xFFF2994A))
-                    else if (d > 9f) pin(canvas, tmp[0], tmp[1], "🚗", c(0xFF27AE60), 11f * density)
+                    if (v.cargo.isNotEmpty()) waypointPill(canvas, tmp[0], tmp[1] - 6f * density, "${v.cargo.size}/${v.def.cargo} in the trunk", c(0xFFF2994A), "cargo_boxes")
+                    else if (d > 9f) pin(canvas, tmp[0], tmp[1], "car", c(0xFF27AE60), 11f * density)
                 }
             }
         }
@@ -929,23 +938,9 @@ class WorldRenderer(private val e: GameEngine) {
         canvas.drawPath(path, strokePaint)
     }
 
-    private fun pin(canvas: Canvas, x: Float, y: Float, emoji: String, ring: Int, r: Float) {
-        pillPaint.color = 0x55000000
-        canvas.drawCircle(x + 1.5f, y + 2f, r * 1.1f, pillPaint)
-        pillPaint.color = ring
-        canvas.drawCircle(x, y, r * 1.12f, pillPaint)
-        pillPaint.color = 0xFFFFFFFF.toInt()
-        canvas.drawCircle(x, y, r * .9f, pillPaint)
-        path.rewind()
-        path.moveTo(x - r * .45f, y + r * .95f); path.lineTo(x + r * .45f, y + r * .95f); path.lineTo(x, y + r * 1.6f); path.close()
-        pillPaint.color = ring
-        canvas.drawPath(path, pillPaint)
-        textPaint.textSize = r * 1.05f
-        textPaint.color = 0xFF000000.toInt()
-        canvas.drawText(emoji, x, y + r * .38f, textPaint)
-    }
+    private fun pin(canvas: Canvas, x: Float, y: Float, icon: String, ring: Int, r: Float) = IconCanvas.pin(canvas, icon, x, y, r, ring)
 
-    private fun waypointPill(canvas: Canvas, x: Float, y: Float, text: String, dot: Int = c(0xFF2F80ED)) {
+    private fun waypointPill(canvas: Canvas, x: Float, y: Float, text: String, dot: Int = c(0xFF2F80ED), icon: String = "pin") {
         textPaint.textSize = 13f * density
         val tw = textPaint.measureText(text)
         val r = 14f * density
@@ -954,9 +949,8 @@ class WorldRenderer(private val e: GameEngine) {
         canvas.drawRoundRect(rect, r, r, pillPaint)
         pillPaint.color = dot
         canvas.drawCircle(rect.left + r, y, r * .78f, pillPaint)
+        IconCanvas.draw(canvas, icon, rect.left + r, y, r * 1.05f)
         textPaint.color = 0xFFFFFFFF.toInt()
-        textPaint.textSize = 12f * density
-        canvas.drawText("📍", rect.left + r, y + 4.5f * density, textPaint)
         textPaint.textSize = 13f * density
         textPaint.textAlign = Paint.Align.LEFT
         canvas.drawText(text, rect.left + r * 2.1f, y + 4.5f * density, textPaint)
@@ -985,26 +979,26 @@ class WorldRenderer(private val e: GameEngine) {
         // places
         for (b in e.city.buildings) {
             val placeId = b.placeId
-            var emoji: String? = null
+            var icon: String? = null
             var ring = 0
             var name: String? = null
             if (placeId != null && f["places"] != false) {
-                val pl = Catalog.place(placeId); emoji = pl.emoji; ring = pl.color; name = pl.name
+                val pl = Catalog.place(placeId); icon = pl.icon; ring = pl.color; name = pl.name
             }
             val biz = bizByBuilding[b.id]
-            if (biz != null) { emoji = biz.type.emoji; ring = c(0xFF27AE60); name = biz.name }
-            else if (b.id == s.player.home) { emoji = "🏠"; ring = c(0xFFEB5757); name = "Home" }
-            else if (b.id in rentedBuildings) { emoji = "🔑"; ring = c(0xFF27AE60); name = b.address }
+            if (biz != null) { icon = biz.type.icon; ring = biz.type.color; name = biz.name }
+            else if (b.id == s.player.home) { icon = "home"; ring = c(0xFFEB5757); name = "Home" }
+            else if (b.id in rentedBuildings) { icon = "rental"; ring = c(0xFF27AE60); name = b.address }
             else {
                 val rb = rivalByBuilding[b.id]
-                if (rb != null && f["type:${rb.typeId}"] == true) { emoji = Catalog.type(rb.typeId).emoji; ring = c(0xFF9AA3AD); name = rb.name }
-                else if (f["rent"] == true && b.kind == BKind.RETAIL && vacant(b)) { emoji = "🏪"; ring = c(0xFF27AE60) }
+                if (rb != null && f["type:${rb.typeId}"] == true) { icon = Catalog.type(rb.typeId).icon; ring = c(0xFF7D8793); name = rb.name }
+                else if (f["rent"] == true && b.kind == BKind.RETAIL && vacant(b)) { icon = "for_rent"; ring = c(0xFF27AE60) }
             }
-            if (emoji == null) continue
+            if (icon == null) continue
             if (!proj.project(b.cx, b.cy, b.height + 3f, tmp)) continue
             if (tmp[0] < -r || tmp[0] > proj.screenW + r || tmp[1] < -r || tmp[1] > proj.screenH + r) continue
             val px = tmp[0]; val py = tmp[1] - r * 1.4f
-            pin(canvas, px, py, emoji, ring, r)
+            pin(canvas, px, py, icon, ring, r)
             if (showNames && name != null) {
                 textPaint.textSize = 10f * density
                 textPaint.color = 0xFF000000.toInt()

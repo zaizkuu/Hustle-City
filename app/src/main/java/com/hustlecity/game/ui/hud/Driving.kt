@@ -1,5 +1,6 @@
 package com.hustlecity.game.ui.hud
 
+import com.hustlecity.game.ui.icons.GIcon
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -117,14 +118,17 @@ private fun Dashboard(e: GameEngine) {
         Box(Modifier.padding(start = 6.dp).clip(RoundedCornerShape(3.dp)).background(if (gear == "R") HC.Red else Color(0x33FFFFFF)).padding(horizontal = 5.dp)) {
             Text(gear, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
-        if (v.cargo.isNotEmpty()) Text("📦${v.cargo.size}/${v.def.cargo}", color = HC.Orange, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp))
+        if (v.cargo.isNotEmpty()) {
+            GIcon("cargo_boxes", 11.dp, Modifier.padding(start = 6.dp, end = 2.dp), tint = HC.Orange)
+            Text("${v.cargo.size}/${v.def.cargo}", color = HC.Orange, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
         Column(Modifier.padding(start = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("⛽", fontSize = 8.sp)
+                GIcon("fuel", 9.dp)
                 com.hustlecity.game.ui.Bar(v.fuel.toFloat(), if (v.fuel < .15) HC.Red else HC.Orange, Modifier.width(36.dp).padding(start = 2.dp), height = 3.dp)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("🔧", fontSize = 8.sp)
+                GIcon("condition", 9.dp)
                 com.hustlecity.game.ui.Bar(v.condition.toFloat(), if (v.condition < .3) HC.Red else HC.GreenLight, Modifier.width(36.dp).padding(start = 2.dp), height = 3.dp)
             }
         }
@@ -243,7 +247,11 @@ private fun SteeringWheel(e: GameEngine, modifier: Modifier) {
                 drawCircle(Color(0xFFEB5757), 4.dp.toPx(), Offset(center.x, center.y - r))
             }
         }
-        Text("◀  STEER  ▶", color = Color(0xCCFFFFFF), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomCenter))
+        Row(Modifier.align(Alignment.BottomCenter), verticalAlignment = Alignment.CenterVertically) {
+            GIcon("arrow_left", 8.dp, tint = Color(0xCCFFFFFF))
+            Text("  STEER  ", color = Color(0xCCFFFFFF), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            GIcon("arrow_right", 8.dp, tint = Color(0xCCFFFFFF))
+        }
     }
 }
 
@@ -341,7 +349,7 @@ fun GpsBanner(e: GameEngine, modifier: Modifier = Modifier) {
         modifier.widthIn(max = 380.dp).shadow(5.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp)).background(Color(0xF01C64C8)).padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(when (gps.turn) { -1 -> "↰"; 1 -> "↱"; else -> "🏁" }, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        GIcon(when (gps.turn) { -1 -> "turn_left"; 1 -> "turn_right"; else -> "arrive" }, 28.dp)
         Column(Modifier.padding(start = 8.dp).weight(1f, fill = false)) {
             Text(
                 if (gps.turn == 0) "${meters(gps.distance)} to ${e.buildingName(dest)}" else "In ${meters(gps.turnDistance)}: ${gps.instruction()}",
@@ -349,7 +357,7 @@ fun GpsBanner(e: GameEngine, modifier: Modifier = Modifier) {
             )
             Text("${e.buildingName(dest)} · ${meters(gps.distance)} · ${eta(e, gps.distance)}", color = Color(0xDDFFFFFF), fontSize = 10.sp, maxLines = 1)
         }
-        Text("✕", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+        GIcon("close", 22.dp,
             modifier = Modifier.padding(start = 10.dp).clip(CircleShape).clickable { e.state.player.waypoint = -1; e.gps.clear(); e.bump() }.padding(4.dp))
     }
 }

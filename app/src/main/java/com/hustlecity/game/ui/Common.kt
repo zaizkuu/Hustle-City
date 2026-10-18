@@ -55,15 +55,16 @@ import com.hustlecity.game.ui.theme.HT
 
 fun Int.toColor() = Color(this)
 
-fun appIcon(id: AppId): ImageVector = when (id) {
-    AppId.PERSONA -> Icons.Filled.Star
-    AppId.CONTACTS -> Icons.Filled.Chat
-    AppId.RIVALS -> Icons.Filled.Groups
-    AppId.STAFF -> Icons.Filled.Badge
-    AppId.BIZHUB -> Icons.Filled.Storefront
-    AppId.FINANCE -> Icons.Filled.ShowChart
-    AppId.REALTY -> Icons.Filled.HomeWork
-    AppId.MAPS -> Icons.Filled.Map
+/** The game's own glyph for a phone app. */
+fun appGlyph(id: AppId): String = when (id) {
+    AppId.PERSONA -> "app_persona"
+    AppId.CONTACTS -> "app_contacts"
+    AppId.RIVALS -> "app_rivals"
+    AppId.STAFF -> "app_staff"
+    AppId.BIZHUB -> "app_bizhub"
+    AppId.FINANCE -> "app_finance"
+    AppId.REALTY -> "app_realty"
+    AppId.MAPS -> "app_maps"
 }
 
 @Composable
@@ -76,7 +77,7 @@ fun AppIconTile(id: AppId, size: Dp, showLabel: Boolean = true, labelColor: Colo
                     .background(Brush.verticalGradient(listOf(top, bottom))),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(appIcon(id), null, tint = Color.White, modifier = Modifier.size(size * .55f))
+                com.hustlecity.game.ui.icons.GIcon(appGlyph(id), size * .56f)
             }
             if (badge > 0) {
                 Box(Modifier.align(Alignment.TopEnd).size(16.dp).clip(CircleShape).background(HC.Red), contentAlignment = Alignment.Center) {
@@ -180,12 +181,14 @@ fun KeyValue(key: String, value: String, valueColor: Color = HC.Ink, bold: Boole
 }
 
 @Composable
-fun Chip(text: String, selected: Boolean, color: Color = HC.Blue, onClick: () -> Unit) {
-    Box(
+fun Chip(text: String, selected: Boolean, color: Color = HC.Blue, icon: String? = null, onClick: () -> Unit) {
+    Row(
         Modifier.padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(14.dp))
             .background(if (selected) color else Color(0xFFE8ECF1))
             .clickable { com.hustlecity.game.audio.Audio.play(com.hustlecity.game.audio.Sfx.TAP); onClick() }.padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (icon != null) com.hustlecity.game.ui.icons.GIcon(icon, 13.dp, Modifier.padding(end = 4.dp), tint = if (selected) Color.White else HC.Ink)
         Text(text, color = if (selected) Color.White else HC.Ink, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }

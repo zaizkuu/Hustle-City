@@ -177,10 +177,10 @@ class WeatherSystem(private val e: GameEngine) {
         lastSky = sky
         if (prev != null && prev != sky) {
             when (sky) {
-                Sky.RAIN -> e.toast("🌧 It's raining: fewer shoppers outside, but umbrellas sell fast")
-                Sky.STORM -> e.toast("⛈ Thunderstorm: streets empty out, cinemas fill up")
-                Sky.SNOW -> e.toast("❄ It's snowing: hot coffee and coats are in demand")
-                Sky.FOG -> e.toast("🌫 Fog rolls in")
+                Sky.RAIN -> e.toast("It's raining: fewer shoppers outside, but umbrellas sell fast", icon = "rain")
+                Sky.STORM -> e.toast("Thunderstorm: streets empty out, cinemas fill up", icon = "storm")
+                Sky.SNOW -> e.toast("It's snowing: hot coffee and coats are in demand", icon = "snow")
+                Sky.FOG -> e.toast("Fog rolls in", icon = "fog")
                 else -> {}
             }
             if (sky.wet) e.tip("weather", "Weather changes business",
@@ -193,7 +193,7 @@ class WeatherSystem(private val e: GameEngine) {
         val s = e.state
         val sb = StringBuilder()
         sb.append("${dateLabel()} · ${season()}\n")
-        sb.append("Now: ${sky().icon} ${sky().label}, ${temperature().toInt()}°C\n\n")
+        sb.append("Now: ${sky().label}, ${temperature().toInt()}°C\n\n")
         for (d in 0..2) {
             val day = s.day + d
             val start = (day - 1L) * MINUTES_PER_DAY
@@ -203,7 +203,7 @@ class WeatherSystem(private val e: GameEngine) {
             val lo = (0..23 step 3).minOf { temperature(start + it * 60L) }.toInt()
             val wetHours = (0 until 24).count { sky(start + it * 60L).wet }
             sb.append(if (d == 0) "Today" else if (d == 1) "Tomorrow" else dateLabel(day))
-            sb.append(": ${main.icon} ${main.label}, $lo° to $hi°C")
+            sb.append(": ${main.label}, $lo° to $hi°C")
             if (wetHours > 0 && !main.wet) sb.append(", showers ($wetHours h)")
             sb.append('\n')
         }

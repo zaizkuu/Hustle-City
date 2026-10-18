@@ -1,5 +1,6 @@
 package com.hustlecity.game.ui.menu
 
+import com.hustlecity.game.ui.icons.GIcon
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -147,7 +148,7 @@ fun NewGameScreen(e: GameEngine) {
                             if (name.isEmpty()) Text("Enter your name", color = HC.InkSoft, fontSize = 15.sp)
                             BasicTextField(name, { name = it.take(20) }, singleLine = true, textStyle = TextStyle(fontSize = 15.sp, color = HC.Ink))
                         }
-                        Text("🎲", fontSize = 16.sp, modifier = Modifier.clickable {
+                        GIcon("dice", 20.dp, tint = HC.InkSoft, modifier = Modifier.clickable {
                             name = "${Catalog.firstNames.random()} ${Catalog.lastNames.random()}"
                         })
                     }

@@ -1,5 +1,6 @@
 package com.hustlecity.game.ui.places
 
+import com.hustlecity.game.ui.icons.GIcon
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -205,7 +206,10 @@ private fun FlatbedBar(e: GameEngine, storeBuildingId: Int, cart: MutableList<Ca
         Row(Modifier.padding(horizontal = 8.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.padding(end = 8.dp)) {
                 Text("FLATBED", style = HT.label, color = Color.White)
-                Text("📦 ${cartSlots(cart)}/$FLATBED $unitLabel", color = Color.White.copy(alpha = .8f), fontSize = 10.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    GIcon("cargo_boxes", 11.dp, Modifier.padding(end = 3.dp), tint = Color.White.copy(alpha = .8f))
+                    Text("${cartSlots(cart)}/$FLATBED $unitLabel", color = Color.White.copy(alpha = .8f), fontSize = 10.sp)
+                }
             }
             LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(cart.toList()) { line ->
@@ -312,7 +316,10 @@ private fun Wholesale(e: GameEngine, buildingId: Int, place: PlaceDef) {
     val myTypes = e.state.businesses.map { it.typeId }.toSet()
     Modal("${place.name} — Wholesale", { close(e) }) {
         if (locked) {
-            Text("🔒 Importing requires the Import & Trade course at Hustle Business School.", style = HT.bodyBold, color = HC.Red, modifier = Modifier.padding(bottom = 6.dp))
+            Row(Modifier.padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                GIcon("lock", 16.dp, Modifier.padding(end = 6.dp), tint = HC.Red)
+                Text("Importing requires the Import & Trade course at Hustle Business School.", style = HT.bodyBold, color = HC.Red)
+            }
         }
         val products = Catalog.products.filter { it.source == source }
             .sortedByDescending { p -> Catalog.businessTypes.any { it.id in myTypes && it.products.any { pr -> pr.first == p.id } } }
@@ -433,7 +440,8 @@ private fun School(e: GameEngine, place: PlaceDef) {
                 val done = c.id in e.state.player.courses
                 WhiteCard(padding = 10.dp) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🎓 ${c.name}", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
+                        GIcon("place_school", 16.dp, Modifier.padding(end = 6.dp), tint = HC.Ink)
+                        Text(c.name, style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
                         if (done) Icon(Icons.Filled.CheckCircle, null, tint = HC.Green, modifier = Modifier.size(18.dp))
                     }
                     Text(c.description, style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(vertical = 4.dp), minLines = 2)
@@ -540,7 +548,10 @@ private fun Marketing(e: GameEngine, place: PlaceDef) {
                 WhiteCard(Modifier.fillMaxWidth(), padding = 10.dp) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("📣 ${c.name} · +${(c.boost * 100).roundToInt()}% marketing", style = HT.bodyBold, color = HC.Ink)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                GIcon("place_marketing", 16.dp, Modifier.padding(end = 6.dp), tint = HC.Ink)
+                                Text("${c.name} · +${(c.boost * 100).roundToInt()}% marketing", style = HT.bodyBold, color = HC.Ink)
+                            }
                             Text(c.description + if (locked) " Requires Marketing Fundamentals." else "", style = HT.small, color = if (locked) HC.Red else HC.InkSoft)
                         }
                         Text("${e.money(c.pricePerDay)}/day", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.padding(horizontal = 8.dp))
@@ -556,7 +567,7 @@ private fun Marketing(e: GameEngine, place: PlaceDef) {
 @Composable
 private fun FlowRowChips(e: GameEngine, sel: Int, onSel: (Int) -> Unit) {
     FlowRow {
-        for (b in e.state.businesses) Chip("${b.type.emoji} ${b.name}", b.id == sel) { onSel(b.id) }
+        for (b in e.state.businesses) Chip(b.name, b.id == sel, icon = b.type.icon) { onSel(b.id) }
     }
 }
 
@@ -580,10 +591,13 @@ private fun RivalShop(e: GameEngine, buildingId: Int) {
     val rb = e.state.rivalBusinessAt(buildingId) ?: return
     val type = Catalog.type(rb.typeId)
     val owner = e.state.rivals.firstOrNull { it.id == rb.rivalId }
-    Modal("${type.emoji} ${rb.name}", { close(e) }, maxWidth = 640.dp) {
+    Modal(rb.name, { close(e) }, maxWidth = 640.dp) {
         Text("${type.name} · owned by ${owner?.name}", style = HT.body, color = HC.InkSoft)
         val mine = e.state.businesses.filter { it.typeId == rb.typeId && e.city.building(it.buildingId)?.neighborhood == e.city.building(buildingId)?.neighborhood }
-        if (mine.isNotEmpty()) Text("⚔ Competes with your ${mine.joinToString { it.name }}", style = HT.bodyBold, color = HC.Red, modifier = Modifier.padding(top = 4.dp))
+        if (mine.isNotEmpty()) Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            GIcon("swords", 16.dp, Modifier.padding(end = 6.dp), tint = HC.Red)
+            Text("Competes with your ${mine.joinToString { it.name }}", style = HT.bodyBold, color = HC.Red)
+        }
         Column(Modifier.verticalScroll(rememberScrollState())) {
             CardTitle("Buy", modifier = Modifier.padding(top = 10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -669,12 +683,15 @@ private fun StartBusiness(e: GameEngine, buildingId: Int) {
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(t.emoji, fontSize = 18.sp)
+                                GIcon(t.icon, 20.dp)
                                 Text(" " + t.name, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 2, lineHeight = 14.sp)
                             }
                             val srcText = if (t.sources.isEmpty()) "Services" else t.sources.joinToString { if (it == Source.IMPORT) "Importer" else "Wholesaler" }
-                            Text("Source: $srcText" + if (importLocked) " 🔒" else " ✓", color = if (importLocked) Color(0xFFFF7B7B) else Color.White, fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 3.dp))
+                            Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                                val srcColor = if (importLocked) Color(0xFFFF7B7B) else Color.White
+                                Text("Source: $srcText ", color = srcColor, fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                                GIcon(if (importLocked) "lock" else "check", 11.dp, tint = srcColor)
+                            }
                             Text(if (t.office) "Firms in the city: ${BizCalc.cityCompetitors(e, t.id)}" else "Competitors nearby: ${BizCalc.competitorsFor(e, t.id, b.neighborhood)}",
                                 color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 2.dp))
                             if (!t.facility) Text("Staff: ${t.staffRole.label}" + (t.performer?.let { " + ${it.label}" } ?: ""), color = Color.White, fontSize = 10.sp, textAlign = TextAlign.Center, lineHeight = 12.sp)
@@ -683,7 +700,10 @@ private fun StartBusiness(e: GameEngine, buildingId: Int) {
                             Text(t.primaryProducts.joinToString(", "), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, lineHeight = 12.sp)
                             Text("Needs: " + t.requirements.joinToString { it.label }, color = Color.White.copy(alpha = .7f), fontSize = 9.sp, textAlign = TextAlign.Center, lineHeight = 11.sp,
                                 modifier = Modifier.padding(top = 3.dp))
-                            if (sel) Text("✓ SELECTED", color = HC.GreenLight, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                            if (sel) Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                GIcon("check", 12.dp, Modifier.padding(end = 3.dp), tint = HC.GreenLight)
+                                Text("SELECTED", color = HC.GreenLight, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -882,7 +902,7 @@ private fun TrunkPanel(e: GameEngine, vehicleId: Int) {
                 val name = if (item.isProduct) "${Catalog.product(item.id)?.name ?: item.id} (${item.qty} units)" else Catalog.item(item.id)?.name ?: item.id
                 WhiteCard(Modifier.fillMaxWidth(), padding = 8.dp) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(if (item.isProduct) "📦" else "🪑", fontSize = 18.sp)
+                        if (item.isProduct) GIcon("product_${item.id}", 28.dp) else ItemThumb(item.id, 28.dp)
                         Text(name, style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
                         HButton("Take", small = true, enabled = p.hand.size < 2) { e.takeFromTrunk(v, i) }
                         HButton("Sell", small = true, color = HC.Red) { e.sellFromTrunk(v, i) }

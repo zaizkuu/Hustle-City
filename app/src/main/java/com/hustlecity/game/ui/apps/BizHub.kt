@@ -1,5 +1,6 @@
 package com.hustlecity.game.ui.apps
 
+import com.hustlecity.game.ui.icons.GIcon
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -105,7 +106,7 @@ fun BizHubApp(e: GameEngine) {
         WhiteCard(Modifier.width(220.dp).fillMaxHeight()) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Box(Modifier.align(Alignment.CenterHorizontally).size(58.dp).clip(CircleShape).background(biz.type.color.toColor()), contentAlignment = Alignment.Center) {
-                    Text(biz.type.emoji, fontSize = 28.sp)
+                    GIcon(biz.type.icon, 34.dp)
                 }
                 Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     val idx = s.businesses.indexOf(biz)
@@ -189,7 +190,7 @@ private fun OverviewTab(e: GameEngine, biz: Business) {
         }
         WhiteCard(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(46.dp).clip(RoundedCornerShape(6.dp)).background(biz.type.color.toColor()), contentAlignment = Alignment.Center) { Text(biz.type.emoji, fontSize = 22.sp) }
+                Box(Modifier.size(46.dp).clip(RoundedCornerShape(6.dp)).background(biz.type.color.toColor()), contentAlignment = Alignment.Center) { GIcon(biz.type.icon, 28.dp) }
                 Column(Modifier.padding(start = 10.dp)) {
                     Text(biz.type.name.uppercase(), style = HT.label, color = HC.InkSoft)
                     Text(biz.name, style = HT.title, color = HC.Ink)
@@ -276,7 +277,7 @@ private fun InsightTab(e: GameEngine, biz: Business) {
                 // weather and security
                 val sky = e.weather.sky()
                 val wf = e.weather.demandFactor(biz.type)
-                KeyValue("Weather now", "${sky.icon} ${sky.label}, ${e.weather.temperature().toInt()}°C · " + (if (wf >= 1.005) "+${((wf - 1) * 100).toInt()}%" else if (wf <= .995) "−${((1 - wf) * 100).toInt()}%" else "±0%") + " customers",
+                KeyValue("Weather now", "${sky.label}, ${e.weather.temperature().toInt()}°C · " + (if (wf >= 1.005) "+${((wf - 1) * 100).toInt()}%" else if (wf <= .995) "−${((1 - wf) * 100).toInt()}%" else "±0%") + " customers",
                     if (wf < .95) HC.Red else if (wf > 1.05) HC.Green else HC.Ink)
                 if (biz.type.theftRisk > 0) {
                     val stolen = biz.history.lastOrNull()?.stolen ?: 0.0
@@ -621,7 +622,7 @@ private fun TeamTab(e: GameEngine, biz: Business) {
                 else "Restocking ${minOf(stores.size, agents * 4)} of ${stores.size} stores every morning at 06:00 (4 per agent). Stores with their own delivery contract are skipped.",
                 style = HT.body, color = HC.Ink,
             )
-            for (b in stores.take(agents * 4)) Text("• ${b.type.emoji} ${b.name}", style = HT.small, color = HC.InkSoft)
+            for (b in stores.take(agents * 4)) Text("• ${b.name}", style = HT.small, color = HC.InkSoft)
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.hustlecity.game.ui.hud
 
+import com.hustlecity.game.ui.icons.GIcon
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -155,10 +156,10 @@ fun Avatar(p: PlayerState, size: androidx.compose.ui.unit.Dp, modifier: Modifier
 }
 
 @Composable
-private fun NeedBar(icon: ImageVector, color: Color, value: Float, barWidth: androidx.compose.ui.unit.Dp) {
+private fun NeedBar(icon: String, color: Color, value: Float, barWidth: androidx.compose.ui.unit.Dp) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(20.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = Color.White, modifier = Modifier.size(13.dp))
+            GIcon(icon, 13.dp)
         }
         Spacer(Modifier.width(4.dp))
         Bar(value, if (value < .2f) HC.Red else color, Modifier.width(barWidth), height = 6.dp)
@@ -166,12 +167,12 @@ private fun NeedBar(icon: ImageVector, color: Color, value: Float, barWidth: and
 }
 
 @Composable
-private fun SquareButton(icon: ImageVector, badge: Int = 0, onClick: () -> Unit) {
+private fun SquareButton(icon: String, badge: Int = 0, onClick: () -> Unit) {
     Box(
         Modifier.padding(start = 5.dp).size(44.dp).clip(RoundedCornerShape(6.dp)).background(HC.Glass).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(22.dp))
+        GIcon(icon, 22.dp)
         if (badge > 0) Box(Modifier.align(Alignment.TopEnd).padding(5.dp).size(9.dp).clip(CircleShape).background(HC.Red))
     }
 }
@@ -192,52 +193,52 @@ fun TopBar(e: GameEngine) {
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 val bw = if (tiny) 26.dp else if (compact) 38.dp else 62.dp
-                NeedBar(Icons.Filled.Bolt, HC.Energy, (p.energy / 100).toFloat(), bw)
-                NeedBar(Icons.Filled.Restaurant, HC.Hunger, (p.hunger / 100).toFloat(), bw)
-                NeedBar(Icons.Filled.SentimentSatisfied, HC.Happy, (p.happiness / 100).toFloat(), bw)
+                NeedBar("energy", HC.Energy, (p.energy / 100).toFloat(), bw)
+                NeedBar("hunger", HC.Hunger, (p.hunger / 100).toFloat(), bw)
+                NeedBar("happiness", HC.Happy, (p.happiness / 100).toFloat(), bw)
                 Box(Modifier.width(1.dp).height(26.dp).background(Color(0x40FFFFFF)))
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { e.ui.app = AppId.FINANCE }) {
-                    Icon(Icons.Filled.Payments, null, tint = Color.White, modifier = Modifier.size(15.dp))
+                    GIcon("money", 16.dp)
                     Text(" " + e.moneyShort(p.money), color = if (p.money < 0) HC.Red else Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     Icon(Icons.Filled.ArrowDropUp, null, tint = HC.GreenLight, modifier = Modifier.size(20.dp))
                     Text(e.moneyShort(e.pendingEarnings()), color = HC.GreenLight, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
                 Box(Modifier.width(1.dp).height(26.dp).background(Color(0x40FFFFFF)))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (!tiny) Icon(Icons.Filled.CalendarMonth, null, tint = Color.White, modifier = Modifier.size(15.dp))
+                    if (!tiny) GIcon("calendar", 15.dp)
                     val dayName = if (compact) s.dayName.take(3) else s.dayName
                     Text(" $dayName (Day ${s.day})", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.AccessTime, null, tint = Color.White, modifier = Modifier.size(15.dp))
+                    GIcon("clock", 15.dp)
                     Text(" ${s.clock}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
                 // weather: tap for the forecast
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { e.ui.info = "Weather" to e.weather.forecastText() }.padding(horizontal = 2.dp)) {
                     val sky = e.weather.sky()
-                    Text(sky.icon, fontSize = 14.sp)
+                    GIcon(sky.icon, 17.dp)
                     if (!tiny) Text(" ${e.weather.temperature().roundToInt()}°", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val paused = e.speedIndex == 0
-                    Icon(
-                        if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause, null,
+                    GIcon(
+                        if (paused) "play" else "pause", 28.dp,
                         tint = if (paused) HC.Red else Color.White,
-                        modifier = Modifier.size(28.dp).clip(RoundedCornerShape(4.dp)).clickable { e.speedIndex = if (paused) 1 else 0; e.bump() }.padding(3.dp),
+                        modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { e.speedIndex = if (paused) 1 else 0; e.bump() }.padding(4.dp),
                     )
                     Row(
                         Modifier.clip(RoundedCornerShape(4.dp)).clickable { e.speedIndex = when (e.speedIndex) { 1 -> 2; 2 -> 3; else -> 1 }; e.bump() }.padding(3.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Filled.FastForward, null, tint = if (e.speedIndex >= 2) HC.Yellow else Color.White, modifier = Modifier.size(20.dp))
+                        GIcon("fast_forward", 20.dp, tint = if (e.speedIndex >= 2) HC.Yellow else Color.White)
                         Text(when (e.speedIndex) { 2 -> "2x"; 3 -> "4x"; else -> "1x" }, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
             val unread = s.messages.count { !it.read }
-            SquareButton(Icons.Filled.Notifications, unread) { e.ui.app = AppId.CONTACTS }
-            if (!tiny) SquareButton(Icons.Filled.QuestionMark) { e.ui.panel = Panel.Help }
-            SquareButton(Icons.Filled.Settings) { e.ui.panel = Panel.Settings }
+            SquareButton("bell", unread) { e.ui.app = AppId.CONTACTS }
+            if (!tiny) SquareButton("help") { e.ui.panel = Panel.Help }
+            SquareButton("settings") { e.ui.panel = Panel.Settings }
         }
     }
 }
@@ -366,8 +367,9 @@ private fun RadioWidget(e: GameEngine) {
     val on = st.radioOn && st.musicVolume > 0f
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            GIcon("music", 10.dp, Modifier.padding(end = 3.dp))
             Text(
-                if (on) "♪ ${Audio.stations[Audio.station].name}: ${Audio.nowPlaying}" else "♪ Radio off · tap to tune in", color = Color.White, fontSize = 9.sp,
+                if (on) "${Audio.stations[Audio.station].name}: ${Audio.nowPlaying}" else "Radio off · tap to tune in", color = Color.White, fontSize = 9.sp,
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).clickable {
                     st.station = (Audio.station + 1) % Audio.stations.size
@@ -470,7 +472,7 @@ fun CarryingChip(e: GameEngine, modifier: Modifier = Modifier) {
         modifier.widthIn(max = 260.dp).shadow(4.dp, RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).background(HC.GlassDark).padding(horizontal = 8.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("🤲", fontSize = 14.sp)
+        GIcon("hands", 16.dp)
         Text(" Carrying ${hand.size}/2: " + hand.joinToString { if (it.isProduct) Catalog.product(it.id)?.name ?: it.id else Catalog.item(it.id)?.name ?: it.id },
             color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 2)
     }
@@ -503,11 +505,11 @@ fun BuildingCard(e: GameEngine, modifier: Modifier = Modifier, avoidPhone: Boole
         Column(Modifier.padding(10.dp)) {
             if (b.kind != BKind.PARK) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.DirectionsCar, null, tint = Color.White, modifier = Modifier.size(13.dp))
+                    GIcon("parking_p", 13.dp)
                     Text(" ${b.parking}   ", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Icon(Icons.Filled.SquareFoot, null, tint = Color.White, modifier = Modifier.size(13.dp))
+                    GIcon("area", 13.dp)
                     Text(" ${"%,d".format(b.area)} m² (${b.sizeClass})   ", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Icon(Icons.Filled.People, null, tint = Color.White, modifier = Modifier.size(13.dp))
+                    GIcon("customers", 13.dp)
                     Text(" ${b.customerLimit}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
                 Box(Modifier.padding(vertical = 6.dp).fillMaxWidth().height(1.dp).background(Color(0x33FFFFFF)))
@@ -742,6 +744,7 @@ fun Toasts(e: GameEngine, modifier: Modifier = Modifier) {
                     .background(Brush.horizontalGradient(listOf(color, color.copy(alpha = .85f)))).clickable { e.ui.toasts.remove(t) }.padding(horizontal = 10.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                t.icon?.let { GIcon(it, 15.dp, Modifier.padding(end = 6.dp)) }
                 Text(t.text, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 14.sp)
             }
         }
@@ -833,7 +836,7 @@ fun TipCard(e: GameEngine) {
             .background(Color(0xF22F80ED)).padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("💡", fontSize = 20.sp)
+        GIcon("lightbulb", 24.dp)
         Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
             Text(tip.first, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             Text(tip.second, color = Color.White.copy(alpha = .92f), fontSize = 11.sp, lineHeight = 14.sp)
@@ -852,7 +855,7 @@ fun EndingOverlay(e: GameEngine) {
             Modifier.padding(16.dp).widthIn(max = 520.dp).shadow(10.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp)).background(HC.Card).padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(if (win) "🏆" else "📉", fontSize = 40.sp)
+            GIcon(if (win) "trophy" else "chart_down", 52.dp, tint = if (win) HC.Orange else HC.Red)
             Text(if (win) "You own Hustle City!" else "Bankrupt", style = HT.big, color = if (win) HC.Green else HC.Red)
             Text(
                 if (win) "You're the richest entrepreneur in town, ahead of every rival. Uncle Sal is speechless."

@@ -253,20 +253,20 @@ class GameEngine(context: Context?) {
 
     fun bump() { ui.tick++ }
 
-    fun toast(text: String, kind: ToastKind = ToastKind.INFO) {
+    fun toast(text: String, kind: ToastKind = ToastKind.INFO, icon: String? = null) {
         when (kind) {
             ToastKind.GOOD -> Audio.play(Sfx.CHIME)
             ToastKind.BAD -> Audio.play(Sfx.ERROR)
             else -> {}
         }
-        ui.toasts += Toast(System.nanoTime(), text, kind, System.currentTimeMillis())
+        ui.toasts += Toast(System.nanoTime(), text, kind, System.currentTimeMillis(), icon)
         while (ui.toasts.size > 4) ui.toasts.removeAt(0)
     }
 
     fun message(from: String, text: String, notify: Boolean = true) {
         state.messages += Message(state.day, (state.minute % MINUTES_PER_DAY).toInt(), from, text)
         if (state.messages.size > 120) state.messages.removeAt(0)
-        if (notify) toast("✉ $from: ${text.take(70)}${if (text.length > 70) "…" else ""}")
+        if (notify) toast("$from: ${text.take(70)}${if (text.length > 70) "…" else ""}", icon = "mail")
     }
 
     fun spend(amount: Double, category: String, allowDebt: Boolean = false, silent: Boolean = false): Boolean {
@@ -987,7 +987,7 @@ class GameEngine(context: Context?) {
         // a reminder when there's something to bring in
         if (mode == InteriorMode.BUSINESS || mode == InteriorMode.HOME) {
             val n = unloadableCount()
-            if (n > 0) toast("📦 Tap \"Unload car & hands\" to bring in $n item(s)", ToastKind.INFO)
+            if (n > 0) toast("Tap \"Unload car & hands\" to bring in $n item(s)", ToastKind.INFO, "cargo_boxes")
         }
         ui.designer = false
         ui.phoneOpen = false

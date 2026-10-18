@@ -68,6 +68,30 @@ def L(d, color, alpha=None, stroke=None, evenodd=False):
     return s + ')'
 
 
+def G(d, alpha=None, stroke=None, evenodd=False):
+    """A glyph layer drawn in the icon's tint (white on pins and app tiles, dark on light cards)."""
+    s = f'L("{d}"'
+    if alpha is not None:
+        s += f', alpha = {f(alpha)}f'
+    if stroke is not None:
+        s += f', stroke = {f(stroke)}f'
+    if evenodd:
+        s += ', evenOdd = true'
+    return s + ')'
+
+
+def gear(cx, cy, r_out, r_in, teeth=8, root=.62, tip=.4):
+    """Gear outline: [teeth] teeth; [root]/[tip] are tooth widths at the base and tip as fractions of the pitch."""
+    import math as _m
+    pts = []
+    step = 360 / teeth
+    for i in range(teeth):
+        a = i * step
+        for ang, r in ((a - step * root / 2, r_in), (a - step * tip / 2, r_out), (a + step * tip / 2, r_out), (a + step * root / 2, r_in)):
+            pts.append((cx + r * _m.cos(_m.radians(ang)), cy + r * _m.sin(_m.radians(ang))))
+    return poly(*pts)
+
+
 def icon(iid, *layers):
     body = ',\n            '.join(layers)
     return f'        icon("{iid}",\n            {body},\n        ),'

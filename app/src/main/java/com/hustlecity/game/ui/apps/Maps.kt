@@ -1,5 +1,6 @@
 package com.hustlecity.game.ui.apps
 
+import com.hustlecity.game.ui.icons.GIcon
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -110,7 +111,7 @@ fun MapsOverlay(e: GameEngine, @Suppress("UNUSED_PARAMETER") r: Renderers) {
                     }) { f["hood:${n.id}"] = it }
                 }
                 Section("Active businesses")
-                for (t in Catalog.customerTypes) FilterRow("${t.emoji}  ${t.name}", null, f["type:${t.id}"] == true) { f["type:${t.id}"] = it }
+                for (t in Catalog.customerTypes) FilterRow(t.name, null, f["type:${t.id}"] == true, icon = t.icon) { f["type:${t.id}"] = it }
                 Spacer(Modifier.height(8.dp))
             }
             HButton("Close maps", Modifier.fillMaxWidth().padding(8.dp), color = HC.Orange) { e.ui.app = null; e.ui.selected = -1 }
@@ -124,9 +125,10 @@ private fun Section(t: String) {
 }
 
 @Composable
-private fun FilterRow(label: String, dot: Color?, on: Boolean, onGo: (() -> Unit)? = null, onChange: (Boolean) -> Unit) {
+private fun FilterRow(label: String, dot: Color?, on: Boolean, onGo: (() -> Unit)? = null, icon: String? = null, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         if (dot != null) Dot(dot, 10.dp)
+        if (icon != null) GIcon(icon, 16.dp)
         Text(label.uppercase(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1)
         if (onGo != null) Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = Color.White, modifier = Modifier.size(18.dp).clickable(onClick = onGo))
         Switch(on, onChange, colors = SwitchDefaults.colors(checkedTrackColor = HC.Green), modifier = Modifier.padding(0.dp))
