@@ -711,6 +711,15 @@ fun SettingsPanel(e: GameEngine) {
                 Chip("30 FPS (battery saver)", st.fpsCap == 30) { st.fpsCap = 30 }
                 Chip("60+ FPS", st.fpsCap == 60) { st.fpsCap = 60 }
             }
+            Text("AUDIO", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
+            VolumeRow("Radio music", st.musicVolume) { st.musicVolume = it; st.radioOn = it > 0f; st.applyAudio() }
+            VolumeRow("Sound effects", st.sfxVolume) { st.sfxVolume = it; st.applyAudio() }
+            Text("RADIO STATION", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
+            FlowRow {
+                for ((i, station) in com.hustlecity.game.audio.Audio.stations.withIndex()) {
+                    Chip(station.name, st.station == i && st.radioOn) { st.station = i; st.radioOn = true; if (st.musicVolume <= 0f) st.musicVolume = .5f; st.applyAudio() }
+                }
+            }
             ToggleRow("Show FPS counter", st.showFps) { st.showFps = it }
             ToggleRow("Pause the clock while menus are open", st.pauseInMenus) { st.pauseInMenus = it }
             ToggleRow("Left-handed controls", st.leftHanded) { st.leftHanded = it }
@@ -723,6 +732,15 @@ fun SettingsPanel(e: GameEngine) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun VolumeRow(label: String, value: Float, onChange: (Float) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = HT.body, color = HC.Ink, modifier = Modifier.width(120.dp))
+        androidx.compose.material3.Slider(value, onChange, Modifier.weight(1f))
+        Text("${(value * 100).roundToInt()}%", style = HT.small, color = HC.InkSoft, modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
     }
 }
 

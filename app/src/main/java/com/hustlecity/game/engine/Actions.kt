@@ -291,6 +291,7 @@ fun GameEngine.checkout(storeBuildingId: Int, cart: List<CartLine>, target: Chec
         }
     }
     if (category == "Furniture") state.objectivesDone += "furniture"
+    com.hustlecity.game.audio.Audio.play(com.hustlecity.game.audio.Sfx.CASH)
     bump()
     return true
 }

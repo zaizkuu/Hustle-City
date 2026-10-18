@@ -69,7 +69,7 @@ fun appIcon(id: AppId): ImageVector = when (id) {
 @Composable
 fun AppIconTile(id: AppId, size: Dp, showLabel: Boolean = true, labelColor: Color = Color.White, badge: Int = 0, onClick: () -> Unit) {
     val (top, bottom) = HC.app[id.name] ?: (HC.Blue to HC.BlueDark)
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick).padding(2.dp)) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { com.hustlecity.game.audio.Audio.play(com.hustlecity.game.audio.Sfx.TAP); onClick() }.padding(2.dp)) {
         Box {
             Box(
                 Modifier.size(size).shadow(3.dp, RoundedCornerShape(size * .26f)).clip(RoundedCornerShape(size * .26f))
@@ -123,7 +123,7 @@ fun HButton(
             .clip(RoundedCornerShape(5.dp))
             .background(Brush.verticalGradient(listOf(bg.copy(alpha = 1f), bg.darken(.88f))))
             .border(1.dp, Color.White.copy(alpha = .25f), RoundedCornerShape(5.dp))
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(enabled = enabled) { com.hustlecity.game.audio.Audio.play(com.hustlecity.game.audio.Sfx.TAP); onClick() }
             .padding(horizontal = if (small) 8.dp else 12.dp, vertical = if (small) 5.dp else 8.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -184,7 +184,7 @@ fun Chip(text: String, selected: Boolean, color: Color = HC.Blue, onClick: () ->
     Box(
         Modifier.padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(14.dp))
             .background(if (selected) color else Color(0xFFE8ECF1))
-            .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 5.dp),
+            .clickable { com.hustlecity.game.audio.Audio.play(com.hustlecity.game.audio.Sfx.TAP); onClick() }.padding(horizontal = 10.dp, vertical = 5.dp),
     ) {
         Text(text, color = if (selected) Color.White else HC.Ink, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }

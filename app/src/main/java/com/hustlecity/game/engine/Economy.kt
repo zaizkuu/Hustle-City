@@ -370,6 +370,7 @@ class Economy(private val e: GameEngine) {
             b.marketing = max(active, b.marketing * .65).let { if (it < .01) 0.0 else it }
         }
         if (sales > 0) {
+            com.hustlecity.game.audio.Audio.play(com.hustlecity.game.audio.Sfx.CASH)
             e.earn(sales, "Sales")
             s.player.totalEarned += sales
             s.objectivesDone += "collect"

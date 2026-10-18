@@ -1,6 +1,8 @@
 package com.hustlecity.game.engine
 
 import android.content.Context
+import com.hustlecity.game.audio.Audio
+import com.hustlecity.game.audio.Sfx
 import com.hustlecity.game.data.Catalog
 import com.hustlecity.game.data.PlaceKind
 import com.hustlecity.game.model.CargoItem
@@ -217,6 +219,11 @@ class GameEngine(context: Context?) {
     fun bump() { ui.tick++ }
 
     fun toast(text: String, kind: ToastKind = ToastKind.INFO) {
+        when (kind) {
+            ToastKind.GOOD -> Audio.play(Sfx.CHIME)
+            ToastKind.BAD -> Audio.play(Sfx.ERROR)
+            else -> {}
+        }
         ui.toasts += Toast(System.nanoTime(), text, kind, System.currentTimeMillis())
         while (ui.toasts.size > 4) ui.toasts.removeAt(0)
     }
@@ -341,6 +348,8 @@ class GameEngine(context: Context?) {
         }
 
         val inside = state.player.inBuilding >= 0
+        val drivingNow = state.vehicle(state.player.driving)
+        Audio.engineLevel = if (drivingNow != null && !inside && skip == null) (abs(carSpeed) / drivingNow.def.maxSpeed).coerceIn(0f, 1f) else -1f
         // the car and player hold still while a phone app, the map or a panel covers the controls
         if (!inside && skip == null && ui.app == null && ui.panel == null) updateMovement(dt)
         updateCamera(dt)
@@ -640,6 +649,7 @@ class GameEngine(context: Context?) {
         val p = state.player
         if (p.inBuilding >= 0) return
         resetInput()
+        Audio.play(Sfx.CAR_DOOR)
         p.driving = v.id
         p.x = v.x; p.y = v.y
         carSpeed = 0f
@@ -659,6 +669,7 @@ class GameEngine(context: Context?) {
         p.driving = -1
         carSpeed = 0f
         resetInput()
+        Audio.play(Sfx.CAR_DOOR)
         // step out on the driver's side, avoiding buildings
         val sx = v.x + cos(v.heading) * -2.2f
         val sy = v.y + sin(v.heading) * -2.2f
@@ -723,6 +734,7 @@ class GameEngine(context: Context?) {
         }
         p.inBuilding = b.id
         p.x = b.doorX; p.y = b.doorY
+        Audio.play(Sfx.DOOR)
         interior = InteriorScene(this, b, mode)
         ui.designer = false
         ui.phoneOpen = false
@@ -749,6 +761,7 @@ class GameEngine(context: Context?) {
     fun exitBuilding() {
         val p = state.player
         val b = city.building(p.inBuilding)
+        Audio.play(Sfx.DOOR)
         exitBuildingInternal()
         if (b != null) { p.x = b.doorX; p.y = b.doorY + if (b.facesNorth) -1f else 1f }
         bump()

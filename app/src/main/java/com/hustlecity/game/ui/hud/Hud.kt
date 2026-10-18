@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QuestionMark
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.SentimentSatisfied
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SquareFoot
 import androidx.compose.material.icons.filled.Build
@@ -83,6 +84,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hustlecity.game.audio.Audio
 import com.hustlecity.game.data.Catalog
 import com.hustlecity.game.engine.AppId
 import com.hustlecity.game.engine.BizCalc
@@ -319,6 +321,7 @@ fun PhonePanel(e: GameEngine, modifier: Modifier = Modifier) {
             PanelHeader("HustlePhone 1.0", Modifier.clickable { e.ui.phoneOpen = false }) {
                 Icon(Icons.Filled.ExpandMore, null, tint = HC.HeaderText, modifier = Modifier.size(16.dp))
             }
+            RadioWidget(e)
             val apps = AppId.entries
             Column(Modifier.padding(vertical = 4.dp)) {
                 for (row in 0 until 4) {
@@ -326,7 +329,7 @@ fun PhonePanel(e: GameEngine, modifier: Modifier = Modifier) {
                         for (col in 0 until 2) {
                             val id = apps[row * 2 + col]
                             val badge = when (id) { AppId.CONTACTS -> unread; AppId.STAFF -> candidates; else -> 0 }
-                            AppIconTile(id, 38.dp, badge = badge) { openApp(e, id) }
+                            AppIconTile(id, 34.dp, badge = badge) { openApp(e, id) }
                         }
                     }
                 }
@@ -343,6 +346,35 @@ fun openApp(e: GameEngine, id: AppId) {
     }
     if (id == AppId.BIZHUB && e.ui.bizHubSel < 0) e.ui.bizHubSel = e.state.businesses.firstOrNull()?.id ?: -1
     e.ui.app = id
+}
+
+@Composable
+private fun RadioWidget(e: GameEngine) {
+    val st = e.settings
+    val on = st.radioOn && st.musicVolume > 0f
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (on) "♪ ${Audio.stations[Audio.station].name.uppercase()}" else "RADIO OFF", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f).clickable {
+                    st.station = (Audio.station + 1) % Audio.stations.size
+                    st.radioOn = true
+                    st.applyAudio(); st.save(); e.bump()
+                },
+            )
+            Icon(
+                if (on) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, tint = Color.White,
+                modifier = Modifier.size(20.dp).clickable {
+                    st.radioOn = !on
+                    if (st.radioOn && st.musicVolume <= 0f) st.musicVolume = .5f
+                    st.applyAudio(); st.save(); e.bump()
+                },
+            )
+            Icon(Icons.Filled.SkipNext, null, tint = Color.White, modifier = Modifier.size(20.dp).clickable { Audio.nextTrack(); e.bump() })
+        }
+        Text(if (on) Audio.nowPlaying else "Tap the station name to tune in", color = Color.White.copy(alpha = .85f), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Bar(Audio.trackProgress, Color.White, Modifier.fillMaxWidth().padding(top = 3.dp), track = Color(0x44FFFFFF), height = 3.dp)
+    }
 }
 
 // ------------------------------------------------------------------ joystick & actions

@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.hustlecity.game.audio.Audio
 import com.hustlecity.game.engine.GameEngine
 import com.hustlecity.game.ui.menu.HustleCityApp
 
@@ -33,8 +34,15 @@ class MainActivity : ComponentActivity() {
         if (hasFocus) hideSystemBars()
     }
 
+    override fun onResume() {
+        super.onResume()
+        EngineHolder.current()?.settings?.applyAudio()
+        Audio.start()
+    }
+
     override fun onPause() {
         super.onPause()
+        Audio.stop()
         EngineHolder.current()?.let {
             it.settings.save()
             if (it.hasGame) it.save()

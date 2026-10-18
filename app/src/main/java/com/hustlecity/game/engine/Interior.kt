@@ -61,6 +61,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     val visitors = ArrayList<Person>()
     val staff = ArrayList<Person>()
     private var spawnAcc = 0f
+    private var lastCash = -10f
     var ghostId: String? = null
     var ghostX = 0
     var ghostY = 0
@@ -290,6 +291,10 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             1 -> {
                 v.wait = 1f
                 v.stage = 2
+                if (mode == InteriorMode.BUSINESS && e.realTime - lastCash > 2.5f) {
+                    lastCash = e.realTime
+                    com.hustlecity.game.audio.Audio.play(com.hustlecity.game.audio.Sfx.CASH)
+                }
                 v.path = bfs(here, idx(doorX, d - 1), occ) ?: IntArray(0); v.pathIdx = 0
             }
             2 -> {

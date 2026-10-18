@@ -16,6 +16,18 @@ class Settings(context: Context?) {
     var showFps by mutableStateOf(prefs?.getBoolean("showFps", false) ?: false)
     var pauseInMenus by mutableStateOf(prefs?.getBoolean("pauseInMenus", true) ?: true)
     var leftHanded by mutableStateOf(prefs?.getBoolean("leftHanded", false) ?: false)
+    var musicVolume by mutableStateOf(prefs?.getFloat("musicVolume", .55f) ?: .55f)
+    var sfxVolume by mutableStateOf(prefs?.getFloat("sfxVolume", .8f) ?: .8f)
+    var radioOn by mutableStateOf(prefs?.getBoolean("radioOn", true) ?: true)
+    var station by mutableIntStateOf(prefs?.getInt("station", 0) ?: 0)
+
+    /** Pushes the audio preferences to the mixer. */
+    fun applyAudio() {
+        com.hustlecity.game.audio.Audio.musicVolume = musicVolume
+        com.hustlecity.game.audio.Audio.sfxVolume = sfxVolume
+        com.hustlecity.game.audio.Audio.radioOn = radioOn
+        if (com.hustlecity.game.audio.Audio.station != station) com.hustlecity.game.audio.Audio.setStation(station)
+    }
 
     fun save() {
         prefs?.edit()
@@ -24,6 +36,10 @@ class Settings(context: Context?) {
             ?.putBoolean("showFps", showFps)
             ?.putBoolean("pauseInMenus", pauseInMenus)
             ?.putBoolean("leftHanded", leftHanded)
+            ?.putFloat("musicVolume", musicVolume)
+            ?.putFloat("sfxVolume", sfxVolume)
+            ?.putBoolean("radioOn", radioOn)
+            ?.putInt("station", station)
             ?.apply()
     }
 
