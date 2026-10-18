@@ -61,8 +61,15 @@ class InteriorRenderer(private val e: GameEngine) {
         for (y in 0 until sc.d) for (x in 0 until sc.w) {
             scene.groundRect(x.toFloat(), y.toFloat(), x + 1f, y + 1f, 0f, if ((x + y) % 2 == 0) scene.lit(fa, 1f) else fb)
         }
+        if (!e.ui.designer) {
+            // grout lines between the floor tiles
+            val grout = scene.withAlpha(scene.lit(scene.mix(fa, 0xFF000000.toInt(), .45f), 1f), .35f)
+            for (x in 1 until sc.w) scene.groundRect(x - .012f, 0f, x + .012f, sc.d.toFloat(), .004f, grout)
+            for (y in 1 until sc.d) scene.groundRect(0f, y - .012f, sc.w.toFloat(), y + .012f, .004f, grout)
+        }
         // entrance mat
         scene.groundRect(sc.doorX - 1f, sc.d - .9f, sc.doorX + 1f, sc.d.toFloat(), .01f, c(0xFF3B3F46))
+        scene.groundRect(sc.doorX - .9f, sc.d - .8f, sc.doorX + .9f, sc.d - .1f, .012f, c(0xFF4A505A))
         sc.business?.let { if (!e.ui.designer) drawDirt(sc, it) }
 
         if (e.ui.designer) {
@@ -159,25 +166,81 @@ class InteriorRenderer(private val e: GameEngine) {
         dType[dCount] = type; dIdx[dCount] = idx; dKey[dCount] = key; dCount++
     }
 
+    private fun trimOf(wall: Int) = scene.mix(wall, 0xFF000000.toInt(), .38f)
+
     private fun wallN(sc: InteriorScene, color: Int, h: Float) {
         scene.box(-.2f, -.2f, 0f, sc.w + .2f, 0f, h, WALL_TOP, color)
-        if (h > 1f) {
-            var x = 1.5f
-            while (x + 1.4f < sc.w - .5f) {
-                scene.quad(x, .02f, 1.1f, x + 1.4f, .02f, 1.1f, x + 1.4f, .02f, 2.5f, x, .02f, 2.5f, scene.lit(c(0xFF9FC6E6), .95f))
-                x += 3.5f
+        if (h <= 1f) return
+        val day = e.daylight()
+        val trim = trimOf(color)
+        // baseboard and crown molding
+        scene.box(0f, 0f, 0f, sc.w.toFloat(), .05f, .14f, trim, trim)
+        scene.box(0f, 0f, h - .12f, sc.w.toFloat(), .04f, h, scene.mix(color, 0xFFFFFFFF.toInt(), .3f), scene.mix(color, 0xFFFFFFFF.toInt(), .3f))
+        // framed windows with sills; daylight falls on the floor in front of them
+        val sky = scene.mix(c(0xFF1C2A3A), c(0xFF9FC6E6), day)
+        val frame = c(0xFFE9E6DF)
+        var x = 1.5f
+        while (x + 1.4f < sc.w - .5f) {
+            scene.quad(x, .02f, 1.1f, x + 1.4f, .02f, 1.1f, x + 1.4f, .02f, 2.5f, x, .02f, 2.5f, scene.lit(sky, .95f))
+            if (day > .3f) {
+                // a few buildings across the street, seen through the glass
+                scene.quad(x + .1f, .025f, 1.1f, x + .6f, .025f, 1.1f, x + .6f, .025f, 1.9f, x + .1f, .025f, 1.9f, scene.lit(c(0xFF7D8A99), .9f))
+                scene.quad(x + .7f, .025f, 1.1f, x + 1.3f, .025f, 1.1f, x + 1.3f, .025f, 1.6f, x + .7f, .025f, 1.6f, scene.lit(c(0xFF8E7F72), .9f))
             }
+            scene.box(x - .08f, 0f, 1.02f, x + 1.48f, .05f, 1.1f, frame, frame)
+            scene.box(x - .08f, 0f, 2.5f, x + 1.48f, .05f, 2.58f, frame, frame)
+            scene.box(x - .08f, 0f, 1.1f, x, .05f, 2.5f, frame, frame)
+            scene.box(x + 1.4f, 0f, 1.1f, x + 1.48f, .05f, 2.5f, frame, frame)
+            scene.box(x + .67f, 0f, 1.1f, x + .73f, .04f, 2.5f, frame, frame)
+            scene.box(x, 0f, 1.77f, x + 1.4f, .04f, 1.83f, frame, frame)
+            scene.box(x - .12f, 0f, .96f, x + 1.52f, .16f, 1.02f, frame, frame)
+            if (day > .2f) {
+                val sun = scene.withAlpha(c(0xFFFFF4D6), .16f * day)
+                scene.quad(x, 0f, .006f, x + 1.4f, 0f, .006f, x + 1.7f, 1.7f, .006f, x + .3f, 1.7f, .006f, sun)
+            }
+            x += 3.5f
         }
+        // light switch and outlets
+        scene.box(1.0f, 0f, 1.2f, 1.12f, .03f, 1.38f, c(0xFFF5F5F5), c(0xFFF5F5F5))
+        var ox = 3.2f
+        while (ox < sc.w - 1f) { scene.box(ox, 0f, .3f, ox + .1f, .03f, .42f, c(0xFFF5F5F5), c(0xFFF5F5F5)); ox += 4.5f }
     }
 
     private fun wallS(sc: InteriorScene, color: Int, h: Float) {
         scene.box(-.2f, sc.d.toFloat(), 0f, sc.doorX - 1f, sc.d + .2f, h, WALL_TOP, color)
         scene.box(sc.doorX + 1f, sc.d.toFloat(), 0f, sc.w + .2f, sc.d + .2f, h, WALL_TOP, color)
+        val trim = trimOf(color)
+        val d = sc.d.toFloat()
+        if (h > 1f) {
+            scene.box(0f, d - .05f, 0f, sc.doorX - 1f, d, .14f, trim, trim)
+            scene.box(sc.doorX + 1f, d - .05f, 0f, sc.w.toFloat(), d, .14f, trim, trim)
+            // the wall above the door, its frame and a lit exit sign
+            scene.box(sc.doorX - 1f, d, 2.45f, sc.doorX + 1f, d + .2f, h, WALL_TOP, color)
+            scene.box(sc.doorX - .35f, d - .06f, 2.55f, sc.doorX + .35f, d, 2.78f, c(0xFF27AE60), c(0xFF1E8449))
+        }
+        // door frame
+        val fh = if (h > 1f) 2.45f else h
+        scene.box(sc.doorX - 1.1f, d - .06f, 0f, sc.doorX - 1f, d + .26f, fh, trim, trim)
+        scene.box(sc.doorX + 1f, d - .06f, 0f, sc.doorX + 1.1f, d + .26f, fh, trim, trim)
+        if (h > 1f) scene.box(sc.doorX - 1.1f, d - .06f, 2.35f, sc.doorX + 1.1f, d + .26f, 2.45f, trim, trim)
     }
 
-    private fun wallW(sc: InteriorScene, color: Int, h: Float) = scene.box(-.2f, -.2f, 0f, 0f, sc.d + .2f, h, WALL_TOP, color)
+    private fun wallW(sc: InteriorScene, color: Int, h: Float) {
+        scene.box(-.2f, -.2f, 0f, 0f, sc.d + .2f, h, WALL_TOP, color)
+        if (h <= 1f) return
+        val trim = trimOf(color)
+        scene.box(0f, 0f, 0f, .05f, sc.d.toFloat(), .14f, trim, trim)
+        scene.box(0f, 0f, h - .12f, .04f, sc.d.toFloat(), h, scene.mix(color, 0xFFFFFFFF.toInt(), .3f), scene.mix(color, 0xFFFFFFFF.toInt(), .3f))
+    }
 
-    private fun wallE(sc: InteriorScene, color: Int, h: Float) = scene.box(sc.w.toFloat(), -.2f, 0f, sc.w + .2f, sc.d + .2f, h, WALL_TOP, color)
+    private fun wallE(sc: InteriorScene, color: Int, h: Float) {
+        scene.box(sc.w.toFloat(), -.2f, 0f, sc.w + .2f, sc.d + .2f, h, WALL_TOP, color)
+        if (h <= 1f) return
+        val trim = trimOf(color)
+        val w = sc.w.toFloat()
+        scene.box(w - .05f, 0f, 0f, w, sc.d.toFloat(), .14f, trim, trim)
+        scene.box(w - .04f, 0f, h - .12f, w, sc.d.toFloat(), h, scene.mix(color, 0xFFFFFFFF.toInt(), .3f), scene.mix(color, 0xFFFFFFFF.toInt(), .3f))
+    }
 
     /** Draws a furniture model at grid position (x, y) with rotation. */
     fun drawItem(def: FurnitureDef, x: Float, y: Float, rot: Int, alpha: Float) = parts.draw(def, x, y, rot, alpha)
