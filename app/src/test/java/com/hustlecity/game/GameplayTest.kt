@@ -45,10 +45,11 @@ class GameplayTest {
         // every place exists exactly where expected
         for (p in Catalog.places.map { it.id }.distinct()) assertNotNull("missing $p", city.placeBuilding(p))
         // no overlapping solid footprints
-        for (block in city.blocks) for (a in block) for (b in block) {
-            if (a.id >= b.id || !a.solid || !b.solid) continue
-            val overlap = a.minX < b.maxX - .01f && b.minX < a.maxX - .01f && a.minY < b.maxY - .01f && b.minY < a.maxY - .01f
-            assertTrue("overlap ${a.id} ${b.id}", !overlap)
+        for (a in city.buildings) {
+            if (!a.solid) continue
+            city.forBuildingsIn(a.minX, a.minY, a.maxX, a.maxY) { b ->
+                if (b.id > a.id && b.solid) assertTrue("overlap ${a.id} ${b.id}", !a.obb().overlaps(b.obb(), -.01f))
+            }
         }
         // doors are on walkable ground
         val out = FloatArray(2)

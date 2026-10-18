@@ -391,11 +391,31 @@ fun MiniMap(e: GameEngine, modifier: Modifier = Modifier) {
             fun sy(y: Float) = cyp + (y - fy) * scale
             val range = 190f
             rotate(yawDeg, Offset(cxp, cyp)) {
-                // blocks
-                drawRect(Color(0xFF8D949C), Offset(sx(-City.AV_HALF - City.SIDEWALK), sy(-City.ST_HALF - City.SIDEWALK)),
-                    Size((City.WIDTH + 2 * (City.AV_HALF + City.SIDEWALK)) * scale, (City.HEIGHT + 2 * (City.ST_HALF + City.SIDEWALK)) * scale))
-                for (b in e.city.buildings) {
-                    if (abs(b.cx - fx) > range || abs(b.cy - fy) > range) continue
+                // ground, water and parks
+                val city = e.city
+                val bnd = city.bounds
+                if (city.shore.land.isEmpty()) drawRect(Color(0xFF8D949C), Offset(sx(bnd[0]), sy(bnd[1])), Size((bnd[2] - bnd[0]) * scale, (bnd[3] - bnd[1]) * scale))
+                fun poly(pts: FloatArray, color: Color) {
+                    val bb = city.boxOf(pts)
+                    if (bb[2] < fx - range || bb[0] > fx + range || bb[3] < fy - range || bb[1] > fy + range) return
+                    val p = Path()
+                    for (k in 0 until pts.size / 2) { if (k == 0) p.moveTo(sx(pts[0]), sy(pts[1])) else p.lineTo(sx(pts[k * 2]), sy(pts[k * 2 + 1])) }
+                    p.close()
+                    drawPath(p, color)
+                }
+                for (l in city.shore.land) poly(l, Color(0xFF8D949C))
+                for (w in city.shore.water) poly(w, Color(0xFF27445C))
+                for (w in city.shore.islands) poly(w, Color(0xFF8D949C))
+                for (w in city.shore.canals) poly(w, Color(0xFF27445C))
+                for (pk in city.parks) poly(pk.poly, if (pk.kind == com.hustlecity.game.world.Park.PLAZA) Color(0xFFB4AE9E) else Color(0xFF6DA35C))
+                // roads
+                val road = Color(0xFF2B3036)
+                city.roads.forCells(fx - range, fy - range, fx + range, fy + range) { id ->
+                    val ed = city.roads.edges[id]
+                    drawLine(road, Offset(sx(ed.ax), sy(ed.ay)), Offset(sx(ed.bx), sy(ed.by)), ed.cls.halfWidth * 2f * scale, StrokeCap.Round)
+                }
+                // buildings
+                city.forBuildingsIn(fx - range, fy - range, fx + range, fy + range) { b ->
                     val col = when {
                         b.id == s.player.waypoint -> Color(0xFF2F80ED)
                         s.businessAt(b.id) != null -> Color(0xFF27AE60)
@@ -405,19 +425,10 @@ fun MiniMap(e: GameEngine, modifier: Modifier = Modifier) {
                         b.placeId != null -> Color(0xFFE0B04A)
                         else -> Color(0xFF59606B)
                     }
-                    drawRect(col, Offset(sx(b.minX), sy(b.minY)), Size(b.width * scale, b.depth * scale))
-                }
-                // roads
-                val road = Color(0xFF2B3036)
-                for (i in 0 until City.AVENUES) {
-                    val x = City.avenueX(i)
-                    if (abs(x - fx) > range + 20) continue
-                    drawRect(road, Offset(sx(x - City.AV_HALF), sy(fy - range)), Size(City.AV_HALF * 2 * scale, range * 2 * scale))
-                }
-                for (k in 0 until City.STREETS) {
-                    val y = City.streetY(k)
-                    if (abs(y - fy) > range + 20) continue
-                    drawRect(road, Offset(sx(fx - range), sy(y - City.ST_HALF)), Size(range * 2 * scale, City.ST_HALF * 2 * scale))
+                    val p = Path()
+                    p.moveTo(sx(b.wx(0f, 0f)), sy(b.wy(0f, 0f))); p.lineTo(sx(b.wx(b.w, 0f)), sy(b.wy(b.w, 0f)))
+                    p.lineTo(sx(b.wx(b.w, b.d)), sy(b.wy(b.w, b.d))); p.lineTo(sx(b.wx(0f, b.d)), sy(b.wy(0f, b.d))); p.close()
+                    drawPath(p, col)
                 }
                 // GPS route
                 val gps = e.gps

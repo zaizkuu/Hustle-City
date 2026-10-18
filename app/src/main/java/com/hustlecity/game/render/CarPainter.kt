@@ -50,8 +50,8 @@ class CarPainter(private val scene: Scene3D) {
         quadFlat(-hl - .15f, -hw - .1f, hl + .15f, hw + .1f, .03f, scene.withAlpha(0xFF000000.toInt(), .28f))
         val body = color
         scene.material = Mat.PAINT
-        val camF = (proj.camX - x) * fx + (proj.camY - y) * fy
-        val camL = (proj.camX - x) * rx + (proj.camY - y) * ry
+        val camF = (scene.camLX - x) * fx + (scene.camLY - y) * fy
+        val camL = (scene.camLX - x) * rx + (scene.camLY - y) * ry
         val nearSide = if (camL >= 0f) 1 else -1
         // far wheels and the end facing away first, so the body covers them
         wheels(len, wid, style, -nearSide)
@@ -174,7 +174,7 @@ class CarPainter(private val scene: Scene3D) {
         var cf = 0f; var cz = 0f
         for (i in 0 until n) { cf += pf[i]; cz += pzz[i] }
         cf /= n; cz /= n
-        val camX = proj.camX; val camY = proj.camY; val camZ = proj.camZ
+        val camX = scene.camLX; val camY = scene.camLY; val camZ = proj.camZ
         for (i in 0 until n) {
             val j = (i + 1) % n
             val df = pf[j] - pf[i]; val dz = pzz[j] - pzz[i]
@@ -214,7 +214,7 @@ class CarPainter(private val scene: Scene3D) {
             val sgn = if (si == 0) -1 else 1
             val l = (hw + .02f) * sgn
             val px = ox + rx * l; val py = oy + ry * l
-            if ((proj.camX - px) * rx * sgn + (proj.camY - py) * ry * sgn <= 0f) continue
+            if ((scene.camLX - px) * rx * sgn + (scene.camLY - py) * ry * sgn <= 0f) continue
             wpt(f0, l, z0, 0); wpt(f1, l, z0, 1); wpt(f1, l, z1, 2); wpt(f0, l, z1, 3)
             scene.poly(4, wx, wy, wz, scene.lit(color, scene.sideShade(rx * sgn, ry * sgn)))
         }
@@ -224,7 +224,7 @@ class CarPainter(private val scene: Scene3D) {
     private fun frontRect(f: Float, l0: Float, l1: Float, z0: Float, z1: Float, color: Int, rear: Boolean = false) {
         val sgn = if (rear) -1f else 1f
         val px = ox + fx * f; val py = oy + fy * f
-        if ((proj.camX - px) * fx * sgn + (proj.camY - py) * fy * sgn <= 0f) return
+        if ((scene.camLX - px) * fx * sgn + (scene.camLY - py) * fy * sgn <= 0f) return
         wpt(f, l0, z0, 0); wpt(f, l1, z0, 1); wpt(f, l1, z1, 2); wpt(f, l0, z1, 3)
         scene.poly(4, wx, wy, wz, scene.lit(color, max(.85f, scene.sideShade(fx * sgn, fy * sgn))))
     }
@@ -251,7 +251,7 @@ class CarPainter(private val scene: Scene3D) {
             // hub cap on the outer side
             val l = (hw + .04f) * sgn
             val px = ox + rx * l; val py = oy + ry * l
-            if ((proj.camX - px) * rx * sgn + (proj.camY - py) * ry * sgn > 0f) {
+            if ((scene.camLX - px) * rx * sgn + (scene.camLY - py) * ry * sgn > 0f) {
                 for (k in 0 until 8) wpt(af + wheelF[k] * .55f, l, r + wheelZ[k] * .55f, k)
                 scene.poly(8, wx, wy, wz, scene.lit(RIM, scene.sideShade(rx * sgn, ry * sgn)))
             }

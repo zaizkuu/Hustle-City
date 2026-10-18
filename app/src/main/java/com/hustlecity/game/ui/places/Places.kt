@@ -592,8 +592,8 @@ private fun StartBusiness(e: GameEngine, buildingId: Int) {
                         Icon(Icons.Filled.DirectionsCar, null, tint = HC.Ink, modifier = Modifier.size(14.dp)); Text(" ${b.parking}", style = HT.small, color = HC.Ink)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                        Dot(City.neighborhoods[b.neighborhood].color.toColor(), 9.dp)
-                        Text(" ${City.neighborhoods[b.neighborhood].name}", style = HT.small, color = HC.Ink)
+                        Dot(b.hood.color.toColor(), 9.dp)
+                        Text(" ${b.hood.name}", style = HT.small, color = HC.Ink)
                     }
                     Spacer(Modifier.height(8.dp))
                     Text("${b.kind.label.uppercase()} BUILDING", style = HT.label, color = HC.InkSoft)
@@ -684,7 +684,7 @@ private fun Listing(e: GameEngine, buildingId: Int) {
     Modal(b.address, { close(e) }, maxWidth = 520.dp) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
             KeyValue("Type", b.kind.label)
-            KeyValue("Neighborhood", City.neighborhoods[b.neighborhood].name)
+            KeyValue("Neighborhood", b.hood.name)
             KeyValue("Size", "${b.area} m² (${b.sizeClass})")
             if (b.kind == com.hustlecity.game.world.BKind.RETAIL) {
                 KeyValue("Traffic index", "${(b.traffic * 100).roundToInt()}%")

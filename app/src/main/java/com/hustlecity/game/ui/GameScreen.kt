@@ -310,8 +310,9 @@ private fun onPan(e: GameEngine, r: Renderers, from: Offset, to: Offset) {
     val dx = panTmp1[0] - panTmp0[0]
     val dy = panTmp1[1] - panTmp0[1]
     if (e.ui.app == AppId.MAPS) {
-        e.camera.mapX = (e.camera.mapX - dx).coerceIn(-100f, com.hustlecity.game.world.City.WIDTH + 100f)
-        e.camera.mapY = (e.camera.mapY - dy).coerceIn(-100f, com.hustlecity.game.world.City.HEIGHT + 100f)
+        val b = e.city.bounds
+        e.camera.mapX = (e.camera.mapX - dx).coerceIn(b[0] - 100f, b[2] + 100f)
+        e.camera.mapY = (e.camera.mapY - dy).coerceIn(b[1] - 100f, b[3] + 100f)
     } else {
         e.camera.panX = (e.camera.panX - dx).coerceIn(-300f, 300f)
         e.camera.panY = (e.camera.panY - dy).coerceIn(-300f, 300f)

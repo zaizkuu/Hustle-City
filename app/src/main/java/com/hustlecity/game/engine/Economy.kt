@@ -135,7 +135,7 @@ object BizCalc {
             return type.baseDemand * (.35 + .9 * b.reputation) * (1.0 + b.marketing) * type.curve[hour] * comp * e.weather.demandFactor(type)
         }
         val promo = promotion(b, building)
-        val hood = City.neighborhoods[building.neighborhood]
+        val hood = building.hood
         val wealth = if (type.wealthSensitive) hood.wealth.toDouble().pow(1.6) else 1.0
         val comp = 1.0 / (1.0 + .15 * e.economy.rivals.competitionFor(b))
         val rep = .55 + .9 * b.reputation
@@ -198,7 +198,7 @@ object BizCalc {
     fun marketPrice(e: GameEngine, b: Business, productId: String): Double {
         val p = Catalog.product(productId) ?: return 0.0
         val building = e.city.building(b.buildingId)
-        val wealth = building?.let { City.neighborhoods[it.neighborhood].wealth } ?: 1f
+        val wealth = building?.let { it.hood.wealth } ?: 1f
         return p.price * (.85 + .15 * wealth)
     }
 

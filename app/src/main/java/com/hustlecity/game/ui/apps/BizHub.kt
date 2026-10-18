@@ -179,7 +179,7 @@ private fun OverviewTab(e: GameEngine, biz: Business) {
         WhiteCard(Modifier.weight(1f)) {
             CardTitle("Building")
             KeyValue("Address", b.address)
-            KeyValue("Neighborhood", City.neighborhoods[b.neighborhood].name)
+            KeyValue("Neighborhood", b.hood.name)
             KeyValue("Size", "${b.area} m² (${b.sizeClass})")
             KeyValue("Traffic index", "${(b.traffic * 100).roundToInt()}%")
             KeyValue("Customer limit", "${b.customerLimit} per hour")

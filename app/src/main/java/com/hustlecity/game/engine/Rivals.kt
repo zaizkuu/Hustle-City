@@ -105,7 +105,7 @@ class RivalAI(private val e: GameEngine) {
 
     /** A day of trading for a rival store (or a store it is thinking about opening). */
     fun project(t: BusinessTypeDef, bld: Building, level: Int, rep: Double, pf: Double, mkt: Double, comp: Double, owned: Boolean): Day {
-        val hood = City.neighborhoods[bld.neighborhood]
+        val hood = bld.hood
         val accept = BizCalc.buyProbability(pf)
         var spend = 0.0
         var cogs = 0.0
@@ -407,7 +407,7 @@ class RivalAI(private val e: GameEngine) {
         }
         // premium chains look in wealthy areas, discounters on busy streets (with some randomness, scored once per building)
         val sample = when (r.strategy) {
-            2 -> vacant.map { it to City.neighborhoods[it.neighborhood].wealth + rnd.nextFloat() * .3f }.sortedByDescending { it.second }.take(30).map { it.first }
+            2 -> vacant.map { it to it.hood.wealth + rnd.nextFloat() * .3f }.sortedByDescending { it.second }.take(30).map { it.first }
             3 -> vacant.map { it to it.traffic + rnd.nextFloat() * .25f }.sortedByDescending { it.second }.take(30).map { it.first }
             else -> vacant.shuffled(rnd).take(30)
         }
@@ -436,13 +436,13 @@ class RivalAI(private val e: GameEngine) {
         val rb = RivalBusiness(s.newId(), r.id, bld.id, t.id, name, level = level, reputation = .5, priceFactor = basePrice(r), opened = s.day)
         s.rivalBusinesses += rb
         version++
-        note(r, "opened ${t.name} \"$name\" in ${City.neighborhoods[bld.neighborhood].name}")
+        note(r, "opened ${t.name} \"$name\" in ${bld.hood.name}")
         val near = playerNear(bld.neighborhood, t.id)
         if (near.isNotEmpty() || (t.office && s.businesses.any { it.typeId == t.id })) {
             e.message("Rival News", "${r.name} opened a ${t.name} \"$name\" at ${bld.address}" +
                 (near.firstOrNull()?.let { ", right by your ${it.name}. Expect fewer customers." } ?: ". Expect more competition for clients."))
         } else if (playerNear(bld.neighborhood).isNotEmpty()) {
-            e.message("Rival News", "${r.name} opened a ${t.name} \"$name\" at ${bld.address}, ${City.neighborhoods[bld.neighborhood].name}.", notify = false)
+            e.message("Rival News", "${r.name} opened a ${t.name} \"$name\" at ${bld.address}, ${bld.hood.name}.", notify = false)
         }
     }
 

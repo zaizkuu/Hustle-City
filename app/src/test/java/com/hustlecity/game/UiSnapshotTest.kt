@@ -410,8 +410,9 @@ class UiSnapshotTest {
         e.ui.objectivesOpen = false
         weather(e, com.hustlecity.game.model.Sky.RAIN)
         e.skyVis.rain = .5f; e.skyVis.cloud = .6f; e.skyVis.wet = .6f
-        val x = com.hustlecity.game.world.City.avenueX(2) + 14f
-        val y = com.hustlecity.game.world.City.streetY(6) + 10f
+        // on the classic grid: 3rd avenue from the west, 7th street from the north
+        val x = 314f
+        val y = 430f
         e.state.player.x = x; e.state.player.y = y
         e.camera.tx = x; e.camera.ty = y; e.camera.dist = 16f; e.camera.zoom = 16f
         e.traffic.ensure(30, 120)
