@@ -50,4 +50,8 @@ class UiState {
     var skipping by mutableStateOf(false)
     var confirm by mutableStateOf<Confirm?>(null)
     var info by mutableStateOf<Pair<String, String>?>(null)
+    /** "bankrupt" or "victory" while an ending screen is shown. */
+    var ending by mutableStateOf<String?>(null)
+    /** One-time tip (title, text). */
+    var tip by mutableStateOf<Pair<String, String>?>(null)
 }

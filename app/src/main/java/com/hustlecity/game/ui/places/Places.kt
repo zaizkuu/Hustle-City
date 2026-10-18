@@ -337,10 +337,24 @@ private fun Wholesale(e: GameEngine, buildingId: Int, place: PlaceDef) {
 
 // ------------------------------------------------------------------ car dealer
 
+private val PAINTS = listOf(0, 0xFFC0392B.toInt(), 0xFF212121.toInt(), 0xFFF2F2F2.toInt(), 0xFF1F3A93.toInt(), 0xFFF2C94C.toInt(), 0xFF27AE60.toInt(), 0xFF8E2442.toInt())
+
 @Composable
 private fun Dealer(e: GameEngine, buildingId: Int, place: PlaceDef) {
+    var paint by remember { mutableIntStateOf(0) }
     Modal(place.name, { close(e) }) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
+                Text("PAINT", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(end = 8.dp))
+                for ((i, col) in PAINTS.withIndex()) {
+                    Box(
+                        Modifier.padding(end = 6.dp).size(24.dp).clip(CircleShape).background(if (col == 0) Color(0xFFDDE2E8) else Color(col))
+                            .border(if (paint == i) 3.dp else 1.dp, if (paint == i) HC.Blue else Color(0x33000000), CircleShape).clickable { paint = i },
+                        contentAlignment = Alignment.Center,
+                    ) { if (col == 0) Text("F", fontSize = 10.sp, color = HC.Ink, fontWeight = FontWeight.Bold) }
+                }
+                Text(if (paint == 0) "Factory color" else "Custom paint (free)", style = HT.small, color = HC.InkSoft)
+            }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(Catalog.vehicles) { v ->
                     WhiteCard(Modifier.width(190.dp), padding = 8.dp) {
@@ -351,7 +365,7 @@ private fun Dealer(e: GameEngine, buildingId: Int, place: PlaceDef) {
                         KeyValue("Top speed", "${(v.maxSpeed * 3.6f).roundToInt()} km/h", bold = false)
                         KeyValue("Happiness", "+${v.happiness}", bold = false)
                         HButton("Buy", Modifier.fillMaxWidth().padding(top = 4.dp), color = HC.Green) {
-                            e.ui.confirm = Confirm("Buy a ${v.name}?", "${e.money(v.price)}. It will be parked outside.", "Buy") { e.buyVehicle(v.id, buildingId) }
+                            e.ui.confirm = Confirm("Buy a ${v.name}?", "${e.money(v.price)}. It will be parked outside.", "Buy") { e.buyVehicle(v.id, buildingId, PAINTS[paint]) }
                         }
                     }
                 }
@@ -783,6 +797,10 @@ private val HELP = listOf(
     "Money" to "Sales are collected at midnight. Rent, wages, loan payments and marketing are charged then too. The daily summary and the Finance app show where your money goes.",
     "Staff" to "Take Basic HR at Hustle Business School, then pay Apex Recruitment for a candidate search. Hire in the Staff app and schedule shifts in BizHub → Schedule. Unhappy staff (low pay, long weeks) will quit.",
     "Growing" to "Logistics Management unlocks automatic daily deliveries. Marketing Fundamentals unlocks bigger campaigns at Buzz Marketing. Import & Trade unlocks electronics and jewelry stores. Real Estate Investing lets you buy buildings. Beat the rivals in the Rivals app!",
+    "Warehouses" to "Rent a warehouse (Realty → Warehouse), open it, and fill it with pallet racks from OfficePlus Supply or Essentials Appliances. Buy 6+ boxes at a wholesaler for 10% off and deliver them there. Delivery contracts and purchasing agents use warehouse stock first, and you can load boxes into your vehicle from inside.",
+    "Headquarters" to "Rent an office and open your Headquarters with office desks. Hire HR Managers (happier staff, automatic replacements) and Purchasing Agents (each restocks 4 stores every morning) at Apex Recruitment, then assign them to HQ in BizHub → Schedule.",
+    "Winning and losing" to "Stay out of deep debt: three midnights below -\$5,000 and the bank declares you bankrupt. Reach #1 in Rivals with a \$5,000,000 net worth to own Hustle City, then keep building as long as you like.",
+    "Radio" to "Your phone has a radio with four stations. Tap the station name to switch, or change volumes in Settings.",
 )
 
 @Composable

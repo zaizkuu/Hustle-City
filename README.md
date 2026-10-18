@@ -23,10 +23,18 @@ Native Kotlin + Jetpack Compose. The 3D city is rendered with a small custom eng
 - Buy wholesale stock at Metro Wholesale, CityDistro or Global Imports, then unload it onto shelves, fridges and machines.
 - Customer simulation is driven by traffic index, marketing, hour of day, competitors, price acceptance, wait times, cleanliness, interior and staff skill.
 
+**Growing the empire**
+- **Warehouses**: rent one, fill it with pallet racks, and buy wholesale in bulk (10% off at 6+ boxes). Delivery contracts and purchasing agents use warehouse stock first, and you can load boxes into your van from inside.
+- **Headquarters**: rent an office and add desks. HR Managers make staff happier and replace anyone who quits; Purchasing Agents restock four stores each every morning.
+- Bankruptcy after three midnights deep in debt (or keep playing in sandbox mode), and a victory screen when you're #1 with a $5M net worth.
+
+**Sound**
+- A phone radio with four procedurally generated stations (Lo-fi, Pop, Jazz, Electro), plus effects for purchases, the cash register, doors, notifications and the car engine. No audio files are shipped; everything is synthesized at runtime.
+
 **Management** (on the in-game HustlePhone)
 - **BizHub** has the tabs Insight, Inventory & Pricing, Schedule, Deliveries, Marketing and Settings.
 - **Staff** lets you hire candidates from Apex Recruitment, give raises, train and fire. Unhappy staff quit.
-- **Finance** shows a daily profit chart, a cost breakdown and your loans. Hudson Bank offers three loan tiers.
+- **Finance** shows a daily operating-profit chart, a cost breakdown and your loans. Hudson Bank offers three loan tiers.
 - **Rivals** has 8 AI companies that open and close stores; your goal is to become #1.
 - **Maps** is a zoomable city map with neighborhood, business-type and for-rent filters, plus search.
 - **Persona** and **Contacts** cover your stats, education, vehicles and messages.
@@ -44,7 +52,7 @@ Native Kotlin + Jetpack Compose. The 3D city is rendered with a small custom eng
 | Select a building | Tap it |
 | Enter a building / get in a car | Context buttons at the bottom of the screen |
 
-Settings include Low/Medium/High graphics quality, a 30/60 FPS cap, an FPS counter, pausing while menus are open, and a left-handed layout.
+Settings include Low/Medium/High graphics quality, a 30/60 FPS cap, music and effects volume, the radio station, an FPS counter, pausing while menus are open, and a left-handed layout.
 
 ## Building
 
@@ -58,7 +66,7 @@ Requirements: JDK 17 or newer and the Android SDK (API 35).
 
 Every push also builds both APKs on GitHub Actions. Download them from the run's **Artifacts** section.
 
-The unit tests use Robolectric's native graphics to render the city, interiors and every main UI screen to PNG files in `app/build/snapshots/`. `BalanceReportTest` writes a per-business-type profit report to `app/build/balance.txt`.
+The unit tests use Robolectric's native graphics to render the city, interiors and every main UI screen to PNG files in `app/build/snapshots/`. `AudioTest` renders each radio station to WAV files in `app/build/audio/`. `BalanceReportTest` writes a per-business-type profit report to `app/build/balance.txt`.
 
 ## Project layout
 
@@ -68,6 +76,7 @@ app/src/main/java/com/hustlecity/game/
   model/     Serializable save state
   world/     City generator, traffic and pedestrians
   render/    Projector, triangle batcher, city / interior renderers, 3D thumbnails
+  audio/     Procedural music stations, sound effects and the audio mixer
   engine/    Game loop, economy simulation, interiors, actions, objectives, saving
   ui/        Compose HUD, phone apps, BizHub, shops, menus
 ```

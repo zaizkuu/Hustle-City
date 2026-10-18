@@ -161,6 +161,8 @@ fun PersonaApp(e: GameEngine) {
             KeyValue("Businesses", "${s.businesses.size}")
             KeyValue("Employees", "${s.employees.size}")
             KeyValue("Days in the city", "${s.day}")
+            KeyValue("Peak net worth", e.moneyShort(maxOf(s.peakNetWorth, e.netWorth())))
+            if (s.sandbox) Text("Sandbox mode", style = HT.small, color = HC.Orange)
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             WhiteCard(Modifier.fillMaxWidth()) {

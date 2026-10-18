@@ -5,6 +5,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
@@ -30,6 +31,8 @@ import com.hustlecity.game.ui.hud.ActionButtons
 import com.hustlecity.game.ui.hud.BuildingCard
 import com.hustlecity.game.ui.hud.DaySummaryCard
 import com.hustlecity.game.ui.hud.DesignerBar
+import com.hustlecity.game.ui.hud.EndingOverlay
+import com.hustlecity.game.ui.hud.TipCard
 import com.hustlecity.game.ui.hud.Dialogs
 import com.hustlecity.game.ui.hud.InteriorPanel
 import com.hustlecity.game.ui.hud.Joystick
@@ -67,7 +70,16 @@ fun GameScreen(e: GameEngine) {
                     TopBar(e)
                     if (!e.ui.designer) ObjectivesPanel(e, Modifier.padding(top = 6.dp).width(236.dp))
                 }
-                Toasts(e, Modifier.align(Alignment.TopCenter).padding(top = 56.dp))
+                // tips and toasts sit in the gap between the objectives panel and the right-hand panels
+                val leftGap = if (!e.ui.designer && e.ui.objectivesOpen) 252.dp else 8.dp
+                val rightGap = if (e.ui.phoneOpen || inside || e.ui.selected >= 0) 186.dp else 8.dp
+                Column(
+                    Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(top = 56.dp, start = leftGap, end = rightGap),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    TipCard(e)
+                    Toasts(e)
+                }
                 if (inside) {
                     if (e.ui.designer) DesignerBar(e, Modifier.align(Alignment.BottomCenter))
                     else InteriorPanel(e, Modifier.align(Alignment.TopEnd).padding(top = 58.dp, end = 8.dp))
@@ -84,6 +96,7 @@ fun GameScreen(e: GameEngine) {
         e.ui.panel?.let { PanelHost(e, it) }
         DaySummaryCard(e, Modifier.align(Alignment.Center))
         if (e.ui.skipping) SkipOverlay(e)
+        EndingOverlay(e)
         Dialogs(e)
     }
 }

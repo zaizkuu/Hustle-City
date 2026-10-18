@@ -118,7 +118,7 @@ fun BizHubApp(e: GameEngine) {
                     })
                 }
                 Text(biz.type.name.uppercase(), style = HT.label, color = HC.InkSoft, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                if (!biz.type.facility) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
                     Text(if (biz.tempClosed) "TEMPORARILY CLOSED" else "OPEN", style = HT.label, color = if (biz.tempClosed) HC.Red else HC.Green, modifier = Modifier.weight(1f))
                     Switch(!biz.tempClosed, { e.setOpen(biz, it) }, colors = SwitchDefaults.colors(checkedTrackColor = HC.Green))
                 }

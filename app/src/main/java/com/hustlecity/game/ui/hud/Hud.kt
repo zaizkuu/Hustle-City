@@ -311,8 +311,10 @@ fun PhonePanel(e: GameEngine, modifier: Modifier = Modifier) {
         }
         return
     }
+    val screenH = LocalConfiguration.current.screenHeightDp
     Column(
-        modifier.width(168.dp).shadow(6.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp)).background(Color(0xFF232830)).padding(5.dp),
+        modifier.width(168.dp).heightIn(max = (screenH - 66).dp).shadow(6.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF232830)).padding(5.dp),
     ) {
         Row(Modifier.fillMaxWidth().padding(bottom = 3.dp), horizontalArrangement = Arrangement.Center) {
             Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF6C7682)))
@@ -323,13 +325,13 @@ fun PhonePanel(e: GameEngine, modifier: Modifier = Modifier) {
             }
             RadioWidget(e)
             val apps = AppId.entries
-            Column(Modifier.padding(vertical = 4.dp)) {
+            Column(Modifier.padding(vertical = 2.dp).verticalScroll(rememberScrollState())) {
                 for (row in 0 until 4) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                         for (col in 0 until 2) {
                             val id = apps[row * 2 + col]
                             val badge = when (id) { AppId.CONTACTS -> unread; AppId.STAFF -> candidates; else -> 0 }
-                            AppIconTile(id, 34.dp, badge = badge) { openApp(e, id) }
+                            AppIconTile(id, 30.dp, badge = badge) { openApp(e, id) }
                         }
                     }
                 }
@@ -340,6 +342,7 @@ fun PhonePanel(e: GameEngine, modifier: Modifier = Modifier) {
 
 fun openApp(e: GameEngine, id: AppId) {
     if (id == AppId.MAPS) {
+        e.tip("map", "Maps", "Drag to pan and pinch to zoom. Use the filters on the right to show neighborhoods, stores for rent or rival businesses. Tap a building to set a waypoint or call a taxi.")
         val (fx, fy) = e.focusPoint()
         e.camera.mapX = fx; e.camera.mapY = fy; e.camera.mapDist = 650f
         e.ui.selected = -1
@@ -352,10 +355,11 @@ fun openApp(e: GameEngine, id: AppId) {
 private fun RadioWidget(e: GameEngine) {
     val st = e.settings
     val on = st.radioOn && st.musicVolume > 0f
-    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (on) "♪ ${Audio.stations[Audio.station].name.uppercase()}" else "RADIO OFF", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                if (on) "♪ ${Audio.stations[Audio.station].name}: ${Audio.nowPlaying}" else "♪ Radio off · tap to tune in", color = Color.White, fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).clickable {
                     st.station = (Audio.station + 1) % Audio.stations.size
                     st.radioOn = true
@@ -372,8 +376,7 @@ private fun RadioWidget(e: GameEngine) {
             )
             Icon(Icons.Filled.SkipNext, null, tint = Color.White, modifier = Modifier.size(20.dp).clickable { Audio.nextTrack(); e.bump() })
         }
-        Text(if (on) Audio.nowPlaying else "Tap the station name to tune in", color = Color.White.copy(alpha = .85f), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Bar(Audio.trackProgress, Color.White, Modifier.fillMaxWidth().padding(top = 3.dp), track = Color(0x44FFFFFF), height = 3.dp)
+        Bar(Audio.trackProgress, Color.White, Modifier.fillMaxWidth().padding(top = 2.dp), track = Color(0x44FFFFFF), height = 2.dp)
     }
 }
 
@@ -599,7 +602,10 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                     val biz = sc.business
                     HButton("Open in BizHub", full, small = true) { e.ui.bizHubSel = biz.id; e.ui.app = AppId.BIZHUB }
                     HButton("Toggle walls", full, small = true, color = HC.GlassLight) { sc.showWalls = !sc.showWalls; e.bump() }
-                    HButton("Interior designer", full, small = true, color = HC.GlassLight) { e.ui.designer = !e.ui.designer; sc.selectedIndex = -1; sc.cancelGhost(); e.bump() }
+                    HButton("Interior designer", full, small = true, color = HC.GlassLight) {
+                        e.ui.designer = !e.ui.designer; sc.selectedIndex = -1; sc.cancelGhost(); e.bump()
+                        if (e.ui.designer) e.tip("designer", "Interior designer", "Tap an item from storage, then tap the floor to position it. Rotate it and press Place. Tap placed furniture to move, rotate, store or sell it. You can also repaint the floor and walls.")
+                    }
                     if (BizCalc.isWarehouse(biz)) {
                         Text("${BizCalc.warehouseBoxesUsed(biz)} / ${BizCalc.warehouseBoxes(biz)} boxes stored", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         HButton("Load vehicle", full, small = true, color = HC.Teal) { e.ui.panel = Panel.Warehouse(biz.id) }
@@ -609,7 +615,10 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                     val biz = sc.business
                     HButton("Open in BizHub", full, small = true) { e.ui.bizHubSel = biz.id; e.ui.app = AppId.BIZHUB }
                     HButton("Toggle walls", full, small = true, color = HC.GlassLight) { sc.showWalls = !sc.showWalls; e.bump() }
-                    HButton("Interior designer", full, small = true, color = HC.GlassLight) { e.ui.designer = !e.ui.designer; sc.selectedIndex = -1; sc.cancelGhost(); e.bump() }
+                    HButton("Interior designer", full, small = true, color = HC.GlassLight) {
+                        e.ui.designer = !e.ui.designer; sc.selectedIndex = -1; sc.cancelGhost(); e.bump()
+                        if (e.ui.designer) e.tip("designer", "Interior designer", "Tap an item from storage, then tap the floor to position it. Rotate it and press Place. Tap placed furniture to move, rotate, store or sell it. You can also repaint the floor and walls.")
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(if (biz.tempClosed) "TEMPORARILY CLOSED" else "OPEN", color = if (biz.tempClosed) HC.Red else HC.GreenLight, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -626,7 +635,10 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                 InteriorMode.HOME -> {
                     HButton("Sleep", full, small = true) { e.ui.panel = Panel.Sleep }
                     HButton("Eat (${e.state.player.fridgeMeals} meals)", full, small = true, color = HC.Green) { e.eatAtHome() }
-                    HButton("Interior designer", full, small = true, color = HC.GlassLight) { e.ui.designer = !e.ui.designer; sc.selectedIndex = -1; sc.cancelGhost(); e.bump() }
+                    HButton("Interior designer", full, small = true, color = HC.GlassLight) {
+                        e.ui.designer = !e.ui.designer; sc.selectedIndex = -1; sc.cancelGhost(); e.bump()
+                        if (e.ui.designer) e.tip("designer", "Interior designer", "Tap an item from storage, then tap the floor to position it. Rotate it and press Place. Tap placed furniture to move, rotate, store or sell it. You can also repaint the floor and walls.")
+                    }
                     HButton("Toggle walls", full, small = true, color = HC.GlassLight) { sc.showWalls = !sc.showWalls; e.bump() }
                     if (unload > 0) HButton("Unload ($unload)", full, small = true, color = HC.Orange) { e.unloadHere() }
                 }
@@ -819,4 +831,69 @@ fun Dialogs(e: GameEngine) {
 fun distanceTo(e: GameEngine, x: Float, y: Float): Float {
     val (fx, fy) = e.focusPoint()
     return hypot(x - fx, y - fy)
+}
+
+// ------------------------------------------------------------------ tips & endings
+
+@Composable
+fun TipCard(e: GameEngine) {
+    val tip = e.ui.tip ?: return
+    Row(
+        Modifier.padding(bottom = 6.dp).widthIn(max = 460.dp).shadow(6.dp, RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp))
+            .background(Color(0xF22F80ED)).padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("💡", fontSize = 20.sp)
+        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+            Text(tip.first, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(tip.second, color = Color.White.copy(alpha = .92f), fontSize = 11.sp, lineHeight = 14.sp)
+        }
+        HButton("Got it", small = true, color = Color(0xFF1C64C8)) { e.ui.tip = null }
+    }
+}
+
+@Composable
+fun EndingOverlay(e: GameEngine) {
+    val kind = e.ui.ending ?: return
+    val s = e.state
+    val win = kind == "victory"
+    Box(Modifier.fillMaxSize().background(Color(0xD9101318)).clickable(enabled = false) {}, contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.padding(16.dp).widthIn(max = 520.dp).shadow(10.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp)).background(HC.Card).padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(if (win) "🏆" else "📉", fontSize = 40.sp)
+            Text(if (win) "You own Hustle City!" else "Bankrupt", style = HT.big, color = if (win) HC.Green else HC.Red)
+            Text(
+                if (win) "You're the richest entrepreneur in town, ahead of every rival. Uncle Sal is speechless."
+                else "Hudson Bank closed your accounts after three days deep in the red. Every empire has a rough start.",
+                style = HT.body, color = HC.InkSoft, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 8.dp),
+            )
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                EndStat("Days", "${s.day}")
+                EndStat("Peak net worth", e.moneyShort(maxOf(s.peakNetWorth, e.netWorth())))
+                EndStat("Total sales", e.moneyShort(s.player.totalEarned))
+                EndStat("Rank", "#${e.rank()}")
+            }
+            Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (win) {
+                    HButton("Keep building", color = HC.Green) { e.ui.ending = null; e.speedIndex = 1; e.bump() }
+                } else {
+                    HButton("New game", color = HC.Blue) { e.ui.ending = null; e.ui.screen = com.hustlecity.game.engine.Screen.NEW_GAME }
+                    HButton("Keep playing (sandbox)", color = HC.GlassLight) {
+                        s.sandbox = true; s.gameOver = false; s.debtDays = 0
+                        e.ui.ending = null; e.speedIndex = 1; e.bump()
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EndStat(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, style = HT.title, color = HC.Ink)
+        Text(label, style = HT.small, color = HC.InkSoft)
+    }
 }

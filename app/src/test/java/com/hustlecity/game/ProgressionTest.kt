@@ -150,4 +150,51 @@ class ProgressionTest {
         e.closeBusiness(biz)
         assertTrue(e.state.player.money >= money + 500)
     }
+
+    @Test
+    fun bankruptcyAfterThreeDaysAndSandbox() {
+        val e = game()
+        e.state.player.money = -20_000.0
+        runMinutes(e, 1440 * 2 + 10)
+        assertTrue(!e.state.gameOver)
+        assertTrue(e.state.messages.any { it.text.startsWith("FINAL NOTICE") })
+        runMinutes(e, 1440)
+        assertTrue(e.state.gameOver)
+        assertEquals("bankrupt", e.ui.ending)
+        // sandbox continues without further bankruptcy
+        e.state.sandbox = true; e.state.gameOver = false; e.ui.ending = null
+        runMinutes(e, 1440 * 3)
+        assertTrue(!e.state.gameOver)
+    }
+
+    @Test
+    fun recoveringResetsDebtCounter() {
+        val e = game()
+        e.state.player.money = -20_000.0
+        runMinutes(e, 1440 * 2 + 10)
+        e.state.player.money = 1000.0
+        runMinutes(e, 1440)
+        assertEquals(0, e.state.debtDays)
+        assertTrue(!e.state.gameOver)
+    }
+
+    @Test
+    fun victoryWhenRichestAndFiveMillion() {
+        val e = game()
+        for (r in e.state.rivals) { r.cash = 100_000.0; r.netWorth = 100_000.0 }
+        e.state.rivalBusinesses.clear()
+        e.state.player.money = 6_000_000.0
+        runMinutes(e, 1440)
+        assertEquals("victory", e.ui.ending)
+        assertTrue("victory" in e.state.objectivesDone)
+    }
+
+    @Test
+    fun tipsShowOnce() {
+        val e = game()
+        assertEquals("Welcome to Hustle City", e.ui.tip?.first)
+        e.ui.tip = null
+        e.tip("welcome", "x", "y")
+        assertEquals(null, e.ui.tip)
+    }
 }

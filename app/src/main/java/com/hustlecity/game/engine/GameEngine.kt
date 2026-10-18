@@ -148,7 +148,9 @@ class GameEngine(context: Context?) {
         traffic.ensure(settings.carCount, settings.pedCount)
         traffic.update(0f, camera.tx, camera.ty, 220f, -9999f, -9999f, initial = true)
         ui.screen = Screen.GAME
-        ui.app = null; ui.panel = null; ui.selected = -1; ui.summary = null; ui.designer = false; ui.phoneOpen = true
+        ui.app = null; ui.panel = null; ui.selected = -1; ui.summary = null; ui.designer = false; ui.phoneOpen = true; ui.ending = null
+        tip("welcome", "Welcome to Hustle City",
+            "Use the joystick to walk and tap any building for details. Your phone (bottom right) has every app: Realty to rent property, BizHub to run your businesses, Maps to find places. Follow Uncle Sal's objectives on the left.")
         save()
     }
 
@@ -178,6 +180,7 @@ class GameEngine(context: Context?) {
         ui.toasts.clear()
         ui.screen = Screen.GAME
         ui.app = null; ui.panel = null; ui.selected = -1; ui.summary = null; ui.designer = false; ui.phoneOpen = true
+        ui.ending = if (s.gameOver && !s.sandbox) "bankrupt" else null
         bump()
         return true
     }
@@ -398,6 +401,7 @@ class GameEngine(context: Context?) {
         economy.minute()
         if (s.minute % MINUTES_PER_DAY == 0L) {
             economy.midnight()
+            checkEndings()
             checkObjectives()
             save()
             toast("Day ${s.day - 1}, 23:59 — Auto saving…", ToastKind.SAVE)
@@ -422,6 +426,39 @@ class GameEngine(context: Context?) {
             p.hunger = (p.hunger - 100.0 / (14 * 60)).coerceAtLeast(0.0)
             if (p.energy <= 0.0 && skip == null) passOut()
         }
+    }
+
+    /** Bankruptcy after three midnights deep in debt; victory once you're #1 with $5M. */
+    private fun checkEndings() {
+        val s = state
+        val nw = netWorth()
+        if (nw > s.peakNetWorth) s.peakNetWorth = nw
+        if (!s.sandbox && !s.gameOver) {
+            if (s.player.money < -5000) {
+                s.debtDays++
+                when (s.debtDays) {
+                    1 -> message("Hudson Bank", "Your account is ${money(s.player.money)} overdrawn. Bring it above -\$5,000 within two days or we will close your accounts.")
+                    2 -> message("Hudson Bank", "FINAL NOTICE: your account is still ${money(s.player.money)} overdrawn. Tomorrow at midnight we start bankruptcy proceedings.")
+                    else -> {
+                        s.gameOver = true
+                        speedIndex = 0
+                        ui.ending = "bankrupt"
+                    }
+                }
+            } else s.debtDays = 0
+        }
+        if ("victory" !in s.objectivesDone && nw >= 5_000_000 && rank() == 1) {
+            s.objectivesDone += "victory"
+            speedIndex = 0
+            ui.ending = "victory"
+        }
+    }
+
+    /** Shows a tip the first time something happens. */
+    fun tip(id: String, title: String, text: String) {
+        if (!hasGame || "tip:$id" in state.objectivesDone) return
+        state.objectivesDone += "tip:$id"
+        ui.tip = title to text
     }
 
     fun happinessHourly() {
@@ -650,6 +687,7 @@ class GameEngine(context: Context?) {
         if (p.inBuilding >= 0) return
         resetInput()
         Audio.play(Sfx.CAR_DOOR)
+        tip("drive", "Driving", "The joystick steers: push it the way you want to go and the car turns and accelerates. Hold the red pedal to brake, and keep holding to reverse. Watch your fuel; Fuel Up stations are on the map.")
         p.driving = v.id
         p.x = v.x; p.y = v.y
         carSpeed = 0f

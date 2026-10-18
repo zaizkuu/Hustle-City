@@ -195,4 +195,76 @@ class UiSnapshotTest {
         e.interior = InteriorScene(e, home, InteriorMode.HOME)
         shoot(e, "ui_home_interior.png")
     }
+
+    @Test
+    fun tipAndRadio() {
+        val e = game()
+        shoot(e, "ui_tip_radio.png")
+    }
+
+    @Test
+    fun endingBankrupt() {
+        val e = game()
+        e.ui.tip = null
+        e.ui.ending = "bankrupt"
+        shoot(e, "ui_ending_bankrupt.png")
+    }
+
+    @Test
+    fun endingVictory() {
+        val e = game()
+        e.ui.tip = null
+        e.state.player.money = 5_400_000.0
+        e.ui.ending = "victory"
+        shoot(e, "ui_ending_victory.png")
+    }
+
+    @Test
+    fun warehouseStorage() {
+        val e = game()
+        e.ui.tip = null
+        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.WAREHOUSE }
+        e.state.rentals += Rental(b.id, b.baseRent, 1)
+        val wh = e.startBusiness(b.id, "warehouse", "Depot")!!
+        repeat(3) { wh.furniture += PlacedItem("pallet_rack", it * 2, 0, 0) }
+        wh.stock["coffee"] = 600; wh.stock["soda"] = 240; wh.stock["fresh_food"] = 90
+        e.ui.app = AppId.BIZHUB; e.ui.bizHubSel = wh.id; e.ui.bizHubTab = 1
+        shoot(e, "ui_warehouse.png")
+    }
+
+    @Test
+    fun warehouseInterior() {
+        val e = game()
+        e.ui.tip = null
+        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.WAREHOUSE }
+        e.state.rentals += Rental(b.id, b.baseRent, 1)
+        val wh = e.startBusiness(b.id, "warehouse", "Depot")!!
+        for (i in 0 until 5) wh.furniture += PlacedItem("pallet_rack", 1 + i * 3, 1, 0)
+        for (i in 0 until 5) wh.furniture += PlacedItem("pallet_rack", 1 + i * 3, 4, 0)
+        e.state.player.x = b.doorX; e.state.player.y = b.doorY
+        e.enterBuilding(b)
+        shoot(e, "ui_warehouse_interior.png")
+    }
+
+    @Test
+    fun hqTeam() {
+        val e = game()
+        e.ui.tip = null
+        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.OFFICE }
+        e.state.rentals += Rental(b.id, b.baseRent, 1)
+        val hq = e.startBusiness(b.id, "hq", "Hustle HQ")!!
+        hq.furniture += PlacedItem("office_desk", 0, 0, 0)
+        hq.furniture += PlacedItem("office_desk", 3, 0, 0)
+        e.state.employees += com.hustlecity.game.model.Employee(e.state.newId(), "Hal Brooks", com.hustlecity.game.data.StaffRole.HR_MANAGER, .6, 26.0, 26.0, 41, businessId = hq.id)
+        e.ui.app = AppId.BIZHUB; e.ui.bizHubSel = hq.id; e.ui.bizHubTab = 1
+        shoot(e, "ui_hq.png")
+    }
+
+    @Test
+    fun settingsAudio() {
+        val e = game()
+        e.ui.tip = null
+        e.ui.panel = Panel.Settings
+        shoot(e, "ui_settings.png")
+    }
 }

@@ -242,6 +242,12 @@ data class GameState(
     var nextId: Int = 1,
     var radioIndex: Int = 0,
     var skip: SkipJob? = null,
+    /** Consecutive midnights with a deep overdraft. */
+    var debtDays: Int = 0,
+    var peakNetWorth: Double = 0.0,
+    /** Bankruptcy no longer ends the game. */
+    var sandbox: Boolean = false,
+    var gameOver: Boolean = false,
 ) {
     val day: Int get() = (minute / MINUTES_PER_DAY).toInt() + 1
     val hour: Int get() = ((minute % MINUTES_PER_DAY) / 60).toInt()

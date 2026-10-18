@@ -474,12 +474,12 @@ fun GameEngine.startCampaign(biz: Business, campaignId: String, days: Int) {
     bump()
 }
 
-fun GameEngine.buyVehicle(defId: String, dealerBuildingId: Int) {
+fun GameEngine.buyVehicle(defId: String, dealerBuildingId: Int, paint: Int = 0) {
     val def = Catalog.vehicle(defId)
     if (!spend(def.price, "Vehicles")) return
     val b = city.building(dealerBuildingId) ?: return
     val (x, y) = curbSpot(b, 6f + (state.vehicles.size % 3) * 5f)
-    state.vehicles += OwnedVehicle(state.newId(), defId, x, y, (Math.PI / 2).toFloat(), fuel = 1.0, condition = 1.0, color = def.color)
+    state.vehicles += OwnedVehicle(state.newId(), defId, x, y, (Math.PI / 2).toFloat(), fuel = 1.0, condition = 1.0, color = if (paint != 0) paint else def.color)
     toast("Your new ${def.name} is parked outside!", ToastKind.GOOD)
     bump()
 }
