@@ -191,6 +191,12 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     var groundPass = false
     /** Forces the next polygons to be emissive (self-lit) on the GPU. */
     var glow = false
+    /**
+     * Building the GPU's cached city: cull against a screen widened by half a screen on every side, since the cache is
+     * drawn from nearby camera positions (moved, turned or zoomed a little) until it's rebuilt; culling to this
+     * frame's screen would leave holes at the edges.
+     */
+    var cacheBuild = false
     /** Level of detail for GPU spheres: 0 far .. 2 near. */
     var sphereDetail = 1
     /** Surface material for the GPU shaders (see [Mat]); [topMaterial] overrides it on box tops (roofs) when set. */
@@ -376,7 +382,8 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
                 if (py < minY) minY = py; if (py > maxY) maxY = py
             }
             if (behind == n) return
-            if (behind == 0 && (maxX < 0 || minX > proj.screenW || maxY < 0 || minY > proj.screenH)) return
+            val mx = if (cacheBuild) proj.screenW * .5f else 0f; val my = if (cacheBuild) proj.screenH * .5f else 0f
+            if (behind == 0 && (maxX < -mx || minX > proj.screenW + mx || maxY < -my || minY > proj.screenH + my)) return
             g.poly(streamFor(color), n, xs, ys, zs, color, isEmissive(color), materialFor(color))
             return
         }

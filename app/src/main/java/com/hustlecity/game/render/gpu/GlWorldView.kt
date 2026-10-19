@@ -277,7 +277,8 @@ class GlWorldView(
             val f = take()
             if (f.version != lastUploaded) upload(f)
             val st = f.staticGeom
-            if (st == null) { scounts.fill(0) } else if (st !== staticRef || st.version != staticVersion) uploadStatic(st)
+            // a frame without the cached city (an interior) drops it, so coming back to the street uploads it again
+            if (st == null) { scounts.fill(0); staticRef = null } else if (st !== staticRef || st.version != staticVersion) uploadStatic(st)
             // the shadow map needs a depth texture even when no shadows are drawn, since the shader samples it
             ensureShadowMap(if (f.shadowOn) f.shadowSize else if (shadowAlloc == 0) 16 else shadowAlloc)
             shadowPass(f)

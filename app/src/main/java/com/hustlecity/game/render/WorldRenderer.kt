@@ -369,7 +369,9 @@ class WorldRenderer(private val e: GameEngine) {
         scene.gpu = staticFrames[stageIdx]
         labelOut = stageLabels
         staticPass = true
+        scene.cacheBuild = true
         try { block() } finally {
+            scene.cacheBuild = false
             staticPass = false
             labelOut = labels
             scene.gpu = prevGpu
