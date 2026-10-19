@@ -54,6 +54,9 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         private val GIWA = c(0xFF3F444A)
         private val TILE_FACADE = intArrayOf(c(0xFFE8E2D6), c(0xFFD9D4CC), c(0xFFC8B8A6), c(0xFFE4DCE6), c(0xFFBFC4C9), c(0xFFF0ECE4))
         /** Neon colors the GPU renderer treats as light sources. */
+        private val SACHETS = intArrayOf(c(0xFFE53935), c(0xFFFDD835), c(0xFF1E88E5), c(0xFF43A047), c(0xFFFB8C00), c(0xFF8E24AA))
+        /** Tokyo's signs: deep, saturated tubes that stay colored when they glow. */
+        private val NEON_TOKYO = intArrayOf(c(0xFFFF2A9D), c(0xFF22D3FF), c(0xFFFFD21F), c(0xFF27F06A), c(0xFFFF4A1F), c(0xFF9B5CFF))
         private val NEON = intArrayOf(c(0xFFFF5FD8), c(0xFF5FE3FF), c(0xFFFFE680), c(0xFF2EE87A), c(0xFFFFD34D), c(0xFFFF4D4D))
         private val SIGN_DAY = intArrayOf(c(0xFFD23C6E), c(0xFF2F80ED), c(0xFFF2C94C), c(0xFF27AE60), c(0xFFE0E0E0), c(0xFFEB5757))
     }
@@ -1214,7 +1217,21 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         faceQuad(x0, y0, x1, y1, face, u0, u1, .9f, 2.1f, scene.lit(c(0xFF3A3530), shade), .05f)
         for (q in 0..5) faceQuad(x0, y0, x1, y1, face, u0 + .2f + q * .32f, u0 + .32f + q * .32f, 1.2f, 1.6f, scene.lit(AD_COLORS[(q + k) % AD_COLORS.size], shade), .06f)
         faceQuad(x0, y0, x1, y1, face, u0, u1, .85f, .95f, scene.lit(c(0xFFB0A090), shade), .3f)
+        // the grille the goods are passed through, and snack sachets hung in strips in front of it
+        val iron = scene.lit(c(0xFF2E3134), 1f)
+        var q = u0 + .12f
+        while (q < u1 - .05f) { faceQuad(x0, y0, x1, y1, face, q - .02f, q + .02f, .95f, 2.1f, iron, .08f); q += .22f }
+        faceQuad(x0, y0, x1, y1, face, u0, u1, 1.62f, 1.66f, iron, .08f)
+        for (s in 0..3) {
+            val su = u0 + .3f + s * (u1 - u0 - .6f) / 3f
+            val col = SACHETS[(k + s) % SACHETS.size]
+            for (p in 0..3) faceQuad(x0, y0, x1, y1, face, su - .09f, su + .09f, 2.05f - p * .17f - .14f, 2.05f - p * .17f, scene.lit(col, 1f), .14f)
+        }
         faceSlab(x0, y0, x1, y1, face, u0 - .3f, u1 + .3f, 2.25f, 2.35f, 0f, .9f, scene.snowy(TIN[k % TIN.size]), TIN[k % TIN.size])
+        // the soft-drink sign over the window
+        val sign = if (k % 2 == 0) c(0xFFD52B1E) else c(0xFF1F4FA0)
+        faceQuad(x0, y0, x1, y1, face, u0 - .1f, u1 + .1f, 2.45f, 2.95f, if (night) sign else scene.lit(sign, shade), .06f)
+        faceQuad(x0, y0, x1, y1, face, u0 + .25f, u1 - .25f, 2.62f, 2.78f, scene.lit(c(0xFFF7F4EC), 1f), .07f)
     }
 
     /**
@@ -1250,6 +1267,18 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
             }
         }
         if (front && floors >= 1 && len >= 3.5f) verticalSign(b, len, h, floors, near, night)
+        if (front && e.city.mapId == Maps.TOKYO) {
+            // tenant signboards stacked up the front, one per floor, under each band of windows
+            for (f in 0 until min(floors, 4)) {
+                if (hash(b.id, f, 61) % 3 == 0) continue
+                val z0 = baseZ + f * 3.2f + .9f
+                val idx = hash(b.id, f, 7) % NEON_TOKYO.size
+                if (night) scene.glow = true
+                faceQuad(x0, y0, x1, y1, face, .5f, len - .5f, z0 - .82f, z0 - .2f, if (night) NEON_TOKYO[idx] else scene.lit(SIGN_DAY[idx], shade), .07f)
+                scene.glow = false
+                if (near) faceQuad(x0, y0, x1, y1, face, len * .25f, len * .75f, z0 - .6f, z0 - .42f, if (night) c(0xFFFFF6E0) else c(0xFFF4F4F4), .08f)
+            }
+        }
     }
 
     /** A blade sign standing out from the front corner: stacked panels with characters, lit at night. */
@@ -1268,10 +1297,25 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         for (q in 0 until panels) {
             val pz0 = z0 + q * ph + .1f; val pz1 = z0 + (q + 1) * ph - .1f
             val idx = (k + q) % NEON.size
-            val col = if (night) NEON[idx] else scene.lit(SIGN_DAY[idx], 1f)
-            if (night) scene.glow = true
-            scene.quad(xs, y0 + .08f, pz0, xs, y1 - .08f, pz0, xs, y1 - .08f, pz1, xs, y0 + .08f, pz1, col)
-            scene.glow = false
+            val tokyo = e.city.mapId == Maps.TOKYO
+            val col = if (night) (if (tokyo) NEON_TOKYO[idx] else NEON[idx]) else scene.lit(SIGN_DAY[idx], 1f)
+            if (night && tokyo) {
+                // a dark panel ringed with a bright tube, so the color stays vivid against the night
+                val off = if (xs > sx) .005f else -.005f
+                scene.quad(xs, y0 + .08f, pz0, xs, y1 - .08f, pz0, xs, y1 - .08f, pz1, xs, y0 + .08f, pz1, c(0xFF15121C))
+                scene.glow = true
+                val t = .09f
+                scene.quad(xs + off, y0 + .08f, pz0, xs + off, y1 - .08f, pz0, xs + off, y1 - .08f, pz0 + t, xs + off, y0 + .08f, pz0 + t, col)
+                scene.quad(xs + off, y0 + .08f, pz1 - t, xs + off, y1 - .08f, pz1 - t, xs + off, y1 - .08f, pz1, xs + off, y0 + .08f, pz1, col)
+                scene.quad(xs + off, y0 + .08f, pz0, xs + off, y0 + .08f + t, pz0, xs + off, y0 + .08f + t, pz1, xs + off, y0 + .08f, pz1, col)
+                scene.quad(xs + off, y1 - .08f - t, pz0, xs + off, y1 - .08f, pz0, xs + off, y1 - .08f, pz1, xs + off, y1 - .08f - t, pz1, col)
+                scene.quad(xs + off, y0 + .3f, pz0 + .25f, xs + off, y1 - .3f, pz0 + .25f, xs + off, y1 - .3f, pz1 - .25f, xs + off, y0 + .3f, pz1 - .25f, scene.withAlpha(col, .55f))
+                scene.glow = false
+            } else {
+                if (night) scene.glow = true
+                scene.quad(xs, y0 + .08f, pz0, xs, y1 - .08f, pz0, xs, y1 - .08f, pz1, xs, y0 + .08f, pz1, col)
+                scene.glow = false
+            }
             if (near) {
                 // characters: white strokes down the panel
                 val white = if (night) c(0xFFFFF4D6) else c(0xFFF4F4F4)

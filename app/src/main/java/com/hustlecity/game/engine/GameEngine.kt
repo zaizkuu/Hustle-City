@@ -331,6 +331,24 @@ class GameEngine(context: Context?) {
         return 1 + state.rivals.count { it.netWorth > mine }
     }
 
+    /**
+     * How busy the pavements are around a point: busy districts and the scramble crossings draw crowds, rush hours
+     * and lunch fill the streets, and the small hours empty them.
+     */
+    fun crowdAt(x: Float, y: Float): Float {
+        val hood = city.neighborhoodAt(x, y)
+        var f = .7f + .7f * hood.traffic
+        for (l in city.landmarks) if (l.kind == com.hustlecity.game.world.Landmark.BILLBOARDS && dist(l.x, l.y, x, y) < 140f) f *= 1.5f
+        val h = if (hasGame) state.hour else 12
+        f *= when (h) {
+            in 1..5 -> .3f
+            0, 6, 23 -> .6f
+            7, 8, 12, 17, 18, 19 -> 1.2f
+            else -> 1f
+        }
+        return f.coerceIn(.25f, 1.6f)
+    }
+
     fun daylight(): Float {
         val h = state.hour + state.minuteOfHour / 60f
         return when {
@@ -406,7 +424,7 @@ class GameEngine(context: Context?) {
         crowdClock -= dt
         if (crowdClock <= 0f) {
             crowdClock = .5f
-            val f = if (hasGame) weather.pedFactor() else 1f
+            val f = if (hasGame) weather.pedFactor() * crowdAt(camera.tx, camera.ty) else 1f
             traffic.setPedTarget((settings.pedCount * f).toInt(), camera.tx, camera.ty)
             traffic.speedFactor = if (hasGame) weather.carSpeedFactor() else 1f
             traffic.hurry = if (v.rain > .3f || v.snow > .3f) 1.18f else 1f

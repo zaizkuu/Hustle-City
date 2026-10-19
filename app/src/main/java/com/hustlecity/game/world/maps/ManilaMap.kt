@@ -148,8 +148,8 @@ object ManilaMap : PlannedMap("manila", "Manila", "Manila Bay, the Pasig River, 
 
     override fun parkSpecies(park: Park, rnd: kotlin.random.Random) = if (rnd.nextFloat() < .5f) 1 else 0
 
-    // a quarter jeepneys, tricycles on the side streets, white cabs, buses and AUV vans; mostly white and silver cars
-    override val trafficMix = intArrayOf(4, 4, 4, 4, 4, 5, 5, 5, 0, 0, 0, 0, 0, 0, 1, 2, 2, 6, 7, 7)
+    // nearly a third jeepneys, tricycles on the side streets, white cabs, buses and AUV vans; mostly white and silver cars
+    override val trafficMix = intArrayOf(4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 0, 0, 0, 0, 0, 0, 1, 2, 2, 6, 7, 7)
     override val trafficPalette = intArrayOf(
         c(0xFFF2F2F2), c(0xFFE8E8E4), c(0xFFB0B7BF), c(0xFF7F8C8D), c(0xFF212121), c(0xFFC0392B), c(0xFF2C3E50),
         c(0xFF8E2442), c(0xFFCFC2A8),

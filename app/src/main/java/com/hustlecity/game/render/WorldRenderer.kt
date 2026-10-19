@@ -141,6 +141,7 @@ class WorldRenderer(private val e: GameEngine) {
         private const val STATIC = 1
         private const val DYNAMIC = 2
         const val PITCH_MAP = 62f
+        private const val TERMINAL = 31
     }
 
     private fun label(text: String, x: Float, y: Float, z: Float, k: Float, max: Float, min: Float, shift: Float, color: Int, bg: Int = 0, icon: String? = null) {
@@ -446,7 +447,10 @@ class WorldRenderer(private val e: GameEngine) {
                 }
                 6 -> drawTrafficLight(dIdx[i])
                 7 -> drawParkedCar(dIdx[i])
-                8 -> props.draw(scene, dIdx[i], dKey[i] < 55f * 55f, e.realTime)
+                8 -> {
+                    props.draw(scene, dIdx[i], dKey[i] < 55f * 55f, e.realTime)
+                    if (props.kind[dIdx[i]] == StreetProps.VENDOR && dKey[i] < 120f * 120f) vendor(dIdx[i])
+                }
                 12 -> features.draw(scene, dIdx[i], e.realTime, scene.gpu == null, mapMode, if (e.hasGame) e.state.hour else 12)
                 13 -> features.drawCar(scene, dIdx[i])
             }
@@ -564,9 +568,39 @@ class WorldRenderer(private val e: GameEngine) {
             k += 6
             if (max(x0, max(x1, x2)) < bbox[0] || min(x0, min(x1, x2)) > bbox[2] || max(y0, max(y1, y2)) < bbox[1] || min(y0, min(y1, y2)) > bbox[3]) continue
             gx[0] = x0; gy[0] = y0; gx[1] = x1; gy[1] = y1; gx[2] = x2; gy[2] = y2
-            gz[0] = z; gz[1] = z; gz[2] = z
-            scene.poly(3, gx, gy, gz, color)
+            var n = 3
+            // big land and water triangles are cut down to the view, so none reach far behind the camera
+            if (min(x0, min(x1, x2)) < bbox[0] || max(x0, max(x1, x2)) > bbox[2] || min(y0, min(y1, y2)) < bbox[1] || max(y0, max(y1, y2)) > bbox[3]) {
+                n = clipToView(n)
+                if (n < 3) continue
+            }
+            for (i in 0 until n) gz[i] = z
+            scene.poly(n, gx, gy, gz, color)
         }
+    }
+
+    private val cx2 = FloatArray(16); private val cy2 = FloatArray(16)
+
+    /** Clips the polygon in gx/gy (n points) to the view box, in place; returns the new point count. */
+    private fun clipToView(n0: Int): Int {
+        var n = n0
+        for (side in 0 until 4) {
+            var m = 0
+            for (i in 0 until n) {
+                val j = if (i + 1 < n) i + 1 else 0
+                val ai = when (side) { 0 -> gx[i] - bbox[0]; 1 -> bbox[2] - gx[i]; 2 -> gy[i] - bbox[1]; else -> bbox[3] - gy[i] }
+                val aj = when (side) { 0 -> gx[j] - bbox[0]; 1 -> bbox[2] - gx[j]; 2 -> gy[j] - bbox[1]; else -> bbox[3] - gy[j] }
+                if (ai >= 0f && m < 15) { cx2[m] = gx[i]; cy2[m] = gy[i]; m++ }
+                if ((ai >= 0f) != (aj >= 0f) && m < 15) {
+                    val t = ai / (ai - aj)
+                    cx2[m] = gx[i] + (gx[j] - gx[i]) * t; cy2[m] = gy[i] + (gy[j] - gy[i]) * t; m++
+                }
+            }
+            for (i in 0 until m) { gx[i] = cx2[i]; gy[i] = cy2[i] }
+            n = m
+            if (n < 3) return n
+        }
+        return n
     }
 
     /** A flat strip along a road piece, [o0]..[o1] meters to the left of a→b, from [s0] to [s1] along it. */
@@ -1093,6 +1127,10 @@ class WorldRenderer(private val e: GameEngine) {
             if (b.kind == BKind.PARK) return@forBuildingsIn
             if (b.kind == BKind.PARKING) {
                 if (!mapMode && proj.dist < 300) {
+                    if (city.mapId == com.hustlecity.game.world.Maps.MANILA && max(b.w, b.d) > 14f && min(b.w, b.d) > 9f) {
+                        if (stat) add(7, b.id * 32 + TERMINAL, keyForRect(b))
+                        return@forBuildingsIn
+                    }
                     val slots = ((b.w - 4f) / 2.8f).toInt()
                     if (stat) for (sIdx in 0 until min(slots, 12)) if ((b.id * 31 + sIdx * 17) % 10 < 6) {
                         add(7, b.id * 32 + sIdx, keyFor(b.wx(4.4f + sIdx * 2.8f, 3.5f), b.wy(4.4f + sIdx * 2.8f, 3.5f)))
@@ -1272,12 +1310,103 @@ class WorldRenderer(private val e: GameEngine) {
     private fun drawParkedCar(code: Int) {
         val b = e.city.buildings[code / 32]
         val slot = code % 32
+        if (slot == TERMINAL) { terminal(b); return }
         val x = 4.4f + slot * 2.8f
         val top = slot % 2 == 0
         val y = if (top) 3.5f else b.d - 3.5f
         val color = intArrayOf(c(0xFFC0392B), c(0xFFE0E0E0), c(0xFF2C3E50), c(0xFF7F8C8D), c(0xFF1F3A93), c(0xFF212121))[(b.id + slot) % 6]
         scene.setFrame(b.ox, b.oy, b.cs, b.sn)
         try { drawCar(x, y, 0f, 4.3f, 1.85f, 1.45f, color, if ((b.id + slot) % 5 == 0) 1 else 0, false) } finally { scene.clearFrame() }
+    }
+
+    private val tqU = FloatArray(40); private val tqV = FloatArray(40); private val tqD = FloatArray(40); private val tqI = IntArray(40)
+
+    /**
+     * A Manila lot as a jeepney terminal: jeepneys in their liveries queued nose to tail in lanes along the lot,
+     * and a tin-roofed waiting shed down one side with the riders lined up under it.
+     */
+    private fun terminal(b: Building) {
+        val alongX = b.w >= b.d
+        val len = if (alongX) b.w else b.d; val wid = if (alongX) b.d else b.w
+        fun lx(u: Float, v: Float) = if (alongX) u else v
+        fun ly(u: Float, v: Float) = if (alongX) v else u
+        val heading = if (alongX) PI.toFloat() / 2 else PI.toFloat()
+        val liv = e.city.map.livery(4)!!
+        val lanes = ((wid - 4.6f) / 3.2f).toInt().coerceIn(1, 4)
+        val per = ((len - 5f) / 7.2f).toInt().coerceIn(1, 10)
+        scene.setFrame(b.ox, b.oy, b.cs, b.sn)
+        try {
+            val camU = if (alongX) scene.camLX else scene.camLY
+            val camV = if (alongX) scene.camLY else scene.camLX
+            var n = 0
+            for (l in 0 until lanes) for (k in 0 until per) {
+                if ((b.id * 13 + l * 7 + k * 5) % 10 >= 8 || n >= tqU.size) continue
+                tqU[n] = 4.2f + k * 7.2f; tqV[n] = 2f + l * 3.2f
+                tqD[n] = (tqU[n] - camU) * (tqU[n] - camU) + (tqV[n] - camV) * (tqV[n] - camV); tqI[n] = l * 16 + k; n++
+            }
+            // farthest first, so they overlap properly on the software renderer
+            for (i in 1 until n) {
+                val d = tqD[i]; val u = tqU[i]; val v = tqV[i]; val id = tqI[i]; var j = i - 1
+                while (j >= 0 && tqD[j] < d) { tqD[j + 1] = tqD[j]; tqU[j + 1] = tqU[j]; tqV[j + 1] = tqV[j]; tqI[j + 1] = tqI[j]; j-- }
+                tqD[j + 1] = d; tqU[j + 1] = u; tqV[j + 1] = v; tqI[j + 1] = id
+            }
+            val shedV0 = wid - 3.4f; val shedV1 = wid - .4f
+            val shedFirst = camV < shedV0
+            if (shedFirst) terminalShed(b, len, shedV0, shedV1, ::lx, ::ly)
+            for (i in 0 until n) {
+                val p = ((b.id * 7 + tqI[i] * 3) % (liv.size / 2)) * 2
+                drawCar(lx(tqU[i], tqV[i]), ly(tqU[i], tqV[i]), heading, 6.2f, 2.05f, 2.3f, liv[p], 4, false, accent = liv[p + 1])
+            }
+            if (!shedFirst) terminalShed(b, len, shedV0, shedV1, ::lx, ::ly)
+        } finally { scene.clearFrame() }
+    }
+
+    private fun terminalShed(b: Building, len: Float, v0: Float, v1: Float, lx: (Float, Float) -> Float, ly: (Float, Float) -> Float) {
+        val post = c(0xFF4E5358)
+        val tin = scene.snowy(c(0xFF9AA0A6))
+        val u0 = 1.5f; val u1 = len - 1.5f
+        // riders queue under the roof (drawn first so the roof covers them from above)
+        if (keyFor(b.cx, b.cy) < 110f * 110f) {
+            val riders = ((u1 - u0) / 1.5f).toInt().coerceIn(2, 12)
+            val face = atan2(-b.cs, b.sn)
+            scene.clearFrame()
+            for (k in 0 until riders) {
+                val sit = k % 3 == 0
+                val u = u0 + .8f + k * (u1 - u0 - 1.6f) / riders
+                val v = if (sit) v1 - .55f else v0 + .9f
+                val px = lx(u, v); val py = ly(u, v)
+                people.draw(b.wx(px, py), b.wy(px, py), if (sit) .5f else 0f, face, 0f, 0f, SHIRT_COLORS[(b.id + k * 3) % SHIRT_COLORS.size],
+                    PersonPainter.PANTS[(b.id + k) % PersonPainter.PANTS.size], SKIN_TONES[(k * 5 + 1) % 4 + 1], PersonPainter.HAIR[k % 3],
+                    pose = if (sit) Pose.SIT else Pose.STAND, umbrella = if (!sit && e.skyVis.rain > .3f && k % 2 == 0) PersonPainter.UMBRELLAS[k % 6] else 0)
+            }
+            scene.setFrame(b.ox, b.oy, b.cs, b.sn)
+        }
+        var u = u0
+        while (u <= u1 + .01f) {
+            for (v in floatArrayOf(v0 + .15f, v1 - .15f)) {
+                val px = lx(u, v); val py = ly(u, v)
+                scene.box(px - .08f, py - .08f, 0f, px + .08f, py + .08f, 2.9f, post, post)
+            }
+            u += ((u1 - u0) / ((u1 - u0) / 5f).toInt().coerceAtLeast(1)).coerceAtLeast(1f)
+        }
+        val ax = lx(u0 - .3f, v0 - .4f); val ay = ly(u0 - .3f, v0 - .4f)
+        val bx = lx(u1 + .3f, v0 - .4f); val by = ly(u1 + .3f, v0 - .4f)
+        val cx = lx(u1 + .3f, v1 + .3f); val cy = ly(u1 + .3f, v1 + .3f)
+        val dx = lx(u0 - .3f, v1 + .3f); val dy = ly(u0 - .3f, v1 + .3f)
+        scene.quad(ax, ay, 2.85f, bx, by, 2.85f, cx, cy, 3.15f, dx, dy, 3.15f, tin)
+        // the bench along the back, and a yellow route board at the head of the queue
+        val sx0 = lx(u0 + .5f, v1 - .75f); val sy0 = ly(u0 + .5f, v1 - .75f); val sx1 = lx(u1 - .5f, v1 - .35f); val sy1 = ly(u1 - .5f, v1 - .35f)
+        scene.box(min(sx0, sx1), min(sy0, sy1), .42f, max(sx0, sx1), max(sy0, sy1), .5f, c(0xFF8C939B), c(0xFF6E757C))
+        val rx = lx(u1 - .2f, v0 + .2f); val ry = ly(u1 - .2f, v0 + .2f)
+        scene.box(rx - .6f, ry - .6f, 2.2f, rx + .6f, ry + .6f, 2.8f, c(0xFFF2C230), c(0xFFF2C230))
+    }
+
+    /** The cook behind a street food cart, facing the street. */
+    private fun vendor(i: Int) {
+        val pr = props
+        val x = pr.x[i] - pr.dirX[i] * .95f; val y = pr.y[i] - pr.dirY[i] * .95f
+        people.draw(x, y, 0f, atan2(pr.dirX[i], -pr.dirY[i]), 0f, 0f, SHIRT_COLORS[(i * 3) % SHIRT_COLORS.size], PersonPainter.PANTS[i % 3],
+            SKIN_TONES[(i % 3) + 1], PersonPainter.HAIR[i % 3], apron = c(0xFFF4F4F0))
     }
 
     private fun drawPed(a: com.hustlecity.game.world.Agent, i: Int) {

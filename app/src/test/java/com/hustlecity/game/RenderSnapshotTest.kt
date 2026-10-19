@@ -325,6 +325,46 @@ class RenderSnapshotTest {
         renderWorld(e, "feat_tokyo_map.png")
     }
 
+    /** Each city's own street dressing: Manila's poles, carts and jeepney terminals; Tokyo's vending machines and lantern alleys. */
+    @Test
+    fun cityDressing() {
+        fun props(e: GameEngine) = com.hustlecity.game.render.StreetProps(e.city)
+        // somewhere well inside the playable city
+        fun inside(e: GameEngine, pr: com.hustlecity.game.render.StreetProps, i: Int): Boolean {
+            val b = e.city.bounds
+            return pr.x[i] in b[0] + 150f..b[2] - 150f && pr.y[i] in b[1] + 150f..b[3] - 150f
+        }
+        run {
+            val e = GameEngine(null)
+            e.newGame("Tester", 1, 0, 1, mapId = "manila")
+            val pr = props(e)
+            val cart = (0 until pr.count).first { pr.kind[it] == com.hustlecity.game.render.StreetProps.VENDOR && inside(e, pr, it) }
+            shoot(e, pr.x[cart], pr.y[cart], 34f, .6f, 11, "dress_manila_cart.png")
+            val pole = (0 until pr.count).filter { pr.kind[it] == com.hustlecity.game.render.StreetProps.UTIL_POLE && pr.link[it] >= 0 && pr.aux[it] > 0f }[7]
+            shoot(e, pr.x[pole], pr.y[pole], 48f, 1.2f, 16, "dress_manila_wires.png")
+            shoot(e, pr.x[pole], pr.y[pole], 48f, 1.2f, 21, "dress_manila_wires_night.png")
+            val lot = e.city.buildings.filter { it.kind == BKind.PARKING && it.w > 16f }.maxByOrNull { it.w * it.d }
+            if (lot != null) shoot(e, lot.cx, lot.cy, 60f, .4f, 9, "dress_manila_terminal.png")
+            val house = e.city.buildings.first { it.kind == BKind.RESIDENTIAL && it.hood.look == com.hustlecity.game.world.Look.TROPICAL && it.height < 12f && it.w > 7f }
+            shoot(e, house.doorX, house.doorY, 22f, kotlin.math.atan2(house.frontX, house.frontY) + .5f, 15, "dress_manila_sarisari.png")
+        }
+        run {
+            val e = GameEngine(null)
+            e.newGame("Tester", 1, 0, 1, mapId = "tokyo")
+            e.state.weather.clear(); e.state.weather += com.hustlecity.game.model.WeatherSpan(0L, 1L shl 40, com.hustlecity.game.model.Sky.CLEAR)
+            val pr = props(e)
+            val vm = (0 until pr.count).first { pr.kind[it] == com.hustlecity.game.render.StreetProps.VENDING && inside(e, pr, it) }
+            shoot(e, pr.x[vm], pr.y[vm], 22f, .8f, 14, "dress_tokyo_vending.png")
+            shoot(e, pr.x[vm], pr.y[vm], 22f, .8f, 21, "dress_tokyo_vending_night.png")
+            val ln = (0 until pr.count).filter { pr.kind[it] == com.hustlecity.game.render.StreetProps.LANTERNS }
+            val mid = ln[ln.size / 2]
+            shoot(e, pr.x[mid], pr.y[mid], 40f, 2.4f, 21, "dress_tokyo_yokocho_night.png")
+            shoot(e, pr.x[mid], pr.y[mid], 40f, 2.4f, 13, "dress_tokyo_yokocho.png")
+            val pencil = e.city.buildings.first { it.hood.look == com.hustlecity.game.world.Look.DENSE_ASIA && it.height > 18f && it.cx in 300f..e.city.bounds[2] - 300f }
+            shoot(e, pencil.doorX, pencil.doorY, 70f, kotlin.math.atan2(pencil.frontX, pencil.frontY) + .5f, 21, "dress_tokyo_neon_night.png")
+        }
+    }
+
     @Test
     fun mapMode() {
         val e = engine()
