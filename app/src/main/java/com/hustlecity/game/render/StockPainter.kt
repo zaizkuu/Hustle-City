@@ -40,11 +40,14 @@ class StockPainter(private val scene: Scene3D, private val parts: PartSorter) {
     fun draw(def: FurnitureDef, p: PlacedItem, index: Int, shelf: ShelfStock, lay: StockLayout, alpha: Float) {
         this.def = def; px = p.x.toFloat(); py = p.y.toFloat(); rot = p.rot
         parts.begin()
-        for ((k, part) in def.parts.withIndex()) {
+        val model = def.parts
+        for (k in model.indices) {
             if (k < 64 && (lay.hideMask ushr k) and 1L == 1L) continue
+            val part = model[k]
             box(part.x0, part.y0, part.z0, part.x1, part.y1, part.z1, part.color)
         }
-        for (part in lay.shell) box(part.x0, part.y0, part.z0, part.x1, part.y1, part.z1, part.color)
+        val shell = lay.shell
+        for (k in shell.indices) { val part = shell[k]; box(part.x0, part.y0, part.z0, part.x1, part.y1, part.z1, part.color) }
         val slots = shelf.slots(index)
         val ages = shelf.ages(index)
         if (slots != null && ages != null) {
@@ -54,8 +57,27 @@ class StockPainter(private val scene: Scene3D, private val parts: PartSorter) {
                 item(lay, s, pid, ages[s], boxed)
             }
         }
-        for (g in lay.glass) box(g.x0, g.y0, g.z0, g.x1, g.y1, g.z1, scene.withAlpha(StockLayouts.GLASS, .26f))
+        val glass = lay.glass
+        for (k in glass.indices) { val g = glass[k]; box(g.x0, g.y0, g.z0, g.x1, g.y1, g.z1, scene.withAlpha(StockLayouts.GLASS, .26f)) }
         parts.end(alpha)
+    }
+
+    /**
+     * Where slot [slot] of a placed display is in the room: out = (x, y, z) of the middle of its item, turned with
+     * the display. Used to send an item from the shelf to a customer's hands.
+     */
+    fun slotWorld(def: FurnitureDef, p: PlacedItem, lay: StockLayout, slot: Int, out: FloatArray) {
+        lay.slotCenter(slot, pt)
+        val row = lay.row(slot)
+        val w = def.w.toFloat(); val d = def.d.toFloat()
+        val ax = pt[0]; val ay = pt[1]
+        when (p.rot % 4) {
+            0 -> { out[0] = p.x + ax; out[1] = p.y + ay }
+            1 -> { out[0] = p.x + d - ay; out[1] = p.y + ax }
+            2 -> { out[0] = p.x + w - ax; out[1] = p.y + d - ay }
+            else -> { out[0] = p.x + ay; out[1] = p.y + w - ax }
+        }
+        out[2] = if (row.hang) pt[2] - .4f else pt[2] + .06f
     }
 
     /** True when the display is so small on screen that single products wouldn't show (one block per run instead). */
@@ -180,8 +202,23 @@ class StockPainter(private val scene: Scene3D, private val parts: PartSorter) {
                 cbox(cx, cy, min(cw * .7f, .13f), .05f, z + .1f, z + .17f, color, scene.mix(color, 0xFF000000.toInt(), .3f))
             }
             StockShape.JEWEL -> {
-                cbox(cx, cy, min(cw * .75f, .08f), min(cd * .75f, .08f), z, z + .025f, VELVET)
-                cbox(cx, cy, .035f, .035f, z + .025f, z + .05f, color, scene.mix(color, 0xFFFFFFFF.toInt(), .35f))
+                // on a velvet pad: a ring with its stone, a necklace laid out flat, or a watch on its band
+                cbox(cx, cy, min(cw * .8f, .11f), min(cd * .8f, .11f), z, z + .025f, VELVET)
+                val shine = scene.mix(color, 0xFFFFFFFF.toInt(), .45f)
+                when (pid) {
+                    "ring" -> {
+                        cbox(cx, cy, .05f, .05f, z + .025f, z + .05f, GOLD, shine)
+                        cbox(cx, cy, .025f, .025f, z + .05f, z + .07f, c(0xFF8FE3FF), c(0xFFE8FBFF))
+                    }
+                    "necklace" -> {
+                        cbox(cx, cy - .025f, .08f, .014f, z + .025f, z + .035f, color, shine)
+                        cbox(cx, cy + .015f, .03f, .03f, z + .025f, z + .045f, c(0xFF2F80ED), c(0xFF8FC7FF))
+                    }
+                    else -> {
+                        cbox(cx, cy, .03f, .09f, z + .025f, z + .04f, c(0xFF3A3A3A))
+                        cbox(cx, cy, .05f, .05f, z + .025f, z + .055f, color, c(0xFF1C2A3A))
+                    }
+                }
             }
             StockShape.GLASS -> cbox(cx, cy, min(cw * .62f, .07f), min(cd * .5f, .07f), z, z + min(h * .5f, .13f), color, if (pid == "draft_beer") WHITE else color)
             else -> cbox(cx, cy, min(cw * .8f, .15f), min(cd * .8f, .12f), z, z + min(h * .75f, .2f), color, scene.mix(color, 0xFFFFFFFF.toInt(), .25f))

@@ -150,6 +150,9 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     /** What your store's displays visibly hold (null outside your own businesses). */
     val shelf: ShelfStock? = business?.let { ShelfStock(this, it) }
 
+    /** True while the player carries a box from the back room to a display (drawn in their arms). */
+    var playerBox = false
+
     init {
         when {
             mode == InteriorMode.HOME -> { w = building.gridW.coerceAtLeast(7); d = building.gridD.coerceAtLeast(6) }
@@ -235,7 +238,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         val def = Catalog.item(itemId) ?: return false
         val (fw, fd) = itemDims(def, rot)
         if (x < 0 || y < 0 || x + fw > w || y + fd > d) return false
-        if (backRoom?.problem(def, x, y, fw, fd) != null) return false
+        if (backRoom?.problem(def, x, y, fw, fd, rot) != null) return false
         val occ = occupancy(ignore)
         for (yy in y until y + fd) for (xx in x until x + fw) {
             if (occ[yy * w + xx] || isDoorTile(xx, yy)) return false
@@ -248,8 +251,31 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         val room = backRoom ?: return null
         val def = Catalog.item(itemId) ?: return null
         val (fw, fd) = itemDims(def, rot)
-        return room.problem(def, x, y, fw, fd)
+        return room.problem(def, x, y, fw, fd, rot)
     }
+
+    /** Why the item being placed can't go where it is, or null when it fits. */
+    val ghostProblem: String?
+        get() {
+            val id = ghostId ?: return null
+            if (ghostValid) return null
+            return backRoomProblem(id, ghostX, ghostY, ghostRot) ?: "Blocked"
+        }
+
+    /** A friendly hint about where the item being placed belongs (it can still go here), or null. */
+    val ghostHint: String?
+        get() {
+            val room = backRoom ?: return null
+            val def = Catalog.item(ghostId ?: return null) ?: return null
+            if (!ghostValid) return null
+            val inside = room.contains(ghostY)
+            return when {
+                def.fn == ItemFn.STORAGE && !inside -> "Storage shelves belong in the back room, out of the customers' way"
+                def.fn == ItemFn.CLEANING && !inside -> "Cleaning stations belong in the back room: cleaners wait there between jobs"
+                inside -> "In the back room: staff only"
+                else -> null
+            }
+        }
 
     fun itemAt(x: Int, y: Int): Int {
         for ((i, p) in items.withIndex()) {
@@ -368,7 +394,19 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             playerHeading = kotlin.math.atan2(p.x + fw / 2f - px, -(p.y + fd / 2f - py))
             then?.invoke()
         }
-        if (ppath.isEmpty()) { onArrive?.invoke(); onArrive = null }
+        // already there: run it now (it may start the next walk, so clear the hook first)
+        if (ppath.isEmpty()) { val f = onArrive; onArrive = null; f?.invoke() }
+    }
+
+    /** Index of the storage shelf nearest the player, or -1 when there is none. */
+    fun storageShelfFor(): Int {
+        var best = -1; var bestD = Float.MAX_VALUE
+        for ((i, p) in items.withIndex()) {
+            if (Catalog.item(p.itemId)?.fn != ItemFn.STORAGE) continue
+            val dd = abs(p.x + .5f - px) + abs(p.y + .5f - py)
+            if (dd < bestD) { bestD = dd; best = i }
+        }
+        return best
     }
 
     /** True when the player stands next to item [index] (close enough to pick it up or pay). */
@@ -478,12 +516,15 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         return occ
     }
 
+    private var custOcc = BooleanArray(0)
+
     /** Where customers may walk: [walkOcc] with the staff-only back room closed off. */
     private fun customerOcc(base: BooleanArray): BooleanArray {
         val room = backRoom ?: return base
-        val occ = base.copyOf()
-        for (i in 0 until room.depth * w) occ[i] = true
-        return occ
+        if (custOcc.size != base.size) custOcc = BooleanArray(base.size)
+        System.arraycopy(base, 0, custOcc, 0, base.size)
+        for (i in 0 until (room.depth * w).coerceAtMost(base.size)) custOcc[i] = true
+        return custOcc
     }
 
     private fun itemsWith(tag: String) = items.withIndex().filter { Catalog.item(it.value.itemId)?.tags?.contains(tag) == true }
@@ -917,7 +958,9 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             else -> {}
         }
         staffById.keys.retainAll(posts.keys)
-        runs.entries.removeAll { (k, r) -> (k !in posts || r.display !in items.indices).also { gone -> if (gone) shelf?.release(r.display) } }
+        runs.entries.removeAll { (k, r) ->
+            (k !in posts || r.display !in items.indices).also { gone -> if (gone) { shelf?.release(r.display); staffById[k]?.carry = 0 } }
+        }
         for ((key, post) in posts) {
             val (shirt, skin) = looks[key]!!
             val p = staffById.getOrPut(key) {
@@ -988,10 +1031,17 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         when (r.stage) {
             0 -> { r.stage = 1; r.t = 0f } // at the box
             1 -> { r.t += dt; if (r.t > .7f) { r.stage = 2; p.carry = 1 } } // picked it up: off to the display
-            2 -> { shelf?.release(r.display); p.carry = 0; r.stage = 3; r.t = 0f } // unpacking: the items fill in
-            else -> { r.t += dt; if (r.t > 1.4f) runs.remove(key) }
+            2 -> { shelf?.release(r.display); r.stage = 3; r.t = 0f } // unpacking: the items fill in
+            else -> {
+                r.t += dt
+                // the box is empty once the display has filled in
+                if (r.t > 1.0f && shelf?.filling(r.display) != true || r.t > 4f) { p.carry = 0; runs.remove(key) }
+            }
         }
     }
+
+    /** Staff members bringing stock to a display right now (for tests and the HUD). */
+    val restockRuns: Int get() = runs.size
 
     /** Where staff stand to take a box off a storage shelf. */
     private fun storageSpot(occ: BooleanArray): Int? {

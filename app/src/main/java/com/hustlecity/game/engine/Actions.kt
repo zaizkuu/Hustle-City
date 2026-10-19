@@ -101,6 +101,8 @@ fun GameEngine.startBusiness(buildingId: Int, typeId: String, name: String): Bus
     if (type.office) { biz.openHour = 8; biz.closeHour = if (type.id == "travel") 21 else 19 }
     if (type.facility) { biz.tempClosed = false; biz.openHour = 0; biz.closeHour = 0 }
     state.businesses += biz
+    // shops, food and services come with a staff-only back room at the back, if the unit is deep enough
+    BackRoom.resolve(biz, b.gridW, b.gridD)
     ui.bizHubSel = biz.id
     if (state.player.inBuilding == buildingId) interior = InteriorScene(this, b, InteriorMode.BUSINESS)
     message("Uncle Sal", when (type.id) {
@@ -384,7 +386,7 @@ fun GameEngine.storageList(): MutableList<String>? {
 fun GameEngine.commitGhost(): Boolean {
     val sc = interior ?: return false
     val id = sc.ghostId ?: return false
-    if (!sc.ghostValid) { toast("Can't place it there", ToastKind.BAD); return false }
+    if (!sc.ghostValid) { toast(sc.ghostProblem?.takeIf { it != "Blocked" } ?: "Can't place it there", ToastKind.BAD); return false }
     if (sc.movingIndex >= 0) {
         val p = sc.items[sc.movingIndex]
         p.x = sc.ghostX; p.y = sc.ghostY; p.rot = sc.ghostRot

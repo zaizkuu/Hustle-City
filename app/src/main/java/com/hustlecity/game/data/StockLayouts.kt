@@ -42,11 +42,16 @@ class StockRow(
 )
 
 /**
- * How a display shows what it holds. [rows] are its levels of product slots (listed top first; the front row of each
- * level fills first). [hide] lists the model's own placeholder goods (part indices) that real stock replaces, and its
- * solid parts that [shell] rebuilds hollow so you can see inside. [glass] is drawn see-through over the goods.
+ * How a display shows what it holds. [rows] are its levels of product slots (listed top first). [hide] lists the
+ * model's own placeholder goods (part indices) that real stock replaces, and its solid parts that [shell] rebuilds
+ * hollow so you can see inside. [glass] is drawn see-through over the goods. Products fill a display a little
+ * irregularly, every level at once and the front row first, so a half-sold display looks picked over everywhere;
+ * [stacked] displays (boxes on storage shelves and pallet racks) fill neatly from the bottom left instead.
  */
-class StockLayout(val rows: List<StockRow>, val hide: Set<Int> = emptySet(), val shell: List<Part> = emptyList(), val glass: List<Part> = emptyList()) {
+class StockLayout(
+    val rows: List<StockRow>, val hide: Set<Int> = emptySet(), val shell: List<Part> = emptyList(), val glass: List<Part> = emptyList(),
+    val stacked: Boolean = false,
+) {
     /** Visible product slots (at most [MAX_SLOTS]). */
     val slots: Int = rows.sumOf { it.cols * it.rows }.coerceAtMost(MAX_SLOTS)
     /** Bit mask of [hide], for the part sorter. */
@@ -55,15 +60,38 @@ class StockLayout(val rows: List<StockRow>, val hide: Set<Int> = emptySet(), val
     private val rowOf = IntArray(slots)
     private val cellOf = IntArray(slots)
 
+    /** The order slots fill in: [order] k is the k-th slot to fill (and the last but k to empty). */
+    val order = IntArray(slots)
+
     init {
         var s = 0
         loop@ for ((r, row) in rows.withIndex()) {
-            // front row first: it's what you see, and it should be the last to go
             for (dr in row.rows - 1 downTo 0) for (c in 0 until row.cols) {
                 if (s >= slots) break@loop
                 rowOf[s] = r; cellOf[s] = dr * row.cols + c; s++
             }
         }
+        if (stacked) {
+            // boxes stack from the bottom level up, left to right
+            var k = 0
+            for (r in rows.indices.reversed()) for (t in 0 until slots) if (rowOf[t] == r) order[k++] = t
+        } else {
+            // every level in turn; within a level the front row first, its columns in a fixed shuffled order
+            val perLevel = rows.indices.map { r -> (0 until slots).filter { rowOf[it] == r }.sortedWith(compareBy({ -(cellOf[it] / rows[r].cols) }, { scatter(it) })) }
+            var k = 0
+            var round = 0
+            while (k < slots) {
+                for (lv in perLevel) if (round < lv.size) order[k++] = lv[round]
+                round++
+            }
+        }
+    }
+
+    /** A fixed pseudo-random value per slot, so the gaps on a half-sold display look natural but stay put. */
+    private fun scatter(slot: Int): Int {
+        var h = slot * 374761393 + rows.size * 668265263
+        h = (h xor (h ushr 13)) * 1274126177
+        return h xor (h ushr 16)
     }
 
     fun row(slot: Int): StockRow = rows[rowOf[slot]]
@@ -95,6 +123,7 @@ object StockLayouts {
     private val WHITE = c(0xFFE9EDF2)
     private val STEEL_D = c(0xFF5B6770)
     private val WIRE = c(0xFFC9D1D9)
+    private val RAIL = c(0xFFB8C0CA)
     /** See-through glass (drawn translucent). */
     val GLASS = c(0xFFBFE3F5)
 
@@ -192,10 +221,16 @@ object StockLayouts {
         ),
         "round_rack" to StockLayout(
             rows = listOf(
-                StockRow(.25f, 1.75f, 1.55f, 1.8f, 1.4f, 6, h = .7f, hang = true),
-                StockRow(.25f, 1.75f, .2f, .45f, 1.4f, 6, h = .7f, hang = true),
+                StockRow(.3f, 1.7f, 1.58f, 1.88f, 1.4f, 6, h = .7f, hang = true),
+                StockRow(.3f, 1.7f, .12f, .42f, 1.4f, 6, h = .7f, hang = true),
             ),
-            hide = setOf(2, 3, 4, 5),
+            // the solid top becomes an open rail, so the clothes hanging from it show
+            hide = setOf(1, 2, 3, 4, 5),
+            shell = listOf(
+                p(.2f, .2f, 1.4f, 1.8f, .26f, 1.46f, RAIL), p(.2f, 1.74f, 1.4f, 1.8f, 1.8f, 1.46f, RAIL),
+                p(.2f, .26f, 1.4f, .26f, 1.74f, 1.46f, RAIL), p(1.74f, .26f, 1.4f, 1.8f, 1.74f, 1.46f, RAIL),
+                p(.26f, .97f, 1.42f, 1.74f, 1.03f, 1.46f, RAIL), p(.97f, .26f, 1.42f, 1.03f, 1.74f, 1.46f, RAIL),
+            ),
         ),
         "shoe_rack" to StockLayout(
             rows = listOf(
@@ -260,6 +295,7 @@ object StockLayouts {
                 StockRow(.12f, 1.88f, .14f, .86f, .1f, 4, h = .7f),
             ),
             hide = setOf(4, 5, 6, 7),
+            stacked = true,
         ),
         "storage_shelf" to StockLayout(
             rows = listOf(
@@ -269,6 +305,7 @@ object StockLayouts {
                 StockRow(.1f, 1.9f, .16f, .84f, .1f, 4, h = .34f),
             ),
             hide = setOf(6, 7, 8, 9),
+            stacked = true,
         ),
     )
 

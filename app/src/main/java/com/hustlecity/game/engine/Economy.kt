@@ -74,6 +74,15 @@ object BizCalc {
         return (storageBoxes(b) - storageBoxesUsed(b)).coerceAtLeast(0) * per + partial
     }
 
+    /** Units waiting in the back room for displays tagged [tag]. */
+    fun backStockFor(b: Business, tag: String) = b.backStock.entries.sumOf { (id, q) -> if (Catalog.product(id)?.tag == tag) q else 0 }
+
+    /** The product tag a display shows for this business (the first of its tags one of the store's products uses), or null. */
+    fun displayTag(b: Business, def: com.hustlecity.game.data.FurnitureDef): String? {
+        if (def.fn != ItemFn.DISPLAY || def.displayUnits <= 0) return null
+        return def.tags.firstOrNull { t -> b.type.products.any { Catalog.product(it.first)?.let { p -> !p.service && p.tag == t } == true } }
+    }
+
     /** Everything of a product the store has: on its displays plus boxed in the back room. */
     fun onHand(b: Business, productId: String) = (b.stock[productId] ?: 0) + (b.backStock[productId] ?: 0)
 
@@ -503,9 +512,12 @@ class Economy(private val e: GameEngine) {
         return take
     }
 
-    /** People who can carry boxes out of the back room right now: staff on shift, and you while you're in the store. */
+    /**
+     * Staff on shift who carry boxes out of the back room as the displays empty. You restock by hand instead (the
+     * Restock button), and at closing time the store restocks everything that fits.
+     */
     fun crew(b: Business, hour: Int, weekday: Int): Int {
-        var n = if (e.state.player.inBuilding == b.buildingId) 1 else 0
+        var n = 0
         for (emp in e.state.employees) if (emp.businessId == b.id && emp.worksAt(hour, weekday)) n++
         return n
     }
@@ -537,6 +549,31 @@ class Economy(private val e: GameEngine) {
                 if (back > take) b.backStock[pid] = back - take else b.backStock.remove(pid)
                 moved += take
                 if (eager) break else left--
+            }
+            if (left <= 0) break
+        }
+        return moved
+    }
+
+    /**
+     * Brings up to [boxes] boxes of one kind of product (those shown on displays tagged [tag]) from the back room to
+     * the displays, the emptiest product first, as much of each box as fits: you restocking a display by hand.
+     * Returns the units moved.
+     */
+    fun restockKind(b: Business, tag: String, boxes: Int): Int {
+        var left = boxes
+        var moved = 0
+        val pids = b.backStock.keys.filter { Catalog.product(it)?.tag == tag }.sortedBy { b.stock[it] ?: 0 }
+        for (pid in pids) {
+            val per = (Catalog.product(pid)?.unitsPerBox ?: 1).coerceAtLeast(1)
+            while (left > 0) {
+                val back = b.backStock[pid] ?: 0
+                val take = minOf(back, BizCalc.roomFor(b, pid), per)
+                if (take <= 0) break
+                b.stock[pid] = (b.stock[pid] ?: 0) + take
+                if (back > take) b.backStock[pid] = back - take else b.backStock.remove(pid)
+                moved += take
+                left--
             }
             if (left <= 0) break
         }
