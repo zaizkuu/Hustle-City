@@ -207,6 +207,45 @@ class GpuFrame {
         s.ni = k
     }
 
+    /**
+     * Appends a flat disc whose color fades smoothly from [inner] at the centre through [mid] at [midFrac] of the
+     * radius to [outer] at the rim: a soft pool of light rather than stepped rings.
+     */
+    fun radial(stream: Int, x: Float, y: Float, z: Float, r: Float, segs: Int, inner: Int, mid: Int, midFrac: Float, outer: Int, emissive: Boolean, material: Int = 0) {
+        val s = streams[stream]
+        s.ensure(1 + segs * 2, segs * 9)
+        val base = s.nv
+        val fl = java.lang.Float.floatToRawIntBits(flags(emissive, material))
+        val up = java.lang.Float.floatToRawIntBits(1f); val zero = java.lang.Float.floatToRawIntBits(0f)
+        val bz = java.lang.Float.floatToRawIntBits(z)
+        val v = s.v
+        var o = base * STRIDE
+        fun put(px: Float, py: Float, col: Int) {
+            v[o] = java.lang.Float.floatToRawIntBits(px); v[o + 1] = java.lang.Float.floatToRawIntBits(py); v[o + 2] = bz
+            v[o + 3] = zero; v[o + 4] = zero; v[o + 5] = up
+            v[o + 6] = col; v[o + 7] = fl
+            o += STRIDE
+        }
+        put(x, y, rgba(inner))
+        val cm = rgba(mid); val co = rgba(outer)
+        for (i in 0 until segs) {
+            val a = i * (Math.PI * 2 / segs)
+            val c = kotlin.math.cos(a).toFloat(); val sn = kotlin.math.sin(a).toFloat()
+            put(x + c * r * midFrac, y + sn * r * midFrac, cm)
+            put(x + c * r, y + sn * r, co)
+        }
+        s.nv += 1 + segs * 2
+        val idx = s.idx
+        var k = s.ni
+        for (i in 0 until segs) {
+            val m0 = base + 1 + i * 2; val m1 = base + 1 + ((i + 1) % segs) * 2
+            idx[k++] = base; idx[k++] = m0; idx[k++] = m1
+            idx[k++] = m0; idx[k++] = m0 + 1; idx[k++] = m1 + 1
+            idx[k++] = m0; idx[k++] = m1 + 1; idx[k++] = m1
+        }
+        s.ni = k
+    }
+
     /** Appends a lit ellipsoid (tree canopies, globes) with smooth normals. */
     fun ellipsoid(stream: Int, x: Float, y: Float, z: Float, r: Float, squash: Float, argb: Int, emissive: Boolean, detail: Int, material: Int = 0) {
         val t = SPHERES[detail.coerceIn(0, 2)]

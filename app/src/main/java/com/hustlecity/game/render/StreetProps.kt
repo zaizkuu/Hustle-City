@@ -84,6 +84,31 @@ class StreetProps(val city: City) {
         return count++
     }
 
+    /** Half the length (along the street) and depth (toward the building) of a prop's footprint. */
+    private fun footprint(k: Int): Float = when (k) {
+        VENDING -> 1.7f; VENDOR -> 1.5f; BUS_STOP -> 2.3f; BIKE_RACK -> 1.6f; BENCH, NEWS -> 1f; PLANTER -> .65f; else -> .35f
+    }
+
+    /**
+     * Whether a prop of kind [k] at (px, py) keeps clear of every road's asphalt (crossings and junctions too: another
+     * street can pass close at a bend or a sharp corner) and of buildings. (ux, uy) runs along its street, (nx, ny)
+     * away from it.
+     */
+    private fun clearSpot(px: Float, py: Float, ux: Float, uy: Float, nx: Float, ny: Float, k: Int): Boolean {
+        val g = city.roads
+        val half = footprint(k)
+        // the wire strings of lanterns reach across their own lane, so only their foot is checked
+        val margin = if (k == LANTERNS) .1f else .25f
+        for (sx in floatArrayOf(-half, 0f, half)) for (sy in floatArrayOf(0f, if (k == BUS_STOP || k == VENDING) .7f else .3f)) {
+            val qx = px + ux * sx + nx * sy; val qy = py + uy * sx + ny * sy
+            if (g.nearAsphalt(qx, qy, margin)) return false
+            if (k != LAMP && k != UTIL_POLE && k != HYDRANT && building(qx, qy)) return false
+        }
+        // and off the curb's own side of the street, toward the road
+        val fx = px - nx * .3f; val fy = py - ny * .3f
+        return !(k != LAMP && k != UTIL_POLE && k != HYDRANT && k != BIN && k != MAILBOX && g.nearAsphalt(fx, fy, 0f))
+    }
+
     /** Whether a solid building stands at a point. */
     private fun building(px: Float, py: Float): Boolean {
         var hit = false
@@ -134,6 +159,7 @@ class StreetProps(val city: City) {
                 fun at(s: Float, off: Float, k: Int): Int {
                     val px = e.ax + e.ux * s + nx * off; val py = e.ay + e.uy * s + ny * off
                     if (city.shore.anyWater(px, py) || city.parks.any { Geo.inside(px, py, it.poly) } || city.reserved(px, py)) return -1
+                    if (!clearSpot(px, py, e.ux, e.uy, nx, ny, k)) return -1
                     return add(px, py, k, -nx, -ny)
                 }
                 val hood = city.neighborhoodAt(e.ax + e.ux * (s0 + s1) * .5f + nx * 12f, e.ay + e.uy * (s0 + s1) * .5f + ny * 12f)
@@ -262,13 +288,18 @@ class StreetProps(val city: City) {
                 val px = ax + ux * s; val py = ay + uy * s
                 if (dist(px, py, cx, cy) > 9f && !city.shore.anyWater(px, py) && !city.reserved(px, py)) {
                     val side = if (k % 2 == 0) 1f else -1f
-                    add(px - uy * 2.4f * side, py + ux * 2.4f * side, PARK_LAMP, uy * side, -ux * side)
-                    if (k % 3 != 2) add(px + ux * 5f + uy * 2.6f * side, py + uy * 5f - ux * 2.6f * side, BENCH, -uy * side, ux * side)
+                    offRoad(px - uy * 2.4f * side, py + ux * 2.4f * side, PARK_LAMP, uy * side, -ux * side)
+                    if (k % 3 != 2) offRoad(px + ux * 5f + uy * 2.6f * side, py + uy * 5f - ux * 2.6f * side, BENCH, -uy * side, ux * side)
                 }
                 s += 12f; k++
             }
-            add(ax + ux * 2f, ay + uy * 2f, BIN, ux, uy)
+            offRoad(ax + ux * 2f, ay + uy * 2f, BIN, ux, uy)
         }
+    }
+
+    /** Park furniture where a road cuts through the park stays on the grass side of the kerb. */
+    private fun offRoad(px: Float, py: Float, k: Int, dx: Float, dy: Float) {
+        if (!city.roads.nearAsphalt(px, py, 1.2f)) add(px, py, k, dx, dy)
     }
 
     // ------------------------------------------------------------------ painting

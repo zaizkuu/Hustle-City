@@ -51,13 +51,18 @@ class InteriorRenderer(private val e: GameEngine) {
         private const val WALL_KEY = 5e5f
     }
 
+    /** Film camera for trailers: target (x, y in tiles) and distance, and a pitch in radians, instead of the game's. */
+    var cinemaTarget: FloatArray? = null
+    var cinemaPitch = Float.NaN
+
     fun setupCamera(sc: InteriorScene, w: Int, h: Int) {
         // zoomed in, the camera drifts from the middle of the room toward the player
         val follow = ((sc.zoom - 1f) / 1.2f).coerceIn(0f, 1f)
         proj.tx = sc.w / 2f + (sc.px - sc.w / 2f) * follow
         proj.ty = sc.d / 2f + (sc.py - sc.d / 2f) * follow
         proj.dist = (max(sc.w, sc.d) * .95f + 5f) / sc.zoom
-        proj.pitch = Math.toRadians(56.0).toFloat()
+        cinemaTarget?.let { proj.tx = it[0]; proj.ty = it[1]; proj.dist = it[2] }
+        proj.pitch = if (!cinemaPitch.isNaN()) cinemaPitch else Math.toRadians(56.0).toFloat()
         proj.yaw = sc.yaw
         proj.near = .5f
         proj.update(w.toFloat(), h.toFloat(), .55f)
@@ -147,7 +152,7 @@ class InteriorRenderer(private val e: GameEngine) {
         }
         for ((i, v) in sc.visitors.withIndex()) add(1, i, key(v.x, v.y))
         for ((i, v) in sc.staff.withIndex()) add(2, i, key(v.x, v.y))
-        if (e.state.player.inBuilding >= 0) add(3, 0, key(sc.px, sc.py))
+        if (e.state.player.inBuilding >= 0 && cinemaTarget == null) add(3, 0, key(sc.px, sc.py))
         for ((i, car) in sc.showroom.withIndex()) add(4, i, key(car.second, car.third))
         if (sc.ghostId != null) {
             val def = Catalog.item(sc.ghostId!!)
@@ -367,9 +372,7 @@ class InteriorRenderer(private val e: GameEngine) {
             while (x < w - .5f) {
                 val back = room != null && room.contains(y.toInt())
                 val col = if (back) LIGHT_COOL else LIGHT_WARM
-                scene.disc(x, y, .007f, 1.9f, 1.9f, 16, scene.withAlpha(col, .05f))
-                scene.disc(x, y, .0075f, 1.2f, 1.2f, 14, scene.withAlpha(col, .06f))
-                scene.disc(x, y, .008f, .6f, .6f, 12, scene.withAlpha(col, .07f))
+                scene.glowDisc(x, y, .007f, 1.9f, col, .17f)
                 x += 4f
             }
             y += 4f

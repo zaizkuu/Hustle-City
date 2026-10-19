@@ -233,10 +233,10 @@ fun WorldCanvas(e: GameEngine, r: Renderers, interactive: Boolean) {
                 drawIntoCanvas { c ->
                     val w = size.width.toInt(); val h = size.height.toInt()
                     val view = if (gpuOn) glView[0] else null
-                    val g = view?.acquire()
+                    val g = view?.acquire() ?: com.hustlecity.game.render.gpu.GpuCapture.frame?.also { it.clear() }
                     if (e.interior != null && e.state.player.inBuilding >= 0) r.interior.draw(c.nativeCanvas, w, h, g, density)
                     else r.world.draw(c.nativeCanvas, w, h, density, g)
-                    if (g != null) view.submit()
+                    if (g != null) view?.submit()
                 }
             },
         )

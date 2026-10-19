@@ -129,7 +129,6 @@ class WorldRenderer(private val e: GameEngine) {
         val GLASS = c(0xFF3C5266)
         val GLASS_NIGHT = c(0xFF1E2A36)
         val LIT = c(0xFFFFE3A0)
-        private val POOL_OUTER = c(0xFFFFB85C)
         private val POOL_INNER = c(0xFFFFE3A0)
         val GLASS_DARK = c(0xFF26313D)
         val TRUNK = c(0xFF6B4A32)
@@ -152,6 +151,15 @@ class WorldRenderer(private val e: GameEngine) {
 
     private fun recycle(list: ArrayList<Label>) { labelPool += list; list.clear() }
 
+    /**
+     * Film mode, for trailers: the camera takes [cinemaPitch] (radians) instead of the game's fixed angle, and the
+     * player's marker, vehicle rings, labels and see-through occluders are left out.
+     */
+    var cinematic = false
+    var cinemaPitch = Float.NaN
+    /** Atmospheric haze for film shots: distance fades softly into the sky. */
+    var cinemaHaze = .3f
+
     fun setupCamera(w: Int, h: Int) {
         val cam = e.camera
         mapMode = e.ui.app == AppId.MAPS
@@ -160,11 +168,11 @@ class WorldRenderer(private val e: GameEngine) {
             proj.pitch = Math.toRadians(PITCH_MAP.toDouble()).toFloat(); proj.yaw = 0f
         } else {
             proj.tx = cam.tx; proj.ty = cam.ty; proj.dist = cam.dist
-            proj.pitch = Math.toRadians(PITCH_STREET.toDouble()).toFloat(); proj.yaw = cam.yaw
+            proj.pitch = if (!cinemaPitch.isNaN()) cinemaPitch else Math.toRadians(PITCH_STREET.toDouble()).toFloat(); proj.yaw = cam.yaw
         }
         proj.near = .8f
         // while driving, keep the car above the dashboard
-        proj.update(w.toFloat(), h.toFloat(), if (mapMode) .5f else if (e.hasGame && e.state.player.driving >= 0) .42f else .56f)
+        proj.update(w.toFloat(), h.toFloat(), if (mapMode || cinematic) .5f else if (e.hasGame && e.state.player.driving >= 0) .42f else .56f)
     }
 
     /** Draws the city; with [gpu] the 3D goes into that frame for the GPU renderer and [canvas] only gets the overlays. */
@@ -180,6 +188,10 @@ class WorldRenderer(private val e: GameEngine) {
         scene.fog = if (mapMode) 0f else max(max(v.fog, v.rain * .3f), max(v.snow * .35f, v.storm * .2f))
         scene.fogStart = proj.dist * (if (v.fog > .3f) .3f else .7f)
         scene.fogEnd = proj.dist * (if (v.fog > .3f) 1.5f else 3f)
+        if (cinematic && !mapMode) {
+            scene.fog = max(scene.fog, cinemaHaze)
+            scene.fogStart = proj.dist * 1.4f; scene.fogEnd = proj.dist * 7f
+        }
         scene.snow = if (e.hasGame) e.state.snowCover.toFloat() else 0f
         scene.rain = if (mapMode) 0f else max(v.rain, max(v.storm, v.fog * .8f))
         // sun moves east -> south -> west over the day
@@ -205,10 +217,15 @@ class WorldRenderer(private val e: GameEngine) {
             gpu.time = e.realTime
             // real sun shadows replace the painted ones when the view is small enough for a sharp shadow map
             val overcast = (v.cloud * .7f + v.rain * .25f + v.storm * .3f).coerceIn(0f, .85f)
-            val wide = mapMode || bbox[2] - bbox[0] > 1200f || bbox[3] - bbox[1] > 1200f || e.settings.quality == 0
+            val wide = !cinematic && (mapMode || bbox[2] - bbox[0] > 1200f || bbox[3] - bbox[1] > 1200f || e.settings.quality == 0)
             val strength = if (wide) 0f else ((scene.daylight - .12f) / .88f).coerceIn(0f, 1f) * (1f - .8f * overcast) * .82f
-            val size = e.settings.shadowMapSize
-            gpu.setShadow(bbox[0], bbox[1], bbox[2], bbox[3], min(e.city.maxHeight, 140f), size.coerceAtLeast(16), if (size == 0) 0f else strength)
+            val size = if (cinematic) 4096 else e.settings.shadowMapSize
+            if (cinematic) {
+                // a film camera sees to the horizon: shadows where the eye rests, around the target
+                val r = max(160f, proj.dist * 2.4f)
+                gpu.setShadow(max(bbox[0], proj.tx - r), max(bbox[1], proj.ty - r), min(bbox[2], proj.tx + r), min(bbox[3], proj.ty + r),
+                    min(e.city.maxHeight, 160f), size, strength)
+            } else gpu.setShadow(bbox[0], bbox[1], bbox[2], bbox[3], min(e.city.maxHeight, 140f), size.coerceAtLeast(16), if (size == 0) 0f else strength)
         }
         if (gpu == null) batch.begin(canvas)
         recycle(labels)
@@ -395,6 +412,7 @@ class WorldRenderer(private val e: GameEngine) {
     private fun findOccluders(gpu: GpuFrame) {
         occl.clear()
         gpu.skipCount = 0
+        if (cinematic) return
         val p = e.state.player
         if (mapMode || !e.hasGame || p.inBuilding >= 0 || published < 0) return
         val sx0 = min(proj.camX, focusX) - 8f; val sx1 = max(proj.camX, focusX) + 8f
@@ -442,7 +460,7 @@ class WorldRenderer(private val e: GameEngine) {
                 3 -> e.traffic.peds.getOrNull(dIdx[i])?.let { drawPed(it, dIdx[i]) }
                 4 -> drawPlayer()
                 5 -> e.state.vehicle(dIdx[i])?.let { v ->
-                    if (e.state.player.driving != v.id && !mapMode) scene.disc(v.x, v.y, .03f, 2.6f, 2.6f, 14, scene.withAlpha(c(0xFF27AE60), .35f))
+                    if (e.state.player.driving != v.id && !mapMode && !cinematic) scene.disc(v.x, v.y, .03f, 2.6f, 2.6f, 14, scene.withAlpha(c(0xFF27AE60), .35f))
                     val driving = e.state.player.driving == v.id
                     val lean = ownLean.getOrPut(v.id) { com.hustlecity.game.world.Agent() }
                     if (driving) com.hustlecity.game.world.lean(lean, e.carSpeed, v.heading, (e.realTime - leanT).coerceIn(0f, .1f))
@@ -521,6 +539,7 @@ class WorldRenderer(private val e: GameEngine) {
 
     /** The GPS route as a blue band along the roads with white arrows pointing the way. */
     private fun drawRoute() {
+        if (cinematic) return
         val gps = e.gps
         if (!gps.active) return
         val r = gps.route
@@ -754,16 +773,13 @@ class WorldRenderer(private val e: GameEngine) {
     }
 
     /**
-     * A pool of lamplight on the ground: concentric discs that build up toward a warm centre, so it fades out softly
-     * instead of ending in a hard grey edge. The GPU renderer draws them as light, not as lit paint.
+     * A pool of lamplight on the ground that fades out softly from a warm centre instead of ending in a hard edge.
+     * The GPU renderer draws it as light, not as lit paint.
      */
     private fun lightPool(x: Float, y: Float, r: Float, strength: Float) {
         if (strength <= .01f) return
         scene.glow = true
-        scene.disc(x, y, .05f, r, r, 18, scene.withAlpha(POOL_OUTER, .07f * strength))
-        scene.disc(x, y, .052f, r * .74f, r * .74f, 16, scene.withAlpha(POOL_OUTER, .09f * strength))
-        scene.disc(x, y, .054f, r * .5f, r * .5f, 14, scene.withAlpha(POOL_INNER, .12f * strength))
-        scene.disc(x, y, .056f, r * .28f, r * .28f, 12, scene.withAlpha(POOL_INNER, .18f * strength))
+        scene.glowDisc(x, y, .05f, r, POOL_INNER, .42f * strength)
         scene.glow = false
     }
 
@@ -1206,7 +1222,7 @@ class WorldRenderer(private val e: GameEngine) {
         features.collect(bbox, proj.camX, proj.camY, stat, mode == DYNAMIC, mapMode, addFeature)
         if (mode == DYNAMIC && !mapMode) features.forCars(e.realTime, bbox, addTrainCar)
         if (dyn) for (v in e.state.vehicles) if (!e.ops.away(v) && v.x in bbox[0] - 5..bbox[2] + 5 && v.y in bbox[1] - 5..bbox[3] + 5) add(5, v.id, keyFor(v.x, v.y))
-        if (dyn && e.hasGame && p.driving < 0 && p.inBuilding < 0 && !mapMode) add(4, 0, playerKey)
+        if (dyn && e.hasGame && p.driving < 0 && p.inBuilding < 0 && !mapMode && !cinematic) add(4, 0, playerKey)
     }
 
     private fun sortDrawables() {
@@ -1503,6 +1519,7 @@ class WorldRenderer(private val e: GameEngine) {
     }
 
     private fun drawOverlays(canvas: Canvas, w: Int, h: Int) {
+        if (cinematic) return
         val s = e.state
         val sel = e.city.building(e.ui.selected)
         if (sel != null && !mapMode) outlineBuilding(canvas, sel)

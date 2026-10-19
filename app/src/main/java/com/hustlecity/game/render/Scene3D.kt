@@ -457,6 +457,32 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     }
 
     /**
+     * A soft disc of light on the ground: [color] at [alpha] in the middle fading to nothing at the rim. The GPU blends
+     * it smoothly per pixel; the Canvas stacks thin rings that add up to the same falloff.
+     */
+    fun glowDisc(x: Float, y: Float, z: Float, r: Float, color: Int, alpha: Float) {
+        val g = gpu
+        if (g != null && !fOn) {
+            val cz = proj.camZOf(x, y, z)
+            if (cz < -r) return
+            if (cz > proj.near) {
+                val px = proj.centerX + proj.focal * proj.camXOf(x, y, z) / cz
+                val py = proj.centerY - proj.focal * proj.camYOf(x, y, z) / cz
+                val pr = proj.focal * r / cz * 1.5f
+                if (px < -pr || px > proj.screenW + pr || py < -pr || py > proj.screenH + pr) return
+            }
+            g.radial(streamFor(withAlpha(color, alpha * .99f)), x, y, z, r, 28, withAlpha(color, alpha), withAlpha(color, alpha * .38f), .42f,
+                withAlpha(color, 0f), true, materialFor(color))
+            return
+        }
+        // each ring adds a little alpha, building toward the centre
+        for (i in 0 until 6) {
+            val f = 1f - i / 6f
+            disc(x, y, z + i * .002f, r * f, r * f, 18 - i, withAlpha(color, alpha * .2f))
+        }
+    }
+
+    /**
      * Axis aligned box with lighting and back-face culling.
      * [top] and [side] are base colors (unlit).
      */

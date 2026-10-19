@@ -129,6 +129,16 @@ class RoadGraph(val nodes: List<RoadNode>, val edges: List<RoadEdge>) {
         return out.edge >= 0
     }
 
+    /** True when (x, y) is on a road's asphalt or within [margin] meters of it (junctions and crossings included). */
+    fun nearAsphalt(x: Float, y: Float, margin: Float): Boolean {
+        var on = false
+        near(x, y, 14f + margin) { id ->
+            val e = edges[id]
+            if (!on && Geo.distToSeg(x, y, e.ax, e.ay, e.bx, e.by) <= e.cls.halfWidth + margin) on = true
+        }
+        return on
+    }
+
     /** True when (x, y) is on a road's asphalt (not the sidewalk). */
     fun onAsphalt(x: Float, y: Float): Boolean {
         var on = false
