@@ -99,6 +99,17 @@ class GpuFrameDumpTest {
         dump(name, frame, overlay, canvasBmp)
     }
 
+    /** Each city's starting street in the HD renderer, plus Tokyo and Seoul after dark. */
+    @Test
+    fun cities() {
+        for ((id, hour) in listOf("nyc" to 15, "manila" to 15, "tokyo" to 15, "seoul" to 15, "tokyo" to 21, "seoul" to 21)) {
+            val e = GameEngine(null).also { it.newGame("Tester", 1, 0, 1, mapId = id); it.ui.tip = null }
+            e.state.minute = hour * 60L
+            e.camera.zoom = 75f; e.camera.dist = 75f; e.camera.yaw = .4f
+            city("city_${id}_$hour", e)
+        }
+    }
+
     @Test
     fun streetDay() { val e = engine(); e.state.minute = 13L * 60; e.camera.zoom = 60f; e.camera.dist = 60f; city("street_day", e) }
 

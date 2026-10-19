@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hustlecity.game.data.Catalog
+import com.hustlecity.game.engine.rentOf
 import com.hustlecity.game.engine.AppId
 import com.hustlecity.game.engine.Confirm
 import com.hustlecity.game.engine.GameEngine
@@ -610,8 +611,8 @@ fun RealtyApp(e: GameEngine) {
                                 }
                             }
                             Column(Modifier.weight(.8f)) {
-                                Text("${e.money(b.baseRent)}/mo", style = HT.bodyBold, color = HC.Ink)
-                                Text("deposit ${e.money(b.baseRent / 2)}", style = HT.small, color = HC.InkSoft)
+                                Text("${e.money(e.rentOf(b))}/mo", style = HT.bodyBold, color = HC.Ink)
+                                Text("deposit ${e.money(e.rentOf(b) / 2)}", style = HT.small, color = HC.InkSoft)
                             }
                             Icon(Icons.Filled.Place, null, tint = HC.Blue, modifier = Modifier.size(26.dp).clickable { e.setWaypoint(b.id); e.toast("Waypoint set: ${b.address}") })
                             Spacer(Modifier.width(6.dp))

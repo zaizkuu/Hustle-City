@@ -320,7 +320,7 @@ class RivalAI(private val e: GameEngine) {
         val vacancy = vacancyRate()
         val room = ((vacancy - MIN_VACANCY) / (1 - MIN_VACANCY)).coerceIn(0.0, 1.0)
         repeat(tries) {
-            if (rnd.nextDouble() < (.06 + .3 * r.aggression) * (.25 + 1.5 * room) && vacancy > MIN_VACANCY) expand(r, reserve)
+            if (rnd.nextDouble() < (.06 + .3 * r.aggression) * (.25 + 1.5 * room) * e.state.player.rules.rivals && vacancy > MIN_VACANCY) expand(r, reserve)
         }
 
         // 7. buy the building of a profitable store instead of paying rent

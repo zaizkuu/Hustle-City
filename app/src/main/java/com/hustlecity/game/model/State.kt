@@ -52,8 +52,32 @@ data class PlayerState(
     /** Business id the player is currently working at, -1 if none. */
     var workingAt: Int = -1,
     var totalEarned: Double = 0.0,
+    /** 0 easy, 1 normal, 2 hard, 3 custom. */
     var difficulty: Int = 1,
+    var rules: GameRules = GameRules(),
 )
+
+/**
+ * How the world treats you, set when the game starts (like Big Ambitions' custom game). Multipliers are 1 for a
+ * normal game: customer demand, rents, wages, loan interest, how hard rivals push, and how fast you get tired and hungry.
+ */
+@Serializable
+data class GameRules(
+    val startMoney: Double = 5000.0,
+    val demand: Double = 1.0,
+    val rent: Double = 1.0,
+    val wages: Double = 1.0,
+    val interest: Double = 1.0,
+    val rivals: Double = 1.0,
+    val needs: Double = 1.0,
+) {
+    companion object {
+        val EASY = GameRules(20000.0, demand = 1.2, rent = .8, wages = .85, interest = .7, rivals = .6, needs = .7)
+        val NORMAL = GameRules()
+        val HARD = GameRules(1500.0, demand = .85, rent = 1.2, wages = 1.15, interest = 1.3, rivals = 1.5, needs = 1.2)
+        fun preset(difficulty: Int) = when (difficulty) { 0 -> EASY; 2 -> HARD; else -> NORMAL }
+    }
+}
 
 @Serializable
 data class PlacedItem(var itemId: String, var x: Int, var y: Int, var rot: Int)

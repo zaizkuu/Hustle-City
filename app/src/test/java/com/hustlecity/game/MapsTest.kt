@@ -62,44 +62,7 @@ class MapsTest {
 
     /** A top-down picture of the whole map: water, parks, roads, buildings and places. */
     private fun preview(city: City) {
-        val b = city.bounds
-        val scale = 1200f / maxOf(b[2] - b[0], b[3] - b[1])
-        val w = ((b[2] - b[0]) * scale).toInt(); val h = ((b[3] - b[1]) * scale).toInt()
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val c = Canvas(bmp)
-        val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        fun x(v: Float) = (v - b[0]) * scale
-        fun y(v: Float) = (v - b[1]) * scale
-        fun poly(pts: FloatArray, color: Int) {
-            val path = Path()
-            for (k in 0 until pts.size / 2) if (k == 0) path.moveTo(x(pts[0]), y(pts[1])) else path.lineTo(x(pts[k * 2]), y(pts[k * 2 + 1]))
-            path.close(); p.color = color; p.style = Paint.Style.FILL; c.drawPath(path, p)
-        }
-        c.drawColor(if (city.shore.land.isEmpty()) 0xFFB9BCC1.toInt() else 0xFF27445C.toInt())
-        for (l in city.shore.land) poly(l, 0xFFB9BCC1.toInt())
-        for (wt in city.shore.water) poly(wt, 0xFF27445C.toInt())
-        for (i in city.shore.islands) poly(i, 0xFFB9BCC1.toInt())
-        for (cn in city.shore.canals) poly(cn, 0xFF3B6E96.toInt())
-        for (pk in city.parks) poly(pk.poly, if (pk.kind == Park.PLAZA) 0xFFD8CFB8.toInt() else 0xFF6DA35C.toInt())
-        p.style = Paint.Style.STROKE; p.strokeCap = Paint.Cap.ROUND
-        for (e in city.roads.edges) {
-            p.color = if (e.overWater) 0xFF8A6D4B.toInt() else 0xFF4A4D53.toInt()
-            p.strokeWidth = e.cls.halfWidth * 2 * scale
-            c.drawLine(x(e.ax), y(e.ay), x(e.bx), y(e.by), p)
-        }
-        for (r in city.rails) {
-            p.color = 0xFFF2994A.toInt(); p.strokeWidth = 2f
-            for (k in 0 until r.pts.size / 2 - 1) c.drawLine(x(r.pts[k * 2]), y(r.pts[k * 2 + 1]), x(r.pts[k * 2 + 2]), y(r.pts[k * 2 + 3]), p)
-        }
-        p.style = Paint.Style.FILL
-        for (bd in city.buildings) {
-            val pts = floatArrayOf(bd.wx(0f, 0f), bd.wy(0f, 0f), bd.wx(bd.w, 0f), bd.wy(bd.w, 0f), bd.wx(bd.w, bd.d), bd.wy(bd.w, bd.d), bd.wx(0f, bd.d), bd.wy(0f, bd.d))
-            val shade = (0xFF - (bd.height * 1.6f).toInt().coerceIn(0, 140))
-            poly(pts, when {
-                bd.placeId != null -> 0xFFE0B04A.toInt()
-                else -> (0xFF shl 24) or ((bd.hood.color shr 16 and 255) * shade / 255 shl 16) or ((bd.hood.color shr 8 and 255) * shade / 255 shl 8) or ((bd.hood.color and 255) * shade / 255)
-            })
-        }
+        val bmp = com.hustlecity.game.render.MapPreview.render(city, 1200)
         File("build/snapshots").mkdirs()
         File("build/snapshots/map_${city.mapId}.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }

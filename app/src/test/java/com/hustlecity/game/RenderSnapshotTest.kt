@@ -8,6 +8,7 @@ import com.hustlecity.game.engine.InteriorMode
 import com.hustlecity.game.engine.InteriorScene
 import com.hustlecity.game.engine.startBusiness
 import com.hustlecity.game.model.PlacedItem
+import com.hustlecity.game.render.Arch
 import com.hustlecity.game.render.InteriorRenderer
 import com.hustlecity.game.render.WorldRenderer
 import com.hustlecity.game.world.BKind
@@ -108,11 +109,38 @@ class RenderSnapshotTest {
                 e.frame(1 / 30f)
                 e.camera.tx = b.doorX; e.camera.ty = b.doorY; e.camera.zoom = far; e.camera.dist = far
                 // look at the front: yaw 0 views a building whose front faces +y
-                e.camera.yaw = kotlin.math.atan2(b.frontX, -b.frontY) - Math.PI.toFloat() + .5f
+                e.camera.yaw = kotlin.math.atan2(b.frontX, b.frontY) + .5f
             }
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             WorldRenderer(e).draw(Canvas(bmp), w, h, 2f)
             save(bmp, "arch_${st.name.lowercase()}${if (night) "_night" else ""}.png")
+        }
+    }
+
+    /** The Asian cities' own styles, close up on their home maps, by day and by night. */
+    @Test
+    fun regionalArchitecture() {
+        val cases = listOf("manila" to Arch.COLONIAL, "manila" to Arch.TROPICAL, "tokyo" to Arch.PENCIL, "seoul" to Arch.PENCIL, "seoul" to Arch.HANOK)
+        for (night in listOf(false, true)) for ((map, st) in cases) {
+            val e = GameEngine(null)
+            e.newGame("Tester", 1, 0, 1, mapId = map)
+            e.ui.tip = null
+            val painter = com.hustlecity.game.render.BuildingPainter(WorldRenderer(e), e)
+            val all = e.city.buildings.filter { it.solid && painter.style(it) == st && it.placeId == null }
+            assertTrue("$map has $st buildings", all.isNotEmpty())
+            // a typical one: a lot of middling width
+            val b = all.sortedBy { it.width }[all.size / 2]
+            val far = (b.height * .8f).coerceIn(24f, 60f)
+            e.state.player.x = b.doorX + b.frontX * 6f; e.state.player.y = b.doorY + b.frontY * 6f
+            e.state.minute = (if (night) 21L else 15L) * 60
+            repeat(20) {
+                e.frame(1 / 30f)
+                e.camera.tx = b.doorX; e.camera.ty = b.doorY; e.camera.zoom = far; e.camera.dist = far
+                e.camera.yaw = kotlin.math.atan2(b.frontX, b.frontY) + .5f
+            }
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            WorldRenderer(e).draw(Canvas(bmp), w, h, 2f)
+            save(bmp, "arch_${map}_${st.name.lowercase()}${if (night) "_night" else ""}.png")
         }
     }
 

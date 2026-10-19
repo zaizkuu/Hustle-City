@@ -143,12 +143,12 @@ class GameEngine(context: Context?) {
 
     // ------------------------------------------------------------------ lifecycle
 
-    fun newGame(name: String, skin: Int, shirt: Int, difficulty: Int, seed: Long = 1337L, mapId: String = Maps.CLASSIC) {
+    fun newGame(name: String, skin: Int, shirt: Int, difficulty: Int, seed: Long = 1337L, mapId: String = Maps.CLASSIC,
+                rules: com.hustlecity.game.model.GameRules = com.hustlecity.game.model.GameRules.preset(difficulty)) {
         city = City(seed, mapId)
         traffic.attach(city)
-        val startMoney = when (difficulty) { 0 -> 20000.0; 1 -> 5000.0; else -> 1500.0 }
         val s = GameState(seed = seed, minute = 8L * 60, mapId = city.mapId)
-        s.player = PlayerState(name = name.ifBlank { "Alex" }, skin = skin, shirt = shirt, money = startMoney, difficulty = difficulty)
+        s.player = PlayerState(name = name.ifBlank { "Alex" }, skin = skin, shirt = shirt, money = rules.startMoney, difficulty = difficulty, rules = rules)
         state = s
         rnd = Random(seed xor System.nanoTime())
         val homeRnd = Random(seed + 99)
@@ -156,7 +156,7 @@ class GameEngine(context: Context?) {
         val home = city.buildings.filter { it.kind == BKind.RESIDENTIAL && it.neighborhood == city.map.startHood && it.frontY > 0f && it.area in 30..70 && it.frontEdge >= 0 }
             .ifEmpty { city.buildings.filter { it.kind == BKind.RESIDENTIAL && it.frontEdge >= 0 } }
             .let { it[homeRnd.nextInt(it.size)] }
-        s.rentals += Rental(home.id, (home.baseRent * .8 / 10).roundToInt() * 10.0, 1)
+        s.rentals += Rental(home.id, (home.baseRent * rules.rent * .8 / 10).roundToInt() * 10.0, 1)
         s.player.home = home.id
         s.player.x = home.doorX + home.frontX * 2f
         s.player.y = home.doorY + home.frontY * 2f
@@ -554,12 +554,12 @@ class GameEngine(context: Context?) {
             p.energy = (p.energy + 100.0 / (7.5 * 60)).coerceAtMost(100.0)
             p.hunger = (p.hunger - 100.0 / (28 * 60)).coerceAtLeast(0.0)
         } else {
-            var drain = 100.0 / (18 * 60)
+            var drain = 100.0 / (18 * 60) * p.rules.needs
             if (working) drain *= 1.35
             if (p.happiness < 25) drain *= 1.2
             if (p.hunger <= 0) drain *= 1.6
             p.energy = (p.energy - drain).coerceAtLeast(0.0)
-            p.hunger = (p.hunger - 100.0 / (14 * 60)).coerceAtLeast(0.0)
+            p.hunger = (p.hunger - 100.0 / (14 * 60) * p.rules.needs).coerceAtLeast(0.0)
             if (p.energy <= 0.0 && skip == null) passOut()
         }
     }

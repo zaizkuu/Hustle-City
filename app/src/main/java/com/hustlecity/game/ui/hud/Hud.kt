@@ -88,6 +88,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hustlecity.game.audio.Audio
 import com.hustlecity.game.data.Catalog
+import com.hustlecity.game.engine.rentOf
 import com.hustlecity.game.engine.AppId
 import com.hustlecity.game.engine.BizCalc
 import com.hustlecity.game.engine.FLOOR_COLORS
@@ -544,7 +545,7 @@ fun BuildingCard(e: GameEngine, modifier: Modifier = Modifier, avoidPhone: Boole
                 rental != null -> "RENTED BY YOU" to HC.Orange
                 biz != null -> null
                 rival != null -> "OWNED BY ${s.rivals.firstOrNull { it.id == rival.rivalId }?.name?.uppercase()}" to Color(0xFFBFC7D1)
-                e.isVacant(b.id) -> "FOR RENT · ${e.money(b.baseRent)}/MONTH" to HC.GreenLight
+                e.isVacant(b.id) -> "FOR RENT · ${e.money(e.rentOf(b))}/MONTH" to HC.GreenLight
                 b.solid && place == null -> "BUILDING OWNED BY ${b.landlord.uppercase()}" to Color(0xFFBFC7D1)
                 else -> null
             }

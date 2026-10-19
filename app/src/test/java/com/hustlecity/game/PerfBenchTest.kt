@@ -26,7 +26,9 @@ class PerfBenchTest {
     @Test
     fun frameCost() {
         val out = StringBuilder()
-        val e = GameEngine(null).also { it.newGame("Bench", 1, 0, 1); it.ui.tip = null; it.ui.phoneOpen = false }
+        for (map in com.hustlecity.game.world.Maps.all) {
+        out.appendLine("== ${map.id}"); println("== ${map.id}")
+        val e = GameEngine(null).also { it.newGame("Bench", 1, 0, 1, mapId = map.id); it.ui.tip = null; it.ui.phoneOpen = false }
         val r = WorldRenderer(e)
         val overlay = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(overlay)
@@ -70,6 +72,7 @@ class PerfBenchTest {
             }
             val line = "%-14s avg %5.2f ms  worst %6.2f ms over %d frames".format(name, total / n / 1e6, worst / 1e6, n)
             println(line); out.appendLine(line)
+        }
         }
         File("build").mkdirs()
         File("build/perf.txt").writeText(out.toString())

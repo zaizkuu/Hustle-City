@@ -171,14 +171,15 @@ object BizCalc {
         if (type.office) {
             // clients find firms by reputation and advertising rather than foot traffic
             val comp = 1.0 / (1.0 + .06 * e.economy.rivals.competitionFor(b))
-            return type.baseDemand * (.35 + .9 * b.reputation) * (1.0 + b.marketing) * type.curve[hour] * comp * e.weather.demandFactor(type)
+            return type.baseDemand * (.35 + .9 * b.reputation) * (1.0 + b.marketing) * type.curve[hour] * comp * e.weather.demandFactor(type) *
+                e.state.player.rules.demand
         }
         val promo = promotion(b, building)
         val hood = building.hood
         val wealth = if (type.wealthSensitive) hood.wealth.toDouble().pow(1.6) else 1.0
         val comp = 1.0 / (1.0 + .15 * e.economy.rivals.competitionFor(b))
         val rep = .55 + .9 * b.reputation
-        return type.baseDemand * (.25 + 1.6 * promo) * type.curve[hour] * wealth * comp * rep * e.weather.demandFactor(type)
+        return type.baseDemand * (.25 + 1.6 * promo) * type.curve[hour] * wealth * comp * rep * e.weather.demandFactor(type) * e.state.player.rules.demand
     }
 
     /** Customers per hour the business can serve with the given workers. */
@@ -602,7 +603,7 @@ class Economy(private val e: GameEngine) {
         val s = e.state
         repeat(count) {
             val skill = (0.2 + e.rnd.nextDouble() * 0.6).coerceIn(0.1, 0.95)
-            val wage = ((role.baseWage * (0.8 + skill * 0.7)) * 2).roundToInt() / 2.0
+            val wage = ((role.baseWage * (0.8 + skill * 0.7) * s.player.rules.wages) * 2).roundToInt() / 2.0
             val name = "${Catalog.firstNames.random(e.rnd)} ${Catalog.lastNames.random(e.rnd)}"
             s.candidates += Employee(s.newId(), name, role, skill, wage, wage, 19 + e.rnd.nextInt(40), expiresDay = s.day + 3)
         }
@@ -720,7 +721,7 @@ class Economy(private val e: GameEngine) {
             if (hr > 0 && q.businessId >= 0) {
                 // HR finds a replacement with the same schedule
                 val skill = (0.3 + e.rnd.nextDouble() * 0.35)
-                val wage = ((q.role.baseWage * (0.85 + skill * 0.6)) * 2).roundToInt() / 2.0
+                val wage = ((q.role.baseWage * (0.85 + skill * 0.6) * s.player.rules.wages) * 2).roundToInt() / 2.0
                 val name = "${Catalog.firstNames.random(e.rnd)} ${Catalog.lastNames.random(e.rnd)}"
                 s.employees += Employee(s.newId(), name, q.role, skill, wage, wage, 20 + e.rnd.nextInt(35), businessId = q.businessId,
                     shiftStart = q.shiftStart, shiftEnd = q.shiftEnd, days = q.days, hiredDay = s.day)
