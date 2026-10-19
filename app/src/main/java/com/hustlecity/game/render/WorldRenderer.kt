@@ -125,6 +125,7 @@ class WorldRenderer(private val e: GameEngine) {
         val PATH = c(0xFFD8CFB8)
         val YELLOW = c(0xFFE8C547)
         val WHITE_LINE = c(0xFFE6E8EA)
+        val CURB = c(0xFFD3D0C8)
         val GLASS = c(0xFF3C5266)
         val GLASS_NIGHT = c(0xFF1E2A36)
         val LIT = c(0xFFFFE3A0)
@@ -651,6 +652,10 @@ class WorldRenderer(private val e: GameEngine) {
             junction(n, asphalt)
         }
         roadStamp++
+        if (!mapMode && proj.dist < 420) {
+            scene.material = Mat.SIDEWALK
+            drawCurbs(asphalt, scene.mix(scene.mix(scene.lit(CURB, 1f), white, snow * .85f), dark, wet * .2f))
+        }
         // lots that are visible from above
         city.forBuildingsIn(bbox[0], bbox[1], bbox[2], bbox[3]) { b ->
             when (b.kind) {
@@ -676,6 +681,7 @@ class WorldRenderer(private val e: GameEngine) {
         }
         scene.material = Mat.PLAIN
         if (proj.dist < 420) drawMarkings()
+        if (!mapMode && proj.dist < 260) drawTreePits(snow)
         features.drawGround(scene, bbox, mapMode, shadowDX, shadowDY,
             e.settings.shadows && !mapMode && scene.daylight > .15f && proj.dist < 400 && scene.gpu?.shadowOn != true)
         if (withRoute) drawRoute()
@@ -730,6 +736,27 @@ class WorldRenderer(private val e: GameEngine) {
      * node. Neighbouring roads join corner to corner, so sharp-angled junctions stay as tight as the roads they join.
      */
     private fun junction(n: com.hustlecity.game.world.RoadNode, asphalt: Int) {
+        val k = junctionOutline(n)
+        if (k < 0) {
+            // a bend in the road: round the joint off
+            val hw = n.edges.maxOf { e.city.roads.edges[it].cls.halfWidth }
+            scene.disc(n.x, n.y, .025f, hw, hw, 14, asphalt)
+            return
+        }
+        for (i in 0 until k) {
+            val j = if (i + 1 < k) i + 1 else 0
+            jx[0] = n.x; jy[0] = n.y; jz[0] = .026f
+            jx[1] = hx[i]; jy[1] = hy[i]; jz[1] = .026f
+            jx[2] = hx[j]; jy[2] = hy[j]; jz[2] = .026f
+            scene.poly(3, jx, jy, jz, asphalt)
+        }
+    }
+
+    /**
+     * The outline of a junction's asphalt into hx/hy, in order round the node: two end corners per road, with arcs
+     * across wide gaps. [mouth] marks the sides where a road comes in (the rest is curb). -1 for a plain bend.
+     */
+    private fun junctionOutline(n: com.hustlecity.game.world.RoadNode): Int {
         val g = e.city.roads
         val m = min(n.edges.size, jOrder.size)
         var any = false
@@ -739,12 +766,7 @@ class WorldRenderer(private val e: GameEngine) {
             jAngle[k] = g.angleAway(ed, n.id)
             if ((if (ed.a == n.id) ed.clearA else ed.clearB) > 0f) any = true
         }
-        if (!any) {
-            // a bend in the road: round the joint off
-            val hw = n.edges.maxOf { g.edges[it].cls.halfWidth }
-            scene.disc(n.x, n.y, .025f, hw, hw, 14, asphalt)
-            return
-        }
+        if (!any) return -1
         // roads in order of the direction they leave the node
         for (i in 1 until m) {
             val v = jOrder[i]; var j = i - 1
@@ -759,8 +781,8 @@ class WorldRenderer(private val e: GameEngine) {
             val hw = ed.cls.halfWidth
             // the corner just before this road's direction, then the one just after it
             if (k + 2 > hx.size) break
-            hx[k] = n.x + dx * clear + dy * hw; hy[k] = n.y + dy * clear - dx * hw; k++
-            hx[k] = n.x + dx * clear - dy * hw; hy[k] = n.y + dy * clear + dx * hw; k++
+            hx[k] = n.x + dx * clear + dy * hw; hy[k] = n.y + dy * clear - dx * hw; mouth[k] = true; k++
+            hx[k] = n.x + dx * clear - dy * hw; hy[k] = n.y + dy * clear + dx * hw; mouth[k] = false; k++
             // a wide gap to the next road (the outside of a bend or a fork): sweep round it so the fan stays convex
             val a0 = jAngle[jOrder[q]]
             val a1 = if (q + 1 < m) jAngle[jOrder[q + 1]] else jAngle[jOrder[0]] + 2f * PI.toFloat()
@@ -772,19 +794,15 @@ class WorldRenderer(private val e: GameEngine) {
                 for (t in 0..steps) {
                     if (k >= hx.size) break
                     val a = from + (to - from) * t / steps
-                    hx[k] = n.x + cos(a) * r; hy[k] = n.y + sin(a) * r; k++
+                    hx[k] = n.x + cos(a) * r; hy[k] = n.y + sin(a) * r; mouth[k] = false; k++
                 }
             }
         }
-        for (i in 0 until k) {
-            val j = if (i + 1 < k) i + 1 else 0
-            jx[0] = n.x; jy[0] = n.y; jz[0] = .026f
-            jx[1] = hx[i]; jy[1] = hy[i]; jz[1] = .026f
-            jx[2] = hx[j]; jy[2] = hy[j]; jz[2] = .026f
-            scene.poly(3, jx, jy, jz, asphalt)
-        }
+        // a dead end has a single road: its far side is curb all round
+        return k
     }
 
+    private val mouth = BooleanArray(64)
     private val jOrder = IntArray(16)
     private val jAngle = FloatArray(16)
     private val jx = FloatArray(3)
@@ -856,53 +874,186 @@ class WorldRenderer(private val e: GameEngine) {
 
     private fun cross(o: Int, a: Int, b: Int) = (hx[a] - hx[o]) * (hy[b] - hy[o]) - (hy[a] - hy[o]) * (hx[b] - hx[o])
 
+    /** Street trees stand in a square of earth behind an iron grate. */
+    private fun drawTreePits(snow: Float) {
+        val pr = props
+        val soil = scene.mix(scene.lit(c(0xFF4A3B2E), 1f), scene.lit(0xFFF2F5F8.toInt(), 1f), snow * .8f)
+        val grate = scene.lit(c(0xFF34373B), 1f)
+        val edge = scene.lit(c(0xFF8D8A83), 1f)
+        for ((i, t) in e.city.trees.withIndex()) {
+            if (!pr.streetTree[i] || pr.hiddenTree[i] || t.x < bbox[0] - 3f || t.x > bbox[2] + 3f || t.y < bbox[1] - 3f || t.y > bbox[3] + 3f) continue
+            val r = (t.r * .45f).coerceIn(.7f, 1.1f)
+            scene.groundRect(t.x - r - .12f, t.y - r - .12f, t.x + r + .12f, t.y + r + .12f, .013f, edge)
+            scene.groundRect(t.x - r, t.y - r, t.x + r, t.y + r, .015f, soil)
+            // the grate: two bars each way round a hole for the trunk
+            val h = r * .32f
+            scene.groundRect(t.x - r, t.y - r, t.x + r, t.y - r + .14f, .017f, grate)
+            scene.groundRect(t.x - r, t.y + r - .14f, t.x + r, t.y + r, .017f, grate)
+            scene.groundRect(t.x - r, t.y - r, t.x - r + .14f, t.y + r, .017f, grate)
+            scene.groundRect(t.x + r - .14f, t.y - r, t.x + r, t.y + r, .017f, grate)
+            scene.groundRect(t.x - h - .07f, t.y - r, t.x - h + .07f, t.y + r, .017f, grate)
+            scene.groundRect(t.x + h - .07f, t.y - r, t.x + h + .07f, t.y + r, .017f, grate)
+        }
+    }
+
+    /** A steady 0..1 value for a pair of numbers, for wear and placement that never flickers. */
+    private fun hash01(a: Int, b: Int): Float {
+        var h = a * 374761393 + b * 668265263
+        h = (h xor (h ushr 13)) * 1274126177
+        return ((h xor (h ushr 16)) and 0xFFFF) / 65535f
+    }
+
+    /** Paint that has seen some traffic: [color] faded by up to [amount], differently for each piece. */
+    private fun worn(color: Int, a: Int, b: Int, amount: Float) = scene.withAlpha(color, 1f - amount * hash01(a, b))
+
+    /** How crossings are painted at a junction: 0 none, 1 zebra, 2 zebra between two edge lines, 3 two thin lines. */
+    private fun crossStyle(n: com.hustlecity.game.world.RoadNode): Int {
+        if (n.degree < 3) return 0
+        return when (e.city.mapId) {
+            "nyc" -> if (n.signal) 2 else 3
+            com.hustlecity.game.world.Maps.CLASSIC -> if (n.signal) 1 else 3
+            else -> 1
+        }
+    }
+
+    /**
+     * Curbs: a pale concrete edge between the asphalt and the sidewalk with a darker gutter inside it, along every
+     * road and round the corners of its junctions.
+     */
+    private fun drawCurbs(asphalt: Int, curb: Int) {
+        val g = e.city.roads
+        val gutter = scene.mix(asphalt, scene.lit(c(0xFF1E2024), 1f), .22f)
+        for (ed in g.edges) {
+            if (ed.overWater || !edgeVisible(ed, 12f)) continue
+            val s0 = ed.clearA; val s1 = ed.len - ed.clearB
+            val hw = ed.cls.halfWidth
+            strip(ed, s0, s1, hw - .38f, hw, .0262f, gutter); strip(ed, s0, s1, -hw, -hw + .38f, .0262f, gutter)
+            strip(ed, s0, s1, hw, hw + .24f, .028f, curb); strip(ed, s0, s1, -hw - .24f, -hw, .028f, curb)
+        }
+        for (n in g.nodes) {
+            if (n.x < bbox[0] - 30f || n.x > bbox[2] + 30f || n.y < bbox[1] - 30f || n.y > bbox[3] + 30f) continue
+            val k = junctionOutline(n)
+            for (i in 0 until k) {
+                if (mouth[i]) continue
+                val j = if (i + 1 < k) i + 1 else 0
+                val ax = hx[i]; val ay = hy[i]; val bx = hx[j]; val by = hy[j]
+                val dx = bx - ax; val dy = by - ay
+                val l = sqrt(dx * dx + dy * dy)
+                if (l < .05f) continue
+                var nx = -dy / l; var ny = dx / l
+                if (nx * ((ax + bx) * .5f - n.x) + ny * ((ay + by) * .5f - n.y) < 0f) { nx = -nx; ny = -ny }
+                scene.quad(ax, ay, .028f, bx, by, .028f, bx + nx * .24f, by + ny * .24f, .028f, ax + nx * .24f, ay + ny * .24f, .028f, curb)
+            }
+        }
+    }
+
     private fun drawMarkings() {
+        val manila = e.city.mapId == "manila"
+        val fade = if (manila) .55f else .38f
         val yellow = scene.lit(YELLOW, 1f)
         val white = scene.lit(WHITE_LINE, .95f)
         val near = proj.dist < 220
         val iron = scene.lit(c(0xFF3B3E43), 1f)
         val rim = scene.lit(c(0xFF5A5E64), 1f)
+        val asphaltLit = scene.lit(ASPHALT, 1f)
+        val patchDark = scene.mix(asphaltLit, scene.lit(c(0xFF202226), 1f), .22f)
+        val patchPale = scene.mix(asphaltLit, scene.lit(c(0xFF9A9CA0), 1f), .15f)
+        val track = scene.withAlpha(scene.lit(c(0xFF1C1D20), 1f), .16f)
         val g = e.city.roads
+        val left = e.city.leftHand
         for (ed in g.edges) {
             if (!edgeVisible(ed, 12f)) continue
             val s0 = ed.clearA + 3.5f; val s1 = ed.len - ed.clearB - 3.5f
             if (s1 <= s0) continue
+            val hw = ed.cls.halfWidth
+            if (near) {
+                // tyre tracks darken the middle of every lane, and old repairs patch the asphalt here and there
+                if (!ed.overWater) {
+                    for (lane in 0 until ed.cls.lanes) for (sd in -1..1 step 2) {
+                        val o = sd * (lane + .5f) * ed.cls.laneWidth
+                        if (kotlin.math.abs(o) > hw - .6f) continue
+                        strip(ed, s0 - 2f, s1 + 2f, o - .9f, o - .35f, .0254f, track)
+                        strip(ed, s0 - 2f, s1 + 2f, o + .35f, o + .9f, .0254f, track)
+                    }
+                    val patches = (ed.len / 40f).toInt().coerceAtMost(3)
+                    for (p in 0 until patches) {
+                        val r = hash01(ed.id, p * 3)
+                        val pl = 2.2f + 3f * hash01(ed.id, p * 3 + 1)
+                        val at = s0 + (s1 - s0 - pl).coerceAtLeast(0f) * r
+                        val pw = 1.2f + 1.4f * hash01(ed.id, p * 3 + 2)
+                        val o = (hash01(p, ed.id) * 2f - 1f) * (hw - pw * .5f - .5f).coerceAtLeast(0f)
+                        strip(ed, at, min(at + pl, s1), o - pw * .5f, o + pw * .5f, .0256f, if ((ed.id + p) % 3 == 0) patchPale else patchDark)
+                    }
+                }
+            }
             when {
-                // divided roads: a double yellow line, and dashed white lines between the lanes
+                // divided roads: a double yellow line, and dashed white lines between the lanes; the paint is worn in places
                 ed.cls.rank >= 2 -> {
-                    strip(ed, s0, s1, -.35f, -.15f, .03f, yellow)
-                    strip(ed, s0, s1, .15f, .35f, .03f, yellow)
-                    if (near) for (k in 1 until ed.cls.lanes) for (sd in -1..1 step 2) {
-                        val o = sd * k * ed.cls.laneWidth
-                        var t = s0 + 1f
-                        while (t < s1 - 2f) { strip(ed, t, min(t + 3f, s1), o - .1f, o + .1f, .03f, white); t += 8f }
+                    var t = s0; var k = 0
+                    while (t < s1) {
+                        val t1 = min(t + 6f, s1)
+                        strip(ed, t, t1, -.35f, -.15f, .03f, worn(yellow, ed.id, k, fade))
+                        strip(ed, t, t1, .15f, .35f, .03f, worn(yellow, k, ed.id, fade))
+                        t = t1; k++
+                    }
+                    if (near) for (lane in 1 until ed.cls.lanes) for (sd in -1..1 step 2) {
+                        val o = sd * lane * ed.cls.laneWidth
+                        t = s0 + 1f; k = 0
+                        while (t < s1 - 2f) { strip(ed, t, min(t + 3f, s1), o - .1f, o + .1f, .03f, worn(white, ed.id * 7 + lane * sd, k++, fade)); t += 8f }
                     }
                 }
                 ed.cls == com.hustlecity.game.world.RoadClass.STREET -> {
-                    var t = s0 + 1f
-                    while (t < s1 - 2f) { strip(ed, t, min(t + 3f, s1), -.1f, .1f, .03f, yellow); t += 7f }
+                    var t = s0 + 1f; var k = 0
+                    while (t < s1 - 2f) { strip(ed, t, min(t + 3f, s1), -.1f, .1f, .03f, worn(yellow, ed.id, k++, fade)); t += 7f }
                 }
             }
             if (!near) continue
-            // crosswalks where the road meets a junction
+            // crosswalks where the road meets a junction, painted the city's way, with stop lines at the lights
             for (end in 0..1) {
                 val node = g.nodes[if (end == 0) ed.a else ed.b]
-                if (node.degree < 3 || ed.cls.rank < 1) continue
+                val style = crossStyle(node)
+                if (style == 0 || ed.cls.rank < 1) continue
                 val clear = if (end == 0) ed.clearA else ed.clearB
                 val a = if (end == 0) clear + .5f else ed.len - clear - 3.2f
-                var o = -ed.cls.halfWidth + .4f
-                while (o < ed.cls.halfWidth - .4f) { strip(ed, a, a + 2.7f, o, o + .6f, .04f, white); o += 1.25f }
+                val salt = ed.id * 2 + end
+                when (style) {
+                    3 -> {
+                        strip(ed, a, a + .3f, -hw + .3f, hw - .3f, .04f, worn(white, salt, 1, fade))
+                        strip(ed, a + 2.4f, a + 2.7f, -hw + .3f, hw - .3f, .04f, worn(white, salt, 2, fade))
+                    }
+                    else -> {
+                        if (style == 2) {
+                            strip(ed, a - .1f, a + .2f, -hw + .3f, hw - .3f, .04f, worn(white, salt, 1, fade))
+                            strip(ed, a + 2.5f, a + 2.8f, -hw + .3f, hw - .3f, .04f, worn(white, salt, 2, fade))
+                        }
+                        var o = -hw + .4f; var k = 0
+                        while (o < hw - .4f) { strip(ed, a, a + 2.7f, o, o + .6f, .04f, worn(white, salt, 10 + k++, fade)); o += 1.25f }
+                    }
+                }
+                if (node.signal) {
+                    // traffic coming toward this junction stops behind the line on its own side of the road
+                    val sign = (if (end == 1) -1f else 1f) * (if (left) -1f else 1f)
+                    val b = if (end == 0) clear + 4.2f else ed.len - clear - 4.6f
+                    val o0 = if (sign > 0) .4f else -hw + .3f
+                    val o1 = if (sign > 0) hw - .3f else -.4f
+                    strip(ed, b, b + .4f, o0, o1, .04f, worn(white, salt, 3, fade))
+                }
             }
-            // a manhole cover and storm drains
+            // a manhole cover, a utility cover on the sidewalk and storm drains at the curb
             val mid = (s0 + s1) * .5f + ((ed.id * 7) % 5) * 2f
             if (mid < s1) {
                 val o = (if (ed.id % 2 == 0) .5f else -.5f) * ed.cls.laneWidth
                 val mx = ed.ax + ed.ux * mid + ed.uy * o; val my = ed.ay + ed.uy * mid - ed.ux * o
                 scene.disc(mx, my, .035f, .55f, .55f, 10, rim)
                 scene.disc(mx, my, .04f, .45f, .45f, 10, iron)
+                if (!ed.overWater && ed.len > 30f) {
+                    val so = (if (ed.id % 3 == 0) -1f else 1f) * (hw + ed.cls.sidewalk * .55f)
+                    strip(ed, mid - 7f, mid - 6.2f, so - .4f, so + .4f, .012f, rim)
+                    strip(ed, mid - 6.95f, mid - 6.25f, so - .35f, so + .35f, .014f, iron)
+                }
             }
-            for (sd in -1..1 step 2) {
-                val o = sd * (ed.cls.halfWidth - .35f)
+            if (!ed.overWater) for (sd in -1..1 step 2) {
+                val o = sd * (hw - .35f)
                 strip(ed, s0 + 2.5f, s0 + 3.7f, o - .25f, o + .25f, .035f, iron)
             }
         }

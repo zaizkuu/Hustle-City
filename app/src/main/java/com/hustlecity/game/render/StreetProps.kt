@@ -42,6 +42,8 @@ class StreetProps(val city: City) {
      * 5 ginkgo (golden in autumn).
      */
     val treeKind = IntArray(city.trees.size)
+    /** Trees planted in the pavement (not in a park), which stand in a pit with a grate. */
+    val streetTree = BooleanArray(city.trees.size)
 
     private val cell = 40f
     private val gx0 = city.bounds[0] - 40f
@@ -157,6 +159,7 @@ class StreetProps(val city: City) {
         // tree kinds: what the map planted, or park trees vs street trees with some conifers and flowering trees
         for ((i, t) in city.trees.withIndex()) {
             val inPark = city.parks.any { it.kind != Park.PLAZA && Geo.inside(t.x, t.y, it.poly) }
+            streetTree[i] = !inPark && !city.reserved(t.x, t.y)
             val h = ((i * 2654435761L) ushr 7).toInt() and 0xFF
             treeKind[i] = when (t.species) {
                 1 -> 4
