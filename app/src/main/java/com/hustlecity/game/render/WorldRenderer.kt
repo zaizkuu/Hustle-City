@@ -18,6 +18,7 @@ import com.hustlecity.game.world.Building
 import com.hustlecity.game.world.City
 import com.hustlecity.game.world.dist
 import com.hustlecity.game.render.gpu.GpuFrame
+import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.ceil
@@ -534,6 +535,36 @@ class WorldRenderer(private val e: GameEngine) {
         scene.groundRect(a, b, cc, d, z, color)
     }
 
+    private val gx = FloatArray(16); private val gy = FloatArray(16); private val gz = FloatArray(16)
+
+    /** Draws cached triangles of a ground polygon, if its bounding box is in view. */
+    private fun groundPoly(poly: FloatArray, z: Float, color: Int) {
+        val bb = e.city.boxOf(poly)
+        if (bb[2] < bbox[0] || bb[0] > bbox[2] || bb[3] < bbox[1] || bb[1] > bbox[3]) return
+        val t = e.city.triangles(poly)
+        var k = 0
+        while (k + 5 < t.size) {
+            val x0 = t[k]; val y0 = t[k + 1]; val x1 = t[k + 2]; val y1 = t[k + 3]; val x2 = t[k + 4]; val y2 = t[k + 5]
+            k += 6
+            if (max(x0, max(x1, x2)) < bbox[0] || min(x0, min(x1, x2)) > bbox[2] || max(y0, max(y1, y2)) < bbox[1] || min(y0, min(y1, y2)) > bbox[3]) continue
+            gx[0] = x0; gy[0] = y0; gx[1] = x1; gy[1] = y1; gx[2] = x2; gy[2] = y2
+            gz[0] = z; gz[1] = z; gz[2] = z
+            scene.poly(3, gx, gy, gz, color)
+        }
+    }
+
+    /** A flat strip along a road piece, [o0]..[o1] meters to the left of a→b, from [s0] to [s1] along it. */
+    private fun strip(e0: com.hustlecity.game.world.RoadEdge, s0: Float, s1: Float, o0: Float, o1: Float, z: Float, color: Int) {
+        if (s1 <= s0) return
+        val lx = e0.uy; val ly = -e0.ux
+        val ax = e0.ax + e0.ux * s0; val ay = e0.ay + e0.uy * s0
+        val bx = e0.ax + e0.ux * s1; val by = e0.ay + e0.uy * s1
+        scene.quad(ax + lx * o0, ay + ly * o0, z, bx + lx * o0, by + ly * o0, z, bx + lx * o1, by + ly * o1, z, ax + lx * o1, ay + ly * o1, z, color)
+    }
+
+    private fun edgeVisible(e0: com.hustlecity.game.world.RoadEdge, pad: Float) =
+        !(max(e0.ax, e0.bx) + pad < bbox[0] || min(e0.ax, e0.bx) - pad > bbox[2] || max(e0.ay, e0.by) + pad < bbox[1] || min(e0.ay, e0.by) - pad > bbox[3])
+
     private fun drawGround(withRoute: Boolean) {
         // snow lies on sidewalks and parks, roads turn to slush; rain darkens everything
         val snow = scene.snow
@@ -544,66 +575,88 @@ class WorldRenderer(private val e: GameEngine) {
         val asphalt = scene.mix(scene.mix(scene.lit(ASPHALT, 1f), white, snow * .45f), dark, wet * .3f)
         val grass = scene.mix(scene.lit(GRASS, 1f), white, snow * .95f)
         val pathC = scene.mix(scene.lit(PATH, 1f), white, snow * .9f)
+        val city = e.city
         scene.groundPass = true
         // the GPU draws a sky, so the sea around the city is real geometry there
         if (scene.gpu != null) {
             scene.material = Mat.WATER
             scene.groundRect(bbox[0] - 400f, bbox[1] - 400f, bbox[2] + 400f, bbox[3] + 400f, -.05f, WATER)
         }
+        // land: the city's paving, then rivers and bays cut into it (or, on island maps, the land masses)
         scene.material = Mat.SIDEWALK
-        clipRect(-City.AV_HALF - City.SIDEWALK, -City.ST_HALF - City.SIDEWALK, City.WIDTH + City.AV_HALF + City.SIDEWALK, City.HEIGHT + City.ST_HALF + City.SIDEWALK, 0f, sidewalk)
-        scene.material = Mat.ASPHALT
-        for (i in 0 until City.AVENUES) {
-            val x = City.avenueX(i)
-            clipRect(x - City.AV_HALF, -City.ST_HALF, x + City.AV_HALF, City.HEIGHT + City.ST_HALF, 0f, asphalt)
-        }
-        for (k in 0 until City.STREETS) {
-            val y = City.streetY(k)
-            clipRect(-City.AV_HALF, y - City.ST_HALF, City.WIDTH + City.AV_HALF, y + City.ST_HALF, 0f, asphalt)
-        }
-        // neighborhood tint (map filters)
-        if (mapMode) {
-            for (row in 0 until City.ROWS) for (col in 0 until City.COLS) {
-                val hood = City.neighborhoodOfBlock(col, row)
-                if (e.ui.mapFilters["hood:$hood"] == true) {
-                    val x0 = col * City.AV_SPACING + City.AV_HALF; val y0 = row * City.ST_SPACING + City.ST_HALF
-                    clipRect(x0, y0, x0 + City.AV_SPACING - 2 * City.AV_HALF, y0 + City.ST_SPACING - 2 * City.ST_HALF, .05f,
-                        scene.withAlpha(City.neighborhoods[hood].color, .45f))
-                }
+        val sh = city.shore
+        if (sh.land.isEmpty()) clipRect(city.bounds[0], city.bounds[1], city.bounds[2], city.bounds[3], 0f, sidewalk)
+        else for (l in sh.land) groundPoly(l, 0f, sidewalk)
+        scene.material = Mat.WATER
+        val water = scene.lit(WATER, 1f)
+        for (w in sh.water) groundPoly(w, .005f, water)
+        scene.material = Mat.SIDEWALK
+        for (w in sh.islands) groundPoly(w, .01f, sidewalk)
+        scene.material = Mat.WATER
+        for (w in sh.canals) groundPoly(w, .012f, water)
+        // parks, plazas and palace grounds with their footpaths
+        for (pk in city.parks) {
+            when (pk.kind) {
+                com.hustlecity.game.world.Park.PLAZA -> { scene.material = Mat.SIDEWALK; groundPoly(pk.poly, .015f, scene.mix(pathC, sidewalk, .4f)) }
+                com.hustlecity.game.world.Park.GROUNDS -> { scene.material = Mat.GRASS; groundPoly(pk.poly, .015f, scene.mix(grass, scene.lit(c(0xFF4E7F45), 1f), .35f)) }
+                else -> { scene.material = Mat.GRASS; groundPoly(pk.poly, .015f, grass) }
+            }
+            scene.material = Mat.ROOF
+            for (path in pk.paths) {
+                val dx = path[2] - path[0]; val dy = path[3] - path[1]
+                val l = sqrt(dx * dx + dy * dy).coerceAtLeast(.01f)
+                val nx = -dy / l * 1.5f; val ny = dx / l * 1.5f
+                if (max(path[0], path[2]) < bbox[0] || min(path[0], path[2]) > bbox[2] || max(path[1], path[3]) < bbox[1] || min(path[1], path[3]) > bbox[3]) continue
+                scene.quad(path[0] + nx, path[1] + ny, .03f, path[2] + nx, path[3] + ny, .03f, path[2] - nx, path[3] - ny, .03f, path[0] - nx, path[1] - ny, .03f, pathC)
             }
         }
+        // neighborhood tint (map filters)
+        if (mapMode) for (h in city.neighborhoods) {
+            if (e.ui.mapFilters["hood:${h.id}"] != true) continue
+            city.forBuildingsIn(bbox[0], bbox[1], bbox[2], bbox[3]) { b ->
+                if (b.hood.id != h.id) return@forBuildingsIn
+                scene.setFrame(b.ox, b.oy, b.cs, b.sn)
+                scene.groundRect(-3f, -3f, b.w + 3f, b.d + 3f, .05f, scene.withAlpha(h.color, .45f))
+                scene.clearFrame()
+            }
+        }
+        // roads: bridge decks get their own sidewalks, then the asphalt, then the junctions
+        val g = city.roads
+        if (roadSeen.size < g.edges.size) roadSeen = IntArray(g.edges.size)
+        scene.material = Mat.SIDEWALK
+        for (ed in g.edges) if (ed.overWater && edgeVisible(ed, 20f)) strip(ed, 0f, ed.len, -ed.cls.outer, ed.cls.outer, .02f, sidewalk)
+        scene.material = Mat.ASPHALT
+        g.forCells(bbox[0] - 20f, bbox[1] - 20f, bbox[2] + 20f, bbox[3] + 20f) { id -> roadSeen[id] = roadStamp }
+        for (ed in g.edges) {
+            if (roadSeen.getOrElse(ed.id) { 0 } != roadStamp) continue
+            strip(ed, ed.clearA, ed.len - ed.clearB, -ed.cls.halfWidth, ed.cls.halfWidth, .025f, asphalt)
+        }
+        for (n in g.nodes) {
+            if (n.x < bbox[0] - 30f || n.x > bbox[2] + 30f || n.y < bbox[1] - 30f || n.y > bbox[3] + 30f) continue
+            junction(n, asphalt)
+        }
+        roadStamp++
         // lots that are visible from above
-        val col0 = floor(bbox[0] / City.AV_SPACING).toInt().coerceAtLeast(0)
-        val col1 = floor(bbox[2] / City.AV_SPACING).toInt().coerceAtMost(City.COLS - 1)
-        val row0 = floor(bbox[1] / City.ST_SPACING).toInt().coerceAtLeast(0)
-        val row1 = floor(bbox[3] / City.ST_SPACING).toInt().coerceAtMost(City.ROWS - 1)
-        for (row in row0..row1) for (col in col0..col1) {
-            for (b in e.city.blocks[row * City.COLS + col]) {
-                when (b.kind) {
-                    BKind.PARK -> {
-                        scene.material = Mat.GRASS
-                        clipRect(b.minX, b.minY, b.maxX, b.maxY, .02f, grass)
-                        scene.material = Mat.ROOF
-                        clipRect(b.cx - 1.5f, b.minY, b.cx + 1.5f, b.maxY, .04f, pathC)
-                        clipRect(b.minX, b.cy - 1.5f, b.maxX, b.cy + 1.5f, .04f, pathC)
-                        scene.material = Mat.PLAIN
-                    }
-                    BKind.PARKING -> {
-                        scene.material = Mat.ASPHALT
-                        clipRect(b.minX, b.minY, b.maxX, b.maxY, .02f, scene.mix(scene.mix(scene.lit(c(0xFF55585E), 1f), white, snow * .6f), dark, wet * .3f))
-                        if (!mapMode && proj.dist < 300) {
-                            var x = b.minX + 3f
-                            val line = scene.lit(WHITE_LINE, .9f)
-                            while (x < b.maxX - 1f) {
-                                clipRect(x, b.minY + 1f, x + .15f, b.minY + 6f, .04f, line)
-                                clipRect(x, b.maxY - 6f, x + .15f, b.maxY - 1f, .04f, line)
-                                x += 2.8f
-                            }
+        city.forBuildingsIn(bbox[0], bbox[1], bbox[2], bbox[3]) { b ->
+            when (b.kind) {
+                BKind.PARKING -> {
+                    scene.setFrame(b.ox, b.oy, b.cs, b.sn)
+                    scene.material = Mat.ASPHALT
+                    scene.groundRect(0f, 0f, b.w, b.d, .02f, scene.mix(scene.mix(scene.lit(c(0xFF55585E), 1f), white, snow * .6f), dark, wet * .3f))
+                    if (!mapMode && proj.dist < 300) {
+                        var x = 3f
+                        val line = scene.lit(WHITE_LINE, .9f)
+                        while (x < b.w - 1f) {
+                            scene.groundRect(x, 1f, x + .15f, 6f, .04f, line)
+                            scene.groundRect(x, b.d - 6f, x + .15f, b.d - 1f, .04f, line)
+                            x += 2.8f
                         }
                     }
-                    BKind.GAS -> clipRect(b.minX, b.minY, b.maxX, b.maxY, .02f, scene.lit(c(0xFF5A5D63), 1f))
-                    else -> if (mapMode && b.kind != BKind.PARK) clipRect(b.minX, b.minY, b.maxX, b.maxY, .01f, scene.lit(LOT, 1f))
+                    scene.clearFrame()
                 }
+                BKind.GAS -> { scene.setFrame(b.ox, b.oy, b.cs, b.sn); scene.groundRect(0f, 0f, b.w, b.d, .02f, scene.lit(c(0xFF5A5D63), 1f)); scene.clearFrame() }
+                BKind.PARK -> {}
+                else -> if (mapMode) { scene.setFrame(b.ox, b.oy, b.cs, b.sn); scene.groundRect(0f, 0f, b.w, b.d, .01f, scene.lit(LOT, 1f)); scene.clearFrame() }
             }
         }
         scene.material = Mat.PLAIN
@@ -615,32 +668,26 @@ class WorldRenderer(private val e: GameEngine) {
             val core = scene.withAlpha(c(0xFFFFE6A8), .12f * (1f - scene.daylight))
             if (proj.dist < 260) {
                 val pr = props
-                for (row in row0..row1) for (col in col0..col1) for (pi in pr.byBlock[row * City.COLS + col]) {
-                    if (!pr.isLamp(pi)) continue
+                pr.forIn(bbox[0] - 6f, bbox[1] - 6f, bbox[2] + 6f, bbox[3] + 6f) { pi ->
+                    if (!pr.isLamp(pi)) return@forIn
                     val lx = pr.lightX(pi); val ly = pr.lightY(pi)
-                    if (lx < bbox[0] - 6f || lx > bbox[2] + 6f || ly < bbox[1] - 6f || ly > bbox[3] + 6f) continue
                     scene.disc(lx, ly, .05f, 4.5f, 4.5f, 12, glow)
                     scene.disc(lx, ly, .06f, 2f, 2f, 10, core)
                 }
             }
-            forIntersections { x, y, _, _ ->
-                scene.disc(x - 12f, y - 8f, .05f, 5f, 5f, 14, glow)
-                scene.disc(x - 12f, y - 8f, .06f, 2.2f, 2.2f, 10, core)
-                scene.disc(x + 12f, y + 8f, .05f, 5f, 5f, 14, glow)
-                scene.disc(x + 12f, y + 8f, .06f, 2.2f, 2.2f, 10, core)
+            forSignals { _, _, x, y ->
+                scene.disc(x, y, .05f, 5f, 5f, 14, glow)
+                scene.disc(x, y, .06f, 2.2f, 2.2f, 10, core)
             }
         }
         // shadows
         if (e.settings.shadows && !mapMode && scene.daylight > .15f && proj.dist < 400 && scene.gpu?.shadowOn != true) {
             val shadowColor = scene.withAlpha(0xFF000000.toInt(), .22f * scene.daylight)
             val expand = 60f
-            for (row in row0..row1) for (col in col0..col1) {
-                for (b in e.city.blocks[row * City.COLS + col]) {
-                    if (b.height <= 0f) continue
-                    shadow(b.minX, b.minY, b.maxX, b.maxY, b.height, shadowColor)
-                }
+            city.forBuildingsIn(bbox[0] - expand, bbox[1] - expand, bbox[2] + expand, bbox[3] + expand) { b ->
+                if (b.height > 0f) shadow(b, shadowColor)
             }
-            if (proj.dist < 250) for (t in e.city.trees) {
+            if (proj.dist < 250) for (t in city.trees) {
                 if (t.x < bbox[0] - expand || t.x > bbox[2] + expand || t.y < bbox[1] - expand || t.y > bbox[3] + expand) continue
                 scene.disc(t.x + shadowDX * t.h * .8f, t.y + shadowDY * t.h * .8f, .03f, t.r, t.r * .85f, 8, shadowColor)
             }
@@ -648,128 +695,188 @@ class WorldRenderer(private val e: GameEngine) {
         scene.groundPass = false
     }
 
-    private val hx = FloatArray(8)
-    private val hy = FloatArray(8)
-    private val hz = FloatArray(8)
-    private val hullX = FloatArray(16)
-    private val hullY = FloatArray(16)
-    private val sortIdx = IntArray(8)
-    private val hidx = IntArray(20)
+    private var roadSeen = IntArray(0)
+    private var roadStamp = 1
 
-    private fun shadow(x0: Float, y0: Float, x1: Float, y1: Float, h: Float, color: Int) {
-        val ox = shadowDX * h; val oy = shadowDY * h
-        hx[0] = x0; hy[0] = y0; hx[1] = x1; hy[1] = y0; hx[2] = x1; hy[2] = y1; hx[3] = x0; hy[3] = y1
-        for (i in 0 until 4) { hx[i + 4] = hx[i] + ox; hy[i + 4] = hy[i] + oy }
-        // monotone chain convex hull on 8 points (allocation free)
-        for (i in 0 until 8) sortIdx[i] = i
-        for (i in 1 until 8) {
+    /**
+     * Fills a junction: the end corners of every road meeting there, in order around the node, fanned out from the
+     * node. Neighbouring roads join corner to corner, so sharp-angled junctions stay as tight as the roads they join.
+     */
+    private fun junction(n: com.hustlecity.game.world.RoadNode, asphalt: Int) {
+        val g = e.city.roads
+        val m = min(n.edges.size, jOrder.size)
+        var any = false
+        for (k in 0 until m) {
+            val ed = g.edges[n.edges[k]]
+            jOrder[k] = k
+            jAngle[k] = g.angleAway(ed, n.id)
+            if ((if (ed.a == n.id) ed.clearA else ed.clearB) > 0f) any = true
+        }
+        if (!any) {
+            // a bend in the road: round the joint off
+            val hw = n.edges.maxOf { g.edges[it].cls.halfWidth }
+            scene.disc(n.x, n.y, .025f, hw, hw, 14, asphalt)
+            return
+        }
+        // roads in order of the direction they leave the node
+        for (i in 1 until m) {
+            val v = jOrder[i]; var j = i - 1
+            while (j >= 0 && jAngle[jOrder[j]] > jAngle[v]) { jOrder[j + 1] = jOrder[j]; j-- }
+            jOrder[j + 1] = v
+        }
+        var k = 0
+        for (q in 0 until m) {
+            val ed = g.edges[n.edges[jOrder[q]]]
+            val clear = if (ed.a == n.id) ed.clearA else ed.clearB
+            val dx = if (ed.a == n.id) ed.ux else -ed.ux; val dy = if (ed.a == n.id) ed.uy else -ed.uy
+            val hw = ed.cls.halfWidth
+            // the corner just before this road's direction, then the one just after it
+            if (k + 2 > hx.size) break
+            hx[k] = n.x + dx * clear + dy * hw; hy[k] = n.y + dy * clear - dx * hw; k++
+            hx[k] = n.x + dx * clear - dy * hw; hy[k] = n.y + dy * clear + dx * hw; k++
+            // a wide gap to the next road (the outside of a bend or a fork): sweep round it so the fan stays convex
+            val a0 = jAngle[jOrder[q]]
+            val a1 = if (q + 1 < m) jAngle[jOrder[q + 1]] else jAngle[jOrder[0]] + 2f * PI.toFloat()
+            if (a1 - a0 > 2.6f) {
+                val nextEd = g.edges[n.edges[jOrder[(q + 1) % m]]]
+                val r = max(hw, nextEd.cls.halfWidth)
+                val from = a0 + PI.toFloat() / 2; val to = a1 - PI.toFloat() / 2
+                val steps = ((to - from) / .5f).toInt().coerceIn(1, 8)
+                for (t in 0..steps) {
+                    if (k >= hx.size) break
+                    val a = from + (to - from) * t / steps
+                    hx[k] = n.x + cos(a) * r; hy[k] = n.y + sin(a) * r; k++
+                }
+            }
+        }
+        for (i in 0 until k) {
+            val j = if (i + 1 < k) i + 1 else 0
+            jx[0] = n.x; jy[0] = n.y; jz[0] = .026f
+            jx[1] = hx[i]; jy[1] = hy[i]; jz[1] = .026f
+            jx[2] = hx[j]; jy[2] = hy[j]; jz[2] = .026f
+            scene.poly(3, jx, jy, jz, asphalt)
+        }
+    }
+
+    private val jOrder = IntArray(16)
+    private val jAngle = FloatArray(16)
+    private val jx = FloatArray(3)
+    private val jy = FloatArray(3)
+    private val jz = FloatArray(3)
+
+    /** Convex hull of the first [k] points of hx/hy into hullX/hullY; returns the point count. */
+    private fun hullOf(k: Int): Int {
+        for (i in 0 until k) sortIdx[i] = i
+        for (i in 1 until k) {
             val v = sortIdx[i]
             var j = i - 1
             while (j >= 0 && (hx[sortIdx[j]] > hx[v] || (hx[sortIdx[j]] == hx[v] && hy[sortIdx[j]] > hy[v]))) { sortIdx[j + 1] = sortIdx[j]; j-- }
             sortIdx[j + 1] = v
         }
-        var k = 0
-        for (q in 0 until 8) {
+        var m = 0
+        for (q in 0 until k) {
             val i = sortIdx[q]
-            while (k >= 2 && cross(hidx[k - 2], hidx[k - 1], i) <= 0) k--
-            hidx[k++] = i
+            while (m >= 2 && cross(hidx[m - 2], hidx[m - 1], i) <= 0) m--
+            hidx[m++] = i
         }
-        val lower = k + 1
-        for (q in 6 downTo 0) {
+        val lower = m + 1
+        for (q in k - 2 downTo 0) {
             val i = sortIdx[q]
-            while (k >= lower && cross(hidx[k - 2], hidx[k - 1], i) <= 0) k--
-            hidx[k++] = i
+            while (m >= lower && cross(hidx[m - 2], hidx[m - 1], i) <= 0) m--
+            hidx[m++] = i
         }
-        val n = (k - 1).coerceAtMost(8)
-        for (i in 0 until n) { hullX[i] = hx[hidx[i]]; hullY[i] = hy[hidx[i]]; hz[i] = .03f }
+        val n = (m - 1).coerceIn(0, hullX.size)
+        for (i in 0 until n) { hullX[i] = hx[hidx[i]]; hullY[i] = hy[hidx[i]] }
+        return n
+    }
+
+    /** Each signalled junction approach in view: (node, edge, x, y) of the pole on its corner. */
+    private inline fun forSignals(block: (com.hustlecity.game.world.RoadNode, com.hustlecity.game.world.RoadEdge, Float, Float) -> Unit) {
+        val g = e.city.roads
+        for (n in g.nodes) {
+            if (!n.signal || n.x < bbox[0] - 20f || n.x > bbox[2] + 20f || n.y < bbox[1] - 20f || n.y > bbox[3] + 20f) continue
+            for (id in n.edges) {
+                val ed = g.edges[id]
+                val clear = if (ed.a == n.id) ed.clearA else ed.clearB
+                // the approach comes toward the node; its pole stands on the near-side corner past the curb
+                val dx = if (ed.a == n.id) ed.ux else -ed.ux; val dy = if (ed.a == n.id) ed.uy else -ed.uy
+                val side = if (e.city.leftHand) -1f else 1f
+                val off = ed.cls.halfWidth + 1.4f
+                // right of someone driving toward the node (direction -d) is (dy, -dx) in a y-down world
+                block(n, ed, n.x + dx * (clear + 1f) + dy * off * side, n.y + dy * (clear + 1f) - dx * off * side)
+            }
+        }
+    }
+
+    private val hx = FloatArray(64)
+    private val hy = FloatArray(64)
+    private val hz = FloatArray(40)
+    private val hullX = FloatArray(40)
+    private val hullY = FloatArray(40)
+    private val sortIdx = IntArray(32)
+    private val hidx = IntArray(80)
+
+    /** The sun's shadow of a building on the ground: the hull of its footprint and the footprint pushed away from the sun. */
+    private fun shadow(b: Building, color: Int) {
+        val ox = shadowDX * b.height; val oy = shadowDY * b.height
+        hx[0] = b.wx(0f, 0f); hy[0] = b.wy(0f, 0f); hx[1] = b.wx(b.w, 0f); hy[1] = b.wy(b.w, 0f)
+        hx[2] = b.wx(b.w, b.d); hy[2] = b.wy(b.w, b.d); hx[3] = b.wx(0f, b.d); hy[3] = b.wy(0f, b.d)
+        for (i in 0 until 4) { hx[i + 4] = hx[i] + ox; hy[i + 4] = hy[i] + oy }
+        val n = hullOf(8).coerceAtMost(8)
+        for (i in 0 until n) hz[i] = .03f
         scene.poly(n, hullX, hullY, hz, color)
     }
 
     private fun cross(o: Int, a: Int, b: Int) = (hx[a] - hx[o]) * (hy[b] - hy[o]) - (hy[a] - hy[o]) * (hx[b] - hx[o])
 
-    private inline fun forIntersections(block: (Float, Float, Int, Int) -> Unit) {
-        val i0 = floor(bbox[0] / City.AV_SPACING).toInt().coerceAtLeast(0)
-        val i1 = ceil(bbox[2] / City.AV_SPACING).toInt().coerceAtMost(City.AVENUES - 1)
-        val k0 = floor(bbox[1] / City.ST_SPACING).toInt().coerceAtLeast(0)
-        val k1 = ceil(bbox[3] / City.ST_SPACING).toInt().coerceAtMost(City.STREETS - 1)
-        for (i in i0..i1) for (k in k0..k1) block(City.avenueX(i), City.streetY(k), i, k)
-    }
-
     private fun drawMarkings() {
         val yellow = scene.lit(YELLOW, 1f)
         val white = scene.lit(WHITE_LINE, .95f)
         val near = proj.dist < 220
-        // avenues
-        for (i in 0 until City.AVENUES) {
-            val x = City.avenueX(i)
-            if (x + City.AV_HALF < bbox[0] || x - City.AV_HALF > bbox[2]) continue
-            for (k in 0 until City.STREETS - 1) {
-                val y0 = City.streetY(k) + City.ST_HALF + 3.5f
-                val y1 = City.streetY(k + 1) - City.ST_HALF - 3.5f
-                if (y1 < bbox[1] || y0 > bbox[3]) continue
-                clipRect(x - .35f, y0, x - .15f, y1, .03f, yellow)
-                clipRect(x + .15f, y0, x + .35f, y1, .03f, yellow)
-                if (near) {
-                    var y = y0 + 1f
-                    while (y < y1 - 2f) {
-                        clipRect(x - 5.1f, y, x - 4.9f, y + 3f, .03f, white)
-                        clipRect(x + 4.9f, y, x + 5.1f, y + 3f, .03f, white)
-                        y += 8f
-                    }
-                }
-            }
-        }
-        // streets
-        for (k in 0 until City.STREETS) {
-            val y = City.streetY(k)
-            if (y + City.ST_HALF < bbox[1] || y - City.ST_HALF > bbox[3]) continue
-            for (i in 0 until City.AVENUES - 1) {
-                val x0 = City.avenueX(i) + City.AV_HALF + 3.5f
-                val x1 = City.avenueX(i + 1) - City.AV_HALF - 3.5f
-                if (x1 < bbox[0] || x0 > bbox[2]) continue
-                var x = x0 + 1f
-                while (x < x1 - 2f) {
-                    clipRect(x, y - .1f, x + 3f, y + .1f, .03f, yellow)
-                    x += 7f
-                }
-            }
-        }
-        if (!near) return
-        // manhole covers and storm drains
         val iron = scene.lit(c(0xFF3B3E43), 1f)
         val rim = scene.lit(c(0xFF5A5E64), 1f)
-        for (k in 0 until City.STREETS) {
-            val y = City.streetY(k)
-            if (y + City.ST_HALF < bbox[1] || y - City.ST_HALF > bbox[3]) continue
-            for (i in 0 until City.AVENUES - 1) {
-                val x0 = City.avenueX(i) + City.AV_HALF; val x1 = City.avenueX(i + 1) - City.AV_HALF
-                for (q in 1..2) {
-                    val mx = x0 + (x1 - x0) * q / 3f + ((i * 7 + k * 3) % 5) * 2f
-                    if (mx < bbox[0] || mx > bbox[2]) continue
-                    val my = y + (if ((i + k + q) % 2 == 0) 2.4f else -2.4f)
-                    scene.disc(mx, my, .035f, .55f, .55f, 10, rim)
-                    scene.disc(mx, my, .04f, .45f, .45f, 10, iron)
+        val g = e.city.roads
+        for (ed in g.edges) {
+            if (!edgeVisible(ed, 12f)) continue
+            val s0 = ed.clearA + 3.5f; val s1 = ed.len - ed.clearB - 3.5f
+            if (s1 <= s0) continue
+            when {
+                // divided roads: a double yellow line, and dashed white lines between the lanes
+                ed.cls.rank >= 2 -> {
+                    strip(ed, s0, s1, -.35f, -.15f, .03f, yellow)
+                    strip(ed, s0, s1, .15f, .35f, .03f, yellow)
+                    if (near) for (k in 1 until ed.cls.lanes) for (sd in -1..1 step 2) {
+                        val o = sd * k * ed.cls.laneWidth
+                        var t = s0 + 1f
+                        while (t < s1 - 2f) { strip(ed, t, min(t + 3f, s1), o - .1f, o + .1f, .03f, white); t += 8f }
+                    }
                 }
-                for (side in intArrayOf(-1, 1)) {
-                    val dx = x0 + 6f
-                    if (dx < bbox[0] || dx > bbox[2]) continue
-                    clipRect(dx, y + side * (City.ST_HALF - .1f) - .25f, dx + 1.2f, y + side * (City.ST_HALF - .1f) + .25f, .035f, iron)
+                ed.cls == com.hustlecity.game.world.RoadClass.STREET -> {
+                    var t = s0 + 1f
+                    while (t < s1 - 2f) { strip(ed, t, min(t + 3f, s1), -.1f, .1f, .03f, yellow); t += 7f }
                 }
             }
-        }
-        // crosswalks
-        forIntersections { x, y, _, _ ->
-            var sx = x - City.AV_HALF + .4f
-            while (sx < x + City.AV_HALF - .4f) {
-                clipRect(sx, y - City.ST_HALF - 3.2f, sx + .6f, y - City.ST_HALF - .5f, .04f, white)
-                clipRect(sx, y + City.ST_HALF + .5f, sx + .6f, y + City.ST_HALF + 3.2f, .04f, white)
-                sx += 1.25f
+            if (!near) continue
+            // crosswalks where the road meets a junction
+            for (end in 0..1) {
+                val node = g.nodes[if (end == 0) ed.a else ed.b]
+                if (node.degree < 3 || ed.cls.rank < 1) continue
+                val clear = if (end == 0) ed.clearA else ed.clearB
+                val a = if (end == 0) clear + .5f else ed.len - clear - 3.2f
+                var o = -ed.cls.halfWidth + .4f
+                while (o < ed.cls.halfWidth - .4f) { strip(ed, a, a + 2.7f, o, o + .6f, .04f, white); o += 1.25f }
             }
-            var sy = y - City.ST_HALF + .4f
-            while (sy < y + City.ST_HALF - .4f) {
-                clipRect(x - City.AV_HALF - 3.2f, sy, x - City.AV_HALF - .5f, sy + .6f, .04f, white)
-                clipRect(x + City.AV_HALF + .5f, sy, x + City.AV_HALF + 3.2f, sy + .6f, .04f, white)
-                sy += 1.25f
+            // a manhole cover and storm drains
+            val mid = (s0 + s1) * .5f + ((ed.id * 7) % 5) * 2f
+            if (mid < s1) {
+                val o = (if (ed.id % 2 == 0) .5f else -.5f) * ed.cls.laneWidth
+                val mx = ed.ax + ed.ux * mid + ed.uy * o; val my = ed.ay + ed.uy * mid - ed.ux * o
+                scene.disc(mx, my, .035f, .55f, .55f, 10, rim)
+                scene.disc(mx, my, .04f, .45f, .45f, 10, iron)
+            }
+            for (sd in -1..1 step 2) {
+                val o = sd * (ed.cls.halfWidth - .35f)
+                strip(ed, s0 + 2.5f, s0 + 3.7f, o - .25f, o + .25f, .035f, iron)
             }
         }
     }
@@ -801,27 +908,21 @@ class WorldRenderer(private val e: GameEngine) {
         val p = e.state.player
         val m = min(city.maxHeight, 130f) * .9f
         val bx0 = bbox[0] - m; val by0 = bbox[1] - m; val bx1 = bbox[2] + m; val by1 = bbox[3] + m
-        val col0 = floor(bx0 / City.AV_SPACING).toInt().coerceAtLeast(0)
-        val col1 = floor(bx1 / City.AV_SPACING).toInt().coerceAtMost(City.COLS - 1)
-        val row0 = floor(by0 / City.ST_SPACING).toInt().coerceAtLeast(0)
-        val row1 = floor(by1 / City.ST_SPACING).toInt().coerceAtMost(City.ROWS - 1)
         if (mode == DYNAMIC) {
             // only the buildings hiding the player, drawn see-through
             for (id in occl) { val b = city.buildings[id]; add(0, b.id, keyForRect(b)) }
-        } else for (row in row0..row1) for (col in col0..col1) {
-            for (b in city.blocks[row * City.COLS + col]) {
-                if (b.kind == BKind.PARK) continue
-                if (b.kind == BKind.PARKING) {
-                    if (!mapMode && proj.dist < 300) {
-                        val slots = ((b.width - 4f) / 2.8f).toInt()
-                        if (stat) for (sIdx in 0 until min(slots, 12)) if ((b.id * 31 + sIdx * 17) % 10 < 6) {
-                            add(7, b.id * 32 + sIdx, keyFor(b.minX + 4.4f + sIdx * 2.8f, b.minY + 3.5f))
-                        }
+        } else city.forBuildingsIn(bx0, by0, bx1, by1) { b ->
+            if (b.kind == BKind.PARK) return@forBuildingsIn
+            if (b.kind == BKind.PARKING) {
+                if (!mapMode && proj.dist < 300) {
+                    val slots = ((b.w - 4f) / 2.8f).toInt()
+                    if (stat) for (sIdx in 0 until min(slots, 12)) if ((b.id * 31 + sIdx * 17) % 10 < 6) {
+                        add(7, b.id * 32 + sIdx, keyFor(b.wx(4.4f + sIdx * 2.8f, 3.5f), b.wy(4.4f + sIdx * 2.8f, 3.5f)))
                     }
-                    continue
                 }
-                add(0, b.id, keyForRect(b))
+                return@forBuildingsIn
             }
+            add(0, b.id, keyForRect(b))
         }
         val farLod = mapMode || proj.dist > 450
         if (!farLod && stat) {
@@ -835,20 +936,15 @@ class WorldRenderer(private val e: GameEngine) {
             if (dyn && proj.dist < 260) for ((i, a) in e.traffic.peds.withIndex()) if (!a.hidden && a.x in bbox[0]..bbox[2] && a.y in bbox[1]..bbox[3]) add(3, i, keyFor(a.x, a.y))
             if (proj.dist < 230) {
                 val pr = props
-                val col0 = floor((bbox[0] - 4f) / City.AV_SPACING).toInt().coerceAtLeast(0)
-                val col1 = floor((bbox[2] + 4f) / City.AV_SPACING).toInt().coerceAtMost(City.COLS - 1)
-                val row0 = floor((bbox[1] - 4f) / City.ST_SPACING).toInt().coerceAtLeast(0)
-                val row1 = floor((bbox[3] + 4f) / City.ST_SPACING).toInt().coerceAtMost(City.ROWS - 1)
-                for (row in row0..row1) for (col in col0..col1) for (pi in pr.byBlock[row * City.COLS + col]) {
+                pr.forIn(bbox[0] - 4f, bbox[1] - 7f, bbox[2] + 4f, bbox[3] + 4f) { pi ->
                     val x = pr.x[pi]; val y = pr.y[pi]
-                    if (x < bbox[0] - 3f || x > bbox[2] + 3f || y < bbox[1] - 6f || y > bbox[3] + 3f) continue
+                    if (x < bbox[0] - 3f || x > bbox[2] + 3f || y < bbox[1] - 6f || y > bbox[3] + 3f) return@forIn
                     // fountains move, so they're redrawn every frame; the rest is cached
                     if (mode == ALL || (mode == STATIC) != pr.animated(pi)) add(8, pi, keyFor(x, y))
                 }
             }
-            if (dyn && proj.dist < 240) forIntersections { x, y, i, k ->
-                add(6, (i * 32 + k) * 4 + 0, keyFor(x - 11f, y - 7.5f))
-                add(6, (i * 32 + k) * 4 + 1, keyFor(x + 11f, y + 7.5f))
+            if (dyn && proj.dist < 240) forSignals { n, ed, x, y ->
+                add(6, (n.id shl 4) or n.edges.indexOf(ed.id).coerceIn(0, 15), keyFor(x, y))
             }
         }
         if (dyn) for (v in e.state.vehicles) if (v.x in bbox[0] - 5..bbox[2] + 5 && v.y in bbox[1] - 5..bbox[3] + 5) add(5, v.id, keyFor(v.x, v.y))
@@ -912,7 +1008,9 @@ class WorldRenderer(private val e: GameEngine) {
             roof = brighten(roof, 1.25f); facade = brighten(facade, 1.15f)
         }
         if (alpha < 1f || mapMode) {
-            scene.box(b.minX, b.minY, 0f, b.maxX, b.maxY, b.height, roof, facade, alpha)
+            scene.setFrame(b.ox, b.oy, b.cs, b.sn)
+            scene.box(0f, 0f, 0f, b.w, b.d, b.height, roof, facade, alpha)
+            scene.clearFrame()
             return
         }
         painter.draw(b, roof, facade, sqrt(keyFor(b.cx, b.cy)), true)
@@ -935,18 +1033,20 @@ class WorldRenderer(private val e: GameEngine) {
     internal fun shopLabel(b: Building, face: Int, name: String) {
         val ox = when (face) { 2 -> -1f; 3 -> 1f; else -> 0f }
         val oy = when (face) { 0 -> -1f; 1 -> 1f; else -> 0f }
-        val cxp = if (face <= 1) b.cx else (if (face == 2) b.minX else b.maxX)
-        val cyp = if (face >= 2) b.cy else (if (face == 0) b.minY else b.maxY)
-        label(name, cxp + ox * .2f, cyp + oy * .2f, 3.8f, .75f, 15f * density, 6.5f * density * .6f, .35f, 0xFFFFFFFF.toInt())
+        // in the building's frame: faces 0 back, 1 front (the street), 2 and 3 the sides
+        val lx = (if (face <= 1) b.w * .5f else (if (face == 2) 0f else b.w)) + ox * .2f
+        val ly = (if (face >= 2) b.d * .5f else (if (face == 0) 0f else b.d)) + oy * .2f
+        label(name, b.wx(lx, ly), b.wy(lx, ly), 3.8f, .75f, 15f * density, 6.5f * density * .6f, .35f, 0xFFFFFFFF.toInt())
     }
 
     internal fun forRentLabel(b: Building, face: Int) {
-        label("FOR RENT", b.doorX, if (face == 0) b.minY else b.maxY, 3.6f, .6f, 12f * density, 4f * density, 0f, c(0xFF27AE60), 0xEEFFFFFF.toInt())
+        val ly = if (face == 0) 0f else b.d
+        label("FOR RENT", b.wx(b.w * .5f, ly), b.wy(b.w * .5f, ly), 3.6f, .6f, 12f * density, 4f * density, 0f, c(0xFF27AE60), 0xEEFFFFFF.toInt())
     }
 
     internal fun gasLabel(b: Building, y0: Float, y1: Float) {
         if (mapMode) return
-        label("Fuel Up", b.cx, if (b.facesNorth) y0 else y1, 6.3f, .8f, 14f * density, 4f * density, 0f, 0xFFFFFFFF.toInt(), icon = "place_gas")
+        label("Fuel Up", b.wx(b.w * .5f, y1), b.wy(b.w * .5f, y1), 6.3f, .8f, 14f * density, 4f * density, 0f, 0xFFFFFFFF.toInt(), icon = "place_gas")
     }
 
     // ------------------------------------------------------------------ props
@@ -1024,33 +1124,36 @@ class WorldRenderer(private val e: GameEngine) {
         cars.draw(x, y, heading, len, wid, hgt, color, style, near, taxi, braking)
     }
 
+
+    private fun drawTrafficLight(code: Int) {
+        val g = e.city.roads
+        val n = g.nodes.getOrNull(code shr 4) ?: return
+        val ed = g.edges.getOrNull(n.edges.getOrElse(code and 15) { -1 }) ?: return
+        val clear = if (ed.a == n.id) ed.clearA else ed.clearB
+        val dx = if (ed.a == n.id) ed.ux else -ed.ux; val dy = if (ed.a == n.id) ed.uy else -ed.uy
+        val side = if (e.city.leftHand) -1f else 1f
+        val off = ed.cls.halfWidth + 1.4f
+        val x = n.x + dx * (clear + 1f) + dy * off * side
+        val y = n.y + dy * (clear + 1f) - dx * off * side
+        val pole = c(0xFF3A3D42)
+        scene.box(x - .1f, y - .1f, 0f, x + .1f, y + .1f, 4.4f, pole, pole)
+        // the arm reaches over the lanes it controls
+        val ax = x - dy * side * 2.6f; val ay = y + dx * side * 2.6f
+        scene.box(min(x, ax) - .05f, min(y, ay) - .05f, 4.3f, max(x, ax) + .05f, max(y, ay) + .05f, 4.42f, pole, pole)
+        val state = e.traffic.light(n, ed)
+        val lightColor = when (state) { 0 -> c(0xFF2EE87A); 1 -> c(0xFFFFD34D); else -> c(0xFFFF4D4D) }
+        scene.box(ax - .25f, ay - .25f, 3.5f, ax + .25f, ay + .25f, 4.4f, lightColor, c(0xFF22252A))
+    }
+
     private fun drawParkedCar(code: Int) {
         val b = e.city.buildings[code / 32]
         val slot = code % 32
-        val x = b.minX + 4.4f + slot * 2.8f
+        val x = 4.4f + slot * 2.8f
         val top = slot % 2 == 0
-        val y = if (top) b.minY + 3.5f else b.maxY - 3.5f
+        val y = if (top) 3.5f else b.d - 3.5f
         val color = intArrayOf(c(0xFFC0392B), c(0xFFE0E0E0), c(0xFF2C3E50), c(0xFF7F8C8D), c(0xFF1F3A93), c(0xFF212121))[(b.id + slot) % 6]
-        drawCar(x, y, 0f, 4.3f, 1.85f, 1.45f, color, if ((b.id + slot) % 5 == 0) 1 else 0, false)
-    }
-
-    private fun drawTrafficLight(code: Int) {
-        val corner = code % 4
-        val ik = code / 4
-        val i = ik / 32; val k = ik % 32
-        val x = City.avenueX(i) + if (corner == 0) -11f else 11f
-        val y = City.streetY(k) + if (corner == 0) -7.5f else 7.5f
-        val pole = c(0xFF3A3D42)
-        scene.box(x - .1f, y - .1f, 0f, x + .1f, y + .1f, 4.4f, pole, pole)
-        // street lamp on the same corner
-        val lx = x + if (corner == 0) -1f else 1f
-        val ly = y + if (corner == 0) -.5f else .5f
-        scene.box(lx - .08f, ly - .08f, 0f, lx + .08f, ly + .08f, 5.2f, pole, pole)
-        val lampOn = scene.daylight < .5f
-        scene.box(lx - .35f, ly - .2f, 5.0f, lx + .35f, ly + .2f, 5.3f, if (lampOn) c(0xFFFFE6A8) else c(0xFF55595F), pole)
-        val state = e.traffic.light(if (corner == 0) 0 else 1)
-        val lightColor = when (state) { 0 -> c(0xFF2EE87A); 1 -> c(0xFFFFD34D); else -> c(0xFFFF4D4D) }
-        scene.box(x - .25f, y - .25f, 3.6f, x + .25f, y + .25f, 4.5f, lightColor, c(0xFF22252A))
+        scene.setFrame(b.ox, b.oy, b.cs, b.sn)
+        try { drawCar(x, y, 0f, 4.3f, 1.85f, 1.45f, color, if ((b.id + slot) % 5 == 0) 1 else 0, false) } finally { scene.clearFrame() }
     }
 
     private fun drawPed(a: com.hustlecity.game.world.Agent, i: Int) {
@@ -1159,8 +1262,8 @@ class WorldRenderer(private val e: GameEngine) {
 
     private fun outlineBuilding(canvas: Canvas, b: Building) {
         val h = max(b.height, .3f)
-        val xs = floatArrayOf(b.minX, b.maxX, b.maxX, b.minX)
-        val ys = floatArrayOf(b.minY, b.minY, b.maxY, b.maxY)
+        val xs = floatArrayOf(b.wx(0f, 0f), b.wx(b.w, 0f), b.wx(b.w, b.d), b.wx(0f, b.d))
+        val ys = floatArrayOf(b.wy(0f, 0f), b.wy(b.w, 0f), b.wy(b.w, b.d), b.wy(0f, b.d))
         path.rewind()
         for (k in 0 until 4) {
             if (!proj.project(xs[k], ys[k], h, tmp)) return
@@ -1191,6 +1294,9 @@ class WorldRenderer(private val e: GameEngine) {
         textPaint.textAlign = Paint.Align.CENTER
     }
 
+    private val nameEdges = ArrayList<Int>()
+    private val namedAt = ArrayList<Triple<String, Float, Float>>()
+
     private fun drawMapOverlay(canvas: Canvas) {
         val s = e.state
         val f = e.ui.mapFilters
@@ -1199,13 +1305,21 @@ class WorldRenderer(private val e: GameEngine) {
         if (roadFont > 6f * density) {
             textPaint.color = 0xCCFFFFFF.toInt()
             textPaint.textSize = roadFont
-            for (i in 0 until City.AVENUES) for (k in 1 until City.STREETS step 3) {
-                val x = City.avenueX(i); val y = City.streetY(k) + City.ST_SPACING / 2
-                roadText(canvas, City.avenueNames[i].uppercase(), x, y - 10f, x, y + 10f)
-            }
-            for (k in 0 until City.STREETS) for (i in 0 until City.AVENUES - 1 step 2) {
-                val x = City.avenueX(i) + City.AV_SPACING / 2; val y = City.streetY(k)
-                roadText(canvas, City.streetName(k).uppercase(), x - 10f, y, x + 10f, y)
+            // one name per road and area: the longest pieces in view first
+            val g = e.city.roads
+            nameEdges.clear()
+            g.forCells(bbox[0], bbox[1], bbox[2], bbox[3]) { id -> if (g.edges[id].len > 40f && g.edges[id].cls.rank >= 1) nameEdges += id }
+            val sorted = nameEdges.distinct().sortedByDescending { g.edges[it].len }
+            namedAt.clear()
+            var shown = 0
+            for (id in sorted) {
+                if (shown >= 40) break
+                val ed = g.edges[id]
+                val mx = (ed.ax + ed.bx) * .5f; val my = (ed.ay + ed.by) * .5f
+                if (namedAt.any { it.first == ed.name && dist(it.second, it.third, mx, my) < 260f }) continue
+                namedAt += Triple(ed.name, mx, my)
+                roadText(canvas, ed.name.uppercase(), mx - ed.ux * 10f, my - ed.uy * 10f, mx + ed.ux * 10f, my + ed.uy * 10f)
+                shown++
             }
         }
         val r = 11f * density

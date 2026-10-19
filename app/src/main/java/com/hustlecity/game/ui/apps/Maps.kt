@@ -96,18 +96,22 @@ fun MapsOverlay(e: GameEngine, @Suppress("UNUSED_PARAMETER") r: Renderers) {
                     }
                 }
                 FilterRow("Enable / disable all", null, f.values.any { it }) { on ->
-                    for (n in City.neighborhoods) f["hood:${n.id}"] = on
+                    for (n in e.city.neighborhoods) f["hood:${n.id}"] = on
                     for (t in Catalog.customerTypes) f["type:${t.id}"] = on
                     f["rent"] = on
                 }
                 FilterRow("Shops & services", null, f["places"] != false) { f["places"] = it }
                 FilterRow("For rent", HC.Green, f["rent"] == true) { f["rent"] = it }
                 Section("Neighborhoods")
-                for (n in City.neighborhoods) {
+                for (n in e.city.neighborhoods) {
                     FilterRow(n.name, n.color.toColor(), f["hood:${n.id}"] == true, onGo = {
-                        val col = if (n.id in listOf(1, 0, 3)) 1.5f else 4.5f
-                        val row = when (n.id) { 1, 5 -> 2.5f; 0, 4 -> 7.5f; else -> 12.5f }
-                        e.camera.mapX = col * City.AV_SPACING; e.camera.mapY = row * City.ST_SPACING; e.camera.mapDist = 700f
+                        // fly to the middle of the neighborhood
+                        val inHood = e.city.buildings.filter { it.hood.id == n.id }
+                        if (inHood.isNotEmpty()) {
+                            e.camera.mapX = inHood.sumOf { it.cx.toDouble() }.toFloat() / inHood.size
+                            e.camera.mapY = inHood.sumOf { it.cy.toDouble() }.toFloat() / inHood.size
+                        }
+                        e.camera.mapDist = 700f
                     }) { f["hood:${n.id}"] = it }
                 }
                 Section("Active businesses")

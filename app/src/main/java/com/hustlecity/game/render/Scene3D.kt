@@ -210,6 +210,27 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         return material
     }
 
+    // ------------------------------------------------------------------ model frame
+
+    private var fOn = false
+    private var fx0 = 0f; private var fy0 = 0f; private var fc = 1f; private var fs = 0f
+    private var tfx = FloatArray(64); private var tfy = FloatArray(64)
+
+    /**
+     * Draws everything that follows in a rotated local frame: local (x, y) maps to (ox + x·cos − y·sin, oy + x·sin + y·cos).
+     * Buildings use it so they can face any direction while their painters work in plain boxes.
+     */
+    fun setFrame(ox: Float, oy: Float, cos: Float, sin: Float) { fOn = true; fx0 = ox; fy0 = oy; fc = cos; fs = sin }
+
+    fun clearFrame() { fOn = false }
+
+    /** Camera position in the current frame (the world position when there's none). */
+    val camLX: Float get() = if (!fOn) proj.camX else (proj.camX - fx0) * fc + (proj.camY - fy0) * fs
+    val camLY: Float get() = if (!fOn) proj.camY else -(proj.camX - fx0) * fs + (proj.camY - fy0) * fc
+
+    fun toWorldX(lx: Float, ly: Float) = if (!fOn) lx else fx0 + lx * fc - ly * fs
+    fun toWorldY(lx: Float, ly: Float) = if (!fOn) ly else fy0 + lx * fs + ly * fc
+
     private val cx = FloatArray(24); private val cy = FloatArray(24); private val cz = FloatArray(24)
     private val ox = FloatArray(24); private val oy = FloatArray(24); private val oz = FloatArray(24)
     private val sx = FloatArray(24); private val sy = FloatArray(24)
@@ -277,7 +298,12 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     var sunY = .89f
 
     /** Shade for a vertical face with horizontal outward normal (nx, ny). */
-    fun sideShade(nx: Float, ny: Float): Float = if (gpu != null) 1f else .6f + .34f * max(0f, nx * sunX + ny * sunY)
+    fun sideShade(nx: Float, ny: Float): Float {
+        if (gpu != null) return 1f
+        val wx = if (fOn) nx * fc - ny * fs else nx
+        val wy = if (fOn) nx * fs + ny * fc else ny
+        return .6f + .34f * max(0f, wx * sunX + wy * sunY)
+    }
 
     /** Light sources keep their own color in the GPU renderer: lit windows, lamps, neon, signals, headlights. */
     private val emissiveRgb = intArrayOf(
@@ -293,7 +319,8 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     }
 
     /** Screen-space circle centred on a projected world point; radius in meters. */
-    fun blob(x: Float, y: Float, z: Float, r: Float, color: Int, segments: Int = 10, dxFrac: Float = 0f, dyFrac: Float = 0f, squash: Float = .9f) {
+    fun blob(lx: Float, ly: Float, z: Float, r: Float, color: Int, segments: Int = 10, dxFrac: Float = 0f, dyFrac: Float = 0f, squash: Float = .9f) {
+        val x = toWorldX(lx, ly); val y = toWorldY(lx, ly)
         val g = gpu
         if (g != null) {
             // screen-space offsets become offsets along the camera's right and up axes; flat discs become ellipsoids
@@ -328,7 +355,13 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         else -> com.hustlecity.game.render.gpu.GpuFrame.OPAQUE
     }
 
-    fun poly(n: Int, xs: FloatArray, ys: FloatArray, zs: FloatArray, color: Int) {
+    fun poly(n: Int, lxs: FloatArray, lys: FloatArray, zs: FloatArray, color: Int) {
+        var xs = lxs; var ys = lys
+        if (fOn) {
+            if (tfx.size < n) { tfx = FloatArray(n * 2); tfy = FloatArray(n * 2) }
+            for (i in 0 until n) { tfx[i] = fx0 + lxs[i] * fc - lys[i] * fs; tfy[i] = fy0 + lxs[i] * fs + lys[i] * fc }
+            xs = tfx; ys = tfy
+        }
         val g = gpu
         if (g != null) {
             // cull polygons entirely behind the camera or off one side of the screen; the GPU clips the rest
@@ -418,7 +451,7 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
      * [top] and [side] are base colors (unlit).
      */
     fun box(x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float, top: Int, side: Int, alpha: Float = 1f) {
-        val cxp = proj.camX; val cyp = proj.camY; val czp = proj.camZ
+        val cxp = camLX; val cyp = camLY; val czp = proj.camZ
         fun col(c: Int, f: Float): Int { val l = lit(c, f); return if (alpha < 1f) withAlpha(l, alpha) else l }
         if (gpu != null && alpha >= 1f) {
             quad(x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1, side)
@@ -461,7 +494,7 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
             val mx = (ax[i] + ax[j]) * .5f; val my = (ay[i] + ay[j]) * .5f
             // make sure normal points away from centre
             if ((mx - ccx) * nx + (my - ccy) * ny < 0) { nx = -nx; ny = -ny }
-            if ((proj.camX - mx) * nx + (proj.camY - my) * ny > 0) {
+            if ((camLX - mx) * nx + (camLY - my) * ny > 0) {
                 val base = if (i == 0) front else side
                 quad(ax[i], ay[i], z0, ax[j], ay[j], z0, ax[j], ay[j], z1, ax[i], ay[i], z1, lit(base, sideShade(nx, ny)))
             }
@@ -478,7 +511,8 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     /** A camera-facing billboard quad standing on the ground (used for people). */
     fun billboard(x: Float, y: Float, z0: Float, z1: Float, halfWidth: Float, color: Int) {
         // right vector of the camera in world space is (cos(yaw), -sin(yaw))
-        val rx = cos(proj.yaw) * halfWidth; val ry = -sin(proj.yaw) * halfWidth
+        val a = proj.yaw + (if (fOn) kotlin.math.atan2(fs, fc) else 0f)
+        val rx = cos(a) * halfWidth; val ry = -sin(a) * halfWidth
         quad(x - rx, y - ry, z0, x + rx, y + ry, z0, x + rx, y + ry, z1, x - rx, y - ry, z1, color)
     }
 }

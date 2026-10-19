@@ -70,7 +70,7 @@ class PartSorter(private val scene: Scene3D) {
             for (i in 0 until n) scene.box(x0[i], y0[i], z0[i], x1[i], y1[i], z1[i], top[i], col[i], alpha)
             return
         }
-        val cx = scene.proj.camX; val cy = scene.proj.camY; val cz = scene.proj.camZ
+        val cx = scene.camLX; val cy = scene.camLY; val cz = scene.proj.camZ
         for (i in 0 until n) { indeg[i] = 0; done[i] = false; java.util.Arrays.fill(before[i], 0, n, false) }
         val eps = .001f
         for (a in 0 until n) for (b in a + 1 until n) {

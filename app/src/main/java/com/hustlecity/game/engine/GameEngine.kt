@@ -20,6 +20,8 @@ import com.hustlecity.game.model.SkipKind
 import com.hustlecity.game.world.BKind
 import com.hustlecity.game.world.Building
 import com.hustlecity.game.world.City
+import com.hustlecity.game.world.Maps
+import com.hustlecity.game.world.RoadHit
 import com.hustlecity.game.world.Traffic
 import com.hustlecity.game.world.dist
 import java.text.NumberFormat
@@ -52,8 +54,8 @@ class CameraRig {
     var yaw = 0f
     var panX = 0f
     var panY = 0f
-    var mapX = City.WIDTH / 2
-    var mapY = City.HEIGHT / 2
+    var mapX = 450f
+    var mapY = 525f
     var mapDist = 900f
 }
 
@@ -141,27 +143,28 @@ class GameEngine(context: Context?) {
 
     // ------------------------------------------------------------------ lifecycle
 
-    fun newGame(name: String, skin: Int, shirt: Int, difficulty: Int, seed: Long = 1337L) {
-        city = City(seed)
+    fun newGame(name: String, skin: Int, shirt: Int, difficulty: Int, seed: Long = 1337L, mapId: String = Maps.CLASSIC) {
+        city = City(seed, mapId)
+        traffic.attach(city)
         val startMoney = when (difficulty) { 0 -> 20000.0; 1 -> 5000.0; else -> 1500.0 }
-        val s = GameState(seed = seed, minute = 8L * 60)
+        val s = GameState(seed = seed, minute = 8L * 60, mapId = city.mapId)
         s.player = PlayerState(name = name.ifBlank { "Alex" }, skin = skin, shirt = shirt, money = startMoney, difficulty = difficulty)
         state = s
         rnd = Random(seed xor System.nanoTime())
         val homeRnd = Random(seed + 99)
-        // home: small residential unit in the Garment District
-        val home = city.buildings.filter { it.kind == BKind.RESIDENTIAL && it.neighborhood == 0 && !it.facesNorth && it.area in 30..70 }
-            .ifEmpty { city.buildings.filter { it.kind == BKind.RESIDENTIAL } }
+        // home: a small apartment in the map's starting neighborhood, on a street with a curb to park at
+        val home = city.buildings.filter { it.kind == BKind.RESIDENTIAL && it.neighborhood == city.map.startHood && it.frontY > 0f && it.area in 30..70 && it.frontEdge >= 0 }
+            .ifEmpty { city.buildings.filter { it.kind == BKind.RESIDENTIAL && it.frontEdge >= 0 } }
             .let { it[homeRnd.nextInt(it.size)] }
         s.rentals += Rental(home.id, (home.baseRent * .8 / 10).roundToInt() * 10.0, 1)
         s.player.home = home.id
-        s.player.x = home.doorX
-        s.player.y = home.doorY + 2f
+        s.player.x = home.doorX + home.frontX * 2f
+        s.player.y = home.doorY + home.frontY * 2f
         s.homeFurniture += PlacedItem("bed", 0, 0, 0)
         s.homeFurniture += PlacedItem("home_fridge", 3, 0, 0)
         // a used starter car parked on the street in front of home
         val spot = curbSpot(home, 4f)
-        s.vehicles += OwnedVehicle(s.newId(), "tico", spot.first, spot.second, (Math.PI / 2).toFloat(), fuel = .6, condition = .75)
+        s.vehicles += OwnedVehicle(s.newId(), "tico", spot.first, spot.second, curbHeadingFor(home), fuel = .6, condition = .75)
         // rivals and their businesses
         economy.rivals.seed(Random(seed + 7))
         weather.ensure()
@@ -191,7 +194,8 @@ class GameEngine(context: Context?) {
     fun loadGame(): Boolean {
         val s = saves.load() ?: return false
         state = s
-        city = City(s.seed)
+        city = City(s.seed, s.mapId)
+        traffic.attach(city)
         rnd = Random(System.nanoTime())
         economy.rivals.migrate()
         weather.ensure()
@@ -224,9 +228,11 @@ class GameEngine(context: Context?) {
     /** Builds a throwaway city to orbit behind the main menu. */
     fun prepareMenuBackground() {
         if (hasGame || menuMode) return
-        city = City(1337L)
-        state = GameState(seed = 1337L, minute = 18L * 60 + 40)
-        val b = city.buildings.first { it.neighborhood == 4 && it.kind == BKind.OFFICE }
+        city = City(1337L, Maps.NYC)
+        traffic.attach(city)
+        state = GameState(seed = 1337L, minute = 18L * 60 + 40, mapId = city.mapId)
+        // the tallest office tower makes a good backdrop
+        val b = city.buildings.filter { it.kind == BKind.OFFICE }.maxByOrNull { it.height } ?: city.buildings.first()
         state.player.x = b.doorX; state.player.y = b.doorY + 8f
         camera.tx = state.player.x; camera.ty = state.player.y
         camera.zoom = 150f; camera.dist = 150f; camera.yaw = .5f
@@ -413,7 +419,9 @@ class GameEngine(context: Context?) {
         val rivals = state.rivalBusinesses.associateBy { it.buildingId }
         val mine = state.businesses.associateBy { it.buildingId }
         var n = 0
-        for (b in city.buildings) {
+        val near = ArrayList<Building>()
+        city.forBuildingsIn(fx - 170f, fy - 170f, fx + 170f, fy + 170f) { near += it }
+        for (b in near) {
             val dx = b.doorX - fx; val dy = b.doorY - fy
             if (dx * dx + dy * dy > 160f * 160f || !b.solid) continue
             val biz = mine[b.id]
@@ -426,11 +434,13 @@ class GameEngine(context: Context?) {
                 else -> 0f
             }
             if (chance <= 0f) continue
-            if (traffic.doors.size < (n + 1) * 4) traffic.doors = traffic.doors.copyOf((n + 1) * 4 + 64)
-            traffic.doors[n * 4] = b.doorX
-            traffic.doors[n * 4 + 1] = b.doorY
-            traffic.doors[n * 4 + 2] = chance
-            traffic.doors[n * 4 + 3] = if (b.facesNorth) 1f else -1f
+            if (traffic.doors.size < (n + 1) * 5) traffic.doors = traffic.doors.copyOf((n + 1) * 5 + 80)
+            traffic.doors[n * 5] = b.doorX
+            traffic.doors[n * 5 + 1] = b.doorY
+            traffic.doors[n * 5 + 2] = chance
+            // inward: against the front's outward direction
+            traffic.doors[n * 5 + 3] = -b.frontX
+            traffic.doors[n * 5 + 4] = -b.frontY
             n++
         }
         traffic.doorCount = n
@@ -591,7 +601,7 @@ class GameEngine(context: Context?) {
         val p = state.player
         var target = 48.0
         val home = city.building(p.home)
-        if (home != null) target += (home.area / 8.0).coerceAtMost(12.0) + City.neighborhoods[home.neighborhood].wealth * 4
+        if (home != null) target += (home.area / 8.0).coerceAtMost(12.0) + home.hood.wealth * 4
         target += state.vehicles.maxOfOrNull { it.def.happiness }?.toDouble() ?: -4.0
         target += state.homeFurniture.sumOf { Catalog.item(it.itemId)?.decor ?: 0 } * 1.5
         if (p.hunger < 20) target -= 20
@@ -671,7 +681,8 @@ class GameEngine(context: Context?) {
             SkipKind.TAXI -> {
                 val b = city.building(job.target) ?: return
                 p.x = b.doorX
-                p.y = b.doorY + if (b.facesNorth) -1.5f else 1.5f
+                p.x = b.doorX + b.frontX * 1.5f
+                p.y = b.doorY + b.frontY * 1.5f
                 camera.tx = p.x; camera.ty = p.y
                 camera.panX = 0f; camera.panY = 0f
                 traffic.update(0f, camera.tx, camera.ty, 230f, -9999f, -9999f, initial = true)
@@ -856,34 +867,24 @@ class GameEngine(context: Context?) {
             toast("Parked")
             return true
         }
-        val i = (v.x / City.AV_SPACING).roundToInt().coerceIn(0, City.AVENUES - 1)
-        val k = (v.y / City.ST_SPACING).roundToInt().coerceIn(0, City.STREETS - 1)
-        val dA = abs(v.x - City.avenueX(i)); val dS = abs(v.y - City.streetY(k))
-        var px: Float; var py: Float; var heading: Float
-        if (dA <= City.AV_HALF + 2f && dA <= dS) {
-            // on an avenue: right-hand curb for the way we're facing
-            val side = if (abs(v.x - City.avenueX(i)) > .5f) Math.signum(v.x - City.avenueX(i)) else (if (cos(v.heading) > 0) 1f else -1f)
-            px = City.avenueX(i) + side * (City.AV_HALF - 1.1f)
-            py = v.y
-            heading = if (side > 0) 0f else Math.PI.toFloat()
-            // not in the middle of a crossing
-            val near = (py / City.ST_SPACING).roundToInt()
-            val gap = py - City.streetY(near)
-            if (abs(gap) < City.ST_HALF + 7f) py = City.streetY(near) + (if (gap >= 0) 1 else -1) * (City.ST_HALF + 7f)
-        } else if (dS <= City.ST_HALF + 2f) {
-            val side = if (abs(v.y - City.streetY(k)) > .5f) Math.signum(v.y - City.streetY(k)) else (if (sin(v.heading) > 0) 1f else -1f)
-            py = City.streetY(k) + side * (City.ST_HALF - 1.1f)
-            px = v.x
-            heading = (if (side > 0) Math.PI / 2 else -Math.PI / 2).toFloat()
-            val near = (px / City.AV_SPACING).roundToInt()
-            val gap = px - City.avenueX(near)
-            if (abs(gap) < City.AV_HALF + 7f) px = City.avenueX(near) + (if (gap >= 0) 1 else -1) * (City.AV_HALF + 7f)
-        } else {
-            // off the road (a plaza or a lot): just switch off
+        val hit = RoadHit()
+        val e = if (city.roads.nearest(v.x, v.y, 30f, hit)) city.roads.edges[hit.edge] else null
+        if (e == null || hit.dist > e.cls.outer + 1.5f) {
+            // off the road (a plaza or a lot): just switch off; on the sidewalk, pull over to the curb
             exitVehicle()
             toast("Parked")
             return true
         }
+        // the curb on the side the car is on (or, in the middle of the road, the side it drives on)
+        val fx = sin(v.heading); val fy = -cos(v.heading)
+        val alongAB = fx * e.ux + fy * e.uy > 0f
+        val side = if (hit.dist > .8f) hit.side else if (alongAB != city.leftHand) -1 else 1
+        val lo = min(e.clearA + 6f, e.len * .5f); val hi = max(e.len - e.clearB - 6f, e.len * .5f)
+        val sAlong = hit.s.coerceIn(lo, hi)
+        val off = e.cls.halfWidth - 1.1f
+        var px = e.ax + e.ux * sAlong + e.uy * off * side
+        var py = e.ay + e.uy * sAlong - e.ux * off * side
+        val heading = city.curbHeading(e, side)
         // leave room for the other cars you own
         val ax = -sin(heading); val ay = cos(heading)
         var tries = 0
@@ -929,10 +930,12 @@ class GameEngine(context: Context?) {
     }
 
     /** Curbside parking spot in front of a building, clear of the traffic lanes. */
-    fun curbSpot(b: Building, along: Float): Pair<Float, Float> {
-        val streetY = City.streetY(b.streetIndex)
-        val y = streetY + if (b.facesNorth) City.ST_HALF - 1.1f else -(City.ST_HALF - 1.1f)
-        return (b.doorX + along) to y
+    fun curbSpot(b: Building, along: Float): Pair<Float, Float> = city.curbSpot(b, along)
+
+    /** Which way a car parked in front of [b] faces (with the traffic on that side). */
+    fun curbHeadingFor(b: Building): Float {
+        val e = city.roads.edges.getOrNull(b.frontEdge) ?: return (Math.PI / 2).toFloat()
+        return city.curbHeading(e, city.sideOf(e, b.doorX, b.doorY))
     }
 
     /** Makes [b] the player's home; furniture that doesn't fit the new place goes to storage. */
@@ -1028,7 +1031,7 @@ class GameEngine(context: Context?) {
         }
         Audio.play(Sfx.DOOR)
         exitBuildingInternal()
-        if (b != null) { p.x = b.doorX; p.y = b.doorY + if (b.facesNorth) -1f else 1f }
+        if (b != null) { p.x = b.doorX + b.frontX; p.y = b.doorY + b.frontY }
         bump()
     }
 
@@ -1043,10 +1046,13 @@ class GameEngine(context: Context?) {
         proj.visibleGround(bbox, 60f)
         var best = -1
         var bestT = Float.MAX_VALUE
-        for (b in city.buildings) {
-            if (b.maxX < bbox[0] || b.minX > bbox[2] || b.maxY < bbox[1] || b.minY > bbox[3]) continue
+        val cand = ArrayList<Building>()
+        city.forBuildingsIn(bbox[0], bbox[1], bbox[2], bbox[3]) { cand += it }
+        for (b in cand) {
             val h = max(b.height, .4f)
-            val t = rayBox(ox, oy, oz, dir[0], dir[1], dir[2], b.minX, b.minY, 0f, b.maxX, b.maxY, h)
+            val lx = b.lx(ox, oy); val ly = b.ly(ox, oy)
+            val ldx = dir[0] * b.cs + dir[1] * b.sn; val ldy = -dir[0] * b.sn + dir[1] * b.cs
+            val t = rayBox(lx, ly, oz, ldx, ldy, dir[2], 0f, 0f, 0f, b.w, b.d, h)
             if (t >= 0 && t < bestT) { bestT = t; best = b.id }
         }
         return best
@@ -1080,7 +1086,10 @@ class GameEngine(context: Context?) {
     /** True when the segment from the camera to a point passes through the building box. */
     fun occludes(proj: com.hustlecity.game.render.Projector, b: Building, px: Float, py: Float, pz: Float): Boolean {
         val dx = px - proj.camX; val dy = py - proj.camY; val dz = pz - proj.camZ
-        val t = rayBox(proj.camX, proj.camY, proj.camZ, dx, dy, dz, b.minX, b.minY, 0f, b.maxX, b.maxY, b.height)
+        // in the building's own frame it's an axis-aligned box
+        val ox = b.lx(proj.camX, proj.camY); val oy = b.ly(proj.camX, proj.camY)
+        val ldx = dx * b.cs + dy * b.sn; val ldy = -dx * b.sn + dy * b.cs
+        val t = rayBox(ox, oy, proj.camZ, ldx, ldy, dz, 0f, 0f, 0f, b.w, b.d, b.height)
         return t in 0f..0.98f
     }
 

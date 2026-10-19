@@ -535,7 +535,7 @@ fun BuildingCard(e: GameEngine, modifier: Modifier = Modifier, avoidPhone: Boole
             }
             Text(typeLine.uppercase(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             if (nameLine != null) Text(nameLine.uppercase(), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
-            Text("NEIGHBORHOOD: ${City.neighborhoods[b.neighborhood].name.uppercase()}", color = Color.White.copy(alpha = .8f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Text("NEIGHBORHOOD: ${b.hood.name.uppercase()}", color = Color.White.copy(alpha = .8f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
             Text("TRAFFIC INDEX: ${(b.traffic * 100).roundToInt()}%", color = Color.White.copy(alpha = .8f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
             val status: Pair<String, Color>? = when {
                 b.id == s.player.home -> "YOUR HOME" to HC.Orange

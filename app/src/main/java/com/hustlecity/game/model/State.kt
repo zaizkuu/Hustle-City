@@ -333,6 +333,8 @@ data class GameState(
     val weather: MutableList<WeatherSpan> = mutableListOf(),
     /** 0..1 snow lying on the ground. */
     var snowCover: Double = 0.0,
+    /** Which map the city was generated from (older saves are all the classic grid). */
+    val mapId: String = "classic",
 ) {
     val day: Int get() = (minute / MINUTES_PER_DAY).toInt() + 1
     val hour: Int get() = ((minute % MINUTES_PER_DAY) / 60).toInt()

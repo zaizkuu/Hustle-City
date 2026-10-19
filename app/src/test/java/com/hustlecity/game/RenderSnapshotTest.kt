@@ -78,6 +78,20 @@ class RenderSnapshotTest {
         renderWorld(e, "midtown.png")
     }
 
+    /** Each city's starting street, close up and from higher up, to check its look. */
+    @Test
+    fun everyCityStreet() {
+        for (map in com.hustlecity.game.world.Maps.all) {
+            val e = GameEngine(null)
+            e.newGame("Tester", 1, 0, 1, mapId = map.id)
+            e.state.minute = 15L * 60
+            e.camera.zoom = 46f; e.camera.dist = 46f
+            renderWorld(e, "city_${map.id}_street.png")
+            e.camera.zoom = 130f; e.camera.dist = 130f
+            renderWorld(e, "city_${map.id}_wide.png")
+        }
+    }
+
     /** One close-up per architectural style, by day and by night, to check the buildings' personality. */
     @Test
     fun architectureGallery() {
@@ -88,12 +102,13 @@ class RenderSnapshotTest {
             val b = e.city.buildings.filter { it.solid && painter.style(it) == st && it.placeId == null }
                 .maxByOrNull { if (st == com.hustlecity.game.render.Arch.DECO || st == com.hustlecity.game.render.Arch.GLASS) it.height else it.width } ?: continue
             val far = (b.height * .7f).coerceIn(28f, 80f)
-            e.state.player.x = b.doorX; e.state.player.y = b.doorY + (if (b.facesNorth) -6f else 6f)
+            e.state.player.x = b.doorX + b.frontX * 6f; e.state.player.y = b.doorY + b.frontY * 6f
             e.state.minute = (if (night) 21L else 15L) * 60
             repeat(20) {
                 e.frame(1 / 30f)
                 e.camera.tx = b.doorX; e.camera.ty = b.doorY; e.camera.zoom = far; e.camera.dist = far
-                e.camera.yaw = if (b.facesNorth) Math.PI.toFloat() + .5f else .5f
+                // look at the front: yaw 0 views a building whose front faces +y
+                e.camera.yaw = kotlin.math.atan2(b.frontX, -b.frontY) - Math.PI.toFloat() + .5f
             }
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             WorldRenderer(e).draw(Canvas(bmp), w, h, 2f)

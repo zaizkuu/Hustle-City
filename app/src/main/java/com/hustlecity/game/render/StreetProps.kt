@@ -2,6 +2,10 @@ package com.hustlecity.game.render
 
 import com.hustlecity.game.data.c
 import com.hustlecity.game.world.City
+import com.hustlecity.game.world.Geo
+import com.hustlecity.game.world.Park
+import com.hustlecity.game.world.RoadClass
+import com.hustlecity.game.world.dist
 import kotlin.math.abs
 import kotlin.math.sin
 
@@ -28,12 +32,24 @@ class StreetProps(val city: City) {
     var y = FloatArray(4096); private set
     var kind = IntArray(4096); private set
     var face = IntArray(4096); private set
-    /** Prop indices per block, [row * COLS + col]. */
-    val byBlock: Array<IntArray>
+    /** Direction toward the road (unit x, y); props are drawn turned to face it. */
+    var dirX = FloatArray(4096); private set
+    var dirY = FloatArray(4096); private set
     /** Trees hidden because a park path or fountain is there. */
     val hiddenTree = BooleanArray(city.trees.size)
-    /** Index into the tree list -> 0 street tree, 1 park tree, 2 park conifer, 3 flowering street tree. */
+    /**
+     * Index into the tree list -> 0 street tree, 1 park tree, 2 park conifer, 3 flowering street tree, 4 palm,
+     * 5 ginkgo (golden in autumn).
+     */
     val treeKind = IntArray(city.trees.size)
+
+    private val cell = 40f
+    private val gx0 = city.bounds[0] - 40f
+    private val gy0 = city.bounds[1] - 40f
+    private val gCols = ((city.bounds[2] + 40f - gx0) / cell).toInt() + 1
+    private val gRows = ((city.bounds[3] + 40f - gy0) / cell).toInt() + 1
+    private val grid: Array<IntArray>
+    private val treeGrid: Array<IntArray>
 
     private var seed = 1234567
 
@@ -42,141 +58,165 @@ class StreetProps(val city: City) {
         return ((seed ushr 8) and 0xFFFF) / 65536f
     }
 
-    private fun add(px: Float, py: Float, k: Int, f: Int) {
+    private fun add(px: Float, py: Float, k: Int, dx: Float, dy: Float) {
         if (count == x.size) {
             x = x.copyOf(count * 2); y = y.copyOf(count * 2); kind = kind.copyOf(count * 2); face = face.copyOf(count * 2)
+            dirX = dirX.copyOf(count * 2); dirY = dirY.copyOf(count * 2)
         }
-        x[count] = px; y[count] = py; kind[count] = k; face[count] = f
+        x[count] = px; y[count] = py; kind[count] = k; face[count] = 1; dirX[count] = dx; dirY[count] = dy
         count++
     }
 
+    private fun cellOf(v: Float, o: Float, n: Int) = ((v - o) / cell).toInt().coerceIn(0, n - 1)
+
     private fun nearTree(px: Float, py: Float, r: Float): Boolean {
-        for (t in city.trees) if (abs(t.x - px) < r && abs(t.y - py) < r) return true
+        val c0 = cellOf(px - r, gx0, gCols); val c1 = cellOf(px + r, gx0, gCols)
+        val r0 = cellOf(py - r, gy0, gRows); val r1 = cellOf(py + r, gy0, gRows)
+        for (row in r0..r1) for (col in c0..c1) for (i in treeGrid[row * gCols + col]) {
+            val t = city.trees[i]
+            if (abs(t.x - px) < r && abs(t.y - py) < r) return true
+        }
         return false
     }
 
-    init {
-        val lists = Array(City.COLS * City.ROWS) { ArrayList<Int>() }
-        for (row in 0 until City.ROWS) for (col in 0 until City.COLS) {
-            val start = count
-            val bx0 = col * City.AV_SPACING + City.AV_HALF + City.SIDEWALK
-            val bx1 = (col + 1) * City.AV_SPACING - City.AV_HALF - City.SIDEWALK
-            val by0 = row * City.ST_SPACING + City.ST_HALF + City.SIDEWALK
-            val by1 = (row + 1) * City.ST_SPACING - City.ST_HALF - City.SIDEWALK
-            val curb = City.SIDEWALK - .6f
-            val hood = City.neighborhoodOfBlock(col, row)
-            val blockIdx = row * City.COLS + col
-            if (blockIdx in city.parkBlocks) {
-                park(bx0, by0, bx1, by1)
-            } else {
-                // a bus shelter mid-block on every other avenue side
-                val busWest = (row + col) % 2 == 0
-                val busY = (by0 + by1) / 2
-                if (row % 2 == 0) add(if (busWest) bx0 - curb + .2f else bx1 + curb - .2f, busY, BUS_STOP, if (busWest) 2 else 3)
-                // lamp posts along the streets and the avenues
-                var lx = bx0 + 9f
-                while (lx < bx1 - 6f) {
-                    for (side in 0..1) {
-                        val ly = if (side == 0) by0 - curb else by1 + curb
-                        val px = if (nearTree(lx, ly, 1.6f)) lx + 2.2f else lx
-                        add(px, ly, LAMP, side)
-                    }
-                    lx += 26f
-                }
-                var ly = by0 + 9f
-                while (ly < by1 - 6f) {
-                    if (abs(ly - busY) > 5f || row % 2 != 0) {
-                        add(bx0 - curb, ly, LAMP, 2)
-                        add(bx1 + curb, ly, LAMP, 3)
-                    }
-                    ly += 22f
-                }
-                // corner furniture
-                for (corner in 0..3) {
-                    val west = corner % 2 == 0; val north = corner < 2
-                    val cx = if (west) bx0 + 3.2f else bx1 - 3.2f
-                    val cy = if (north) by0 - curb else by1 + curb
-                    val f = if (north) 0 else 1
-                    val r = rand()
-                    when {
-                        r < .45f -> add(cx, cy, BIN, f)
-                        r < .6f -> add(cx, cy, MAILBOX, f)
-                    }
-                    // newspaper boxes on the avenue side, near the corner
-                    if (rand() < .35f) add(if (west) bx0 - curb + .3f else bx1 + curb - .3f, if (north) by0 + 4.5f else by1 - 4.5f, NEWS, if (west) 2 else 3)
-                }
-                // a hydrant per block side
-                for (side in 0..1) {
-                    val hx = if (rand() < .5f) bx0 + 6.5f else bx1 - 6.5f
-                    add(hx, if (side == 0) by0 - curb else by1 + curb, HYDRANT, side)
-                }
-                // benches, bike racks and planters in the busier neighborhoods
-                val busy = hood == 0 || hood == 2 || hood == 3 || hood == 4
-                for (side in 0..1) {
-                    val r = rand()
-                    val px = bx0 + 20f + rand() * (bx1 - bx0 - 40f)
-                    val py = if (side == 0) by0 - curb else by1 + curb
-                    if (nearTree(px, py, 2.2f)) continue
-                    when {
-                        r < (if (busy) .35f else .15f) -> add(px, py, BENCH, side)
-                        r < (if (busy) .55f else .25f) -> add(px, py, BIKE_RACK, side)
-                        r < (if (busy) .75f else .3f) && hood != 5 -> add(px, py, PLANTER, side)
-                    }
-                }
-            }
-            for (i in start until count) lists[blockIdx] += i
-        }
-        byBlock = Array(lists.size) { lists[it].toIntArray() }
-        // tree kinds: park trees vs street trees, some conifers and flowering trees
-        for ((i, t) in city.trees.withIndex()) {
-            val col = (t.x / City.AV_SPACING).toInt().coerceIn(0, City.COLS - 1)
-            val row = (t.y / City.ST_SPACING).toInt().coerceIn(0, City.ROWS - 1)
-            val inPark = (row * City.COLS + col) in city.parkBlocks
-            val h = ((i * 2654435761L) ushr 7).toInt() and 0xFF
-            treeKind[i] = when {
-                inPark && h % 4 == 0 -> 2
-                inPark -> 1
-                h % 5 == 0 -> 3
-                else -> 0
-            }
-        }
+    /** Calls [f] with every prop index whose position lies in the rectangle. */
+    inline fun forIn(x0: Float, y0: Float, x1: Float, y1: Float, f: (Int) -> Unit) {
+        val c0 = cellIndex(x0, true); val c1 = cellIndex(x1, true)
+        val r0 = cellIndex(y0, false); val r1 = cellIndex(y1, false)
+        for (row in r0..r1) for (col in c0..c1) for (i in cellProps(row, col)) f(i)
     }
 
-    private fun park(bx0: Float, by0: Float, bx1: Float, by1: Float) {
-        val cx = (bx0 + bx1) / 2; val cy = (by0 + by1) / 2
-        add(cx, cy, FOUNTAIN, 0)
-        // keep the paths and the fountain clear of trees
+    fun cellIndex(v: Float, isX: Boolean) = if (isX) cellOf(v, gx0, gCols) else cellOf(v, gy0, gRows)
+    fun cellProps(row: Int, col: Int): IntArray = grid[row * gCols + col]
+
+    init {
+        // trees by cell, for spacing props around them
+        val tLists = Array(gCols * gRows) { ArrayList<Int>() }
+        for ((i, t) in city.trees.withIndex()) tLists[cellOf(t.y, gy0, gRows) * gCols + cellOf(t.x, gx0, gCols)] += i
+        treeGrid = Array(tLists.size) { tLists[it].toIntArray() }
+        val g = city.roads
+        for (e in g.edges) {
+            if (e.overWater || e.len < 14f) continue
+            val major = e.cls.rank >= 2
+            for (side in -1..1 step 2) {
+                // n points from the road to this sidewalk; props face the road (-n)
+                val nx = e.uy * side; val ny = -e.ux * side
+                val curb = e.cls.halfWidth + .6f
+                val s0 = e.clearA + 4f; val s1 = e.len - e.clearB - 4f
+                if (s1 - s0 < 6f) continue
+                fun at(s: Float, off: Float, k: Int) {
+                    val px = e.ax + e.ux * s + nx * off; val py = e.ay + e.uy * s + ny * off
+                    if (city.shore.anyWater(px, py) || city.parks.any { Geo.inside(px, py, it.poly) }) return
+                    add(px, py, k, -nx, -ny)
+                }
+                val hood = city.neighborhoodAt(e.ax + e.ux * (s0 + s1) * .5f + nx * 12f, e.ay + e.uy * (s0 + s1) * .5f + ny * 12f)
+                val busy = hood.traffic > .3f
+                // lamp posts every ~25 m (one side only on narrow lanes)
+                if (e.cls != RoadClass.LANE || side > 0) {
+                    var s = s0 + 5f
+                    while (s < s1 - 3f) {
+                        val px = e.ax + e.ux * s + nx * curb; val py = e.ay + e.uy * s + ny * curb
+                        at(if (nearTree(px, py, 1.6f)) s + 2.2f else s, curb, LAMP)
+                        s += if (e.cls == RoadClass.LANE) 30f else 25f
+                    }
+                }
+                if (e.cls == RoadClass.LANE) {
+                    if (rand() < .25f) at(s0 + rand() * (s1 - s0), e.cls.halfWidth + e.cls.sidewalk * .5f, if (busy && rand() < .5f) BIN else PLANTER)
+                    continue
+                }
+                // corner furniture at both ends
+                for (end in 0..1) {
+                    val s = if (end == 0) s0 + 1f else s1 - 1f
+                    val r = rand()
+                    when {
+                        r < .45f -> at(s, curb, BIN)
+                        r < .6f -> at(s, curb, MAILBOX)
+                    }
+                    if (major && rand() < .35f) at(if (end == 0) s0 + 4.5f else s1 - 4.5f, curb + .3f, NEWS)
+                }
+                // a hydrant on each side of a block
+                at(if (rand() < .5f) s0 + 6.5f else s1 - 6.5f, curb, HYDRANT)
+                // a bus shelter mid-block on the big roads
+                if (major && s1 - s0 > 50f && rand() < .45f) at((s0 + s1) * .5f, curb + .2f, BUS_STOP)
+                // benches, bike racks and planters where it's busy
+                val n = ((s1 - s0) / 60f).toInt().coerceAtLeast(1)
+                repeat(n) {
+                    val r = rand()
+                    val s = s0 + 12f + rand() * (s1 - s0 - 24f).coerceAtLeast(1f)
+                    val px = e.ax + e.ux * s + nx * curb; val py = e.ay + e.uy * s + ny * curb
+                    if (nearTree(px, py, 2.2f)) return@repeat
+                    when {
+                        r < (if (busy) .35f else .15f) -> at(s, curb, BENCH)
+                        r < (if (busy) .55f else .25f) -> at(s, curb, BIKE_RACK)
+                        r < (if (busy) .75f else .3f) -> at(s, curb, PLANTER)
+                    }
+                }
+            }
+        }
+        for (park in city.parks) if (park.kind == Park.GREEN) park(park)
+        // tree kinds: what the map planted, or park trees vs street trees with some conifers and flowering trees
         for ((i, t) in city.trees.withIndex()) {
-            if (t.x < bx0 || t.x > bx1 || t.y < by0 || t.y > by1) continue
-            if (abs(t.x - cx) < 2.8f || abs(t.y - cy) < 2.8f || (abs(t.x - cx) < 8f && abs(t.y - cy) < 8f)) hiddenTree[i] = true
-        }
-        // lamps and benches along the paths
-        var px = bx0 + 8f
-        var k = 0
-        while (px < bx1 - 6f) {
-            if (abs(px - cx) > 9f) {
-                add(px, cy + (if (k % 2 == 0) -2.4f else 2.4f), PARK_LAMP, if (k % 2 == 0) 0 else 1)
-                if (k % 3 != 2) add(px + 5f, cy + (if (k % 2 == 0) 2.6f else -2.6f), BENCH, if (k % 2 == 0) 0 else 1)
+            val inPark = city.parks.any { it.kind != Park.PLAZA && Geo.inside(t.x, t.y, it.poly) }
+            val h = ((i * 2654435761L) ushr 7).toInt() and 0xFF
+            treeKind[i] = when (t.species) {
+                1 -> 4
+                2 -> 2
+                3 -> 3
+                4 -> 5
+                0 -> if (inPark) 1 else 0
+                else -> when {
+                    inPark && h % 4 == 0 -> 2
+                    inPark -> 1
+                    h % 5 == 0 -> 3
+                    else -> 0
+                }
             }
-            px += 12f; k++
         }
-        var py = by0 + 7f
-        while (py < by1 - 5f) {
-            if (abs(py - cy) > 9f) {
-                add(cx + 2.4f, py, PARK_LAMP, 2)
-                add(cx - 2.6f, py + 4f, BENCH, 3)
+        val lists = Array(gCols * gRows) { ArrayList<Int>() }
+        for (i in 0 until count) lists[cellOf(y[i], gy0, gRows) * gCols + cellOf(x[i], gx0, gCols)] += i
+        grid = Array(lists.size) { lists[it].toIntArray() }
+    }
+
+    /** A fountain where the park's paths cross, lamps and benches along them, and bins at the edges. */
+    private fun park(p: Park) {
+        if (Geo.area(p.poly) < 2500f) return
+        val (cx, cy) = p.centre
+        if (Geo.inside(cx, cy, p.poly) && !city.shore.anyWater(cx, cy)) {
+            add(cx, cy, FOUNTAIN, 0f, 1f)
+            for ((i, t) in city.trees.withIndex()) if (abs(t.x - cx) < 8f && abs(t.y - cy) < 8f) hiddenTree[i] = true
+        }
+        for (path in p.paths) {
+            val ax = path[0]; val ay = path[1]; val bx = path[2]; val by = path[3]
+            val len = dist(ax, ay, bx, by)
+            if (len < 10f) continue
+            val ux = (bx - ax) / len; val uy = (by - ay) / len
+            // trees stay off the path
+            for ((i, t) in city.trees.withIndex()) if (Geo.distToSeg(t.x, t.y, ax, ay, bx, by) < 2.8f) hiddenTree[i] = true
+            var s = 6f; var k = 0
+            while (s < len - 4f) {
+                val px = ax + ux * s; val py = ay + uy * s
+                if (dist(px, py, cx, cy) > 9f && !city.shore.anyWater(px, py)) {
+                    val side = if (k % 2 == 0) 1f else -1f
+                    add(px - uy * 2.4f * side, py + ux * 2.4f * side, PARK_LAMP, uy * side, -ux * side)
+                    if (k % 3 != 2) add(px + ux * 5f + uy * 2.6f * side, py + uy * 5f - ux * 2.6f * side, BENCH, -uy * side, ux * side)
+                }
+                s += 12f; k++
             }
-            py += 12f
+            add(ax + ux * 2f, ay + uy * 2f, BIN, ux, uy)
         }
-        add(bx0 + 2f, by0 + 2f, BIN, 0)
-        add(bx1 - 2f, by1 - 2f, BIN, 1)
     }
 
     // ------------------------------------------------------------------ painting
 
     /** Draws prop [i]. [near] adds the small parts. */
     fun draw(scene: Scene3D, i: Int, near: Boolean, time: Float) {
-        val px = x[i]; val py = y[i]; val f = face[i]
+        // local +y points at the road: world (-sin, cos) = (dirX, dirY)
+        scene.setFrame(x[i], y[i], dirY[i], -dirX[i])
+        try { drawLocal(scene, i, near, time) } finally { scene.clearFrame() }
+    }
+
+    private fun drawLocal(scene: Scene3D, i: Int, near: Boolean, time: Float) {
+        val px = 0f; val py = 0f; val f = face[i]
         val night = scene.daylight < .5f
         // unit vector toward the road
         val ox = when (f) { 2 -> -1f; 3 -> 1f; else -> 0f }
@@ -330,7 +370,7 @@ class StreetProps(val city: City) {
     /** Props that move (fountains) are drawn every frame instead of being cached. */
     fun animated(i: Int) = kind[i] == FOUNTAIN
 
-    /** Where the light falls: under the lamp head. */
-    fun lightX(i: Int) = x[i] + (if (kind[i] == LAMP) when (face[i]) { 2 -> -1.6f; 3 -> 1.6f; else -> 0f } else 0f)
-    fun lightY(i: Int) = y[i] + (if (kind[i] == LAMP) when (face[i]) { 0 -> -1.6f; 1 -> 1.6f; else -> 0f } else 0f)
+    /** Where the light falls: under the lamp head, which reaches out over the road. */
+    fun lightX(i: Int) = x[i] + (if (kind[i] == LAMP) dirX[i] * 1.6f else 0f)
+    fun lightY(i: Int) = y[i] + (if (kind[i] == LAMP) dirY[i] * 1.6f else 0f)
 }

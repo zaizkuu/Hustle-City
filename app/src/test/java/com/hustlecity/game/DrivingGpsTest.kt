@@ -51,11 +51,15 @@ class DrivingGpsTest {
         assertTrue(e.parkVehicle())
         assertEquals(-1, e.state.player.driving)
         // parked at a curb (or in a lot), lined up with the road
-        val onAvenueCurb = (0 until City.AVENUES).any { abs(abs(v.x - City.avenueX(it)) - (City.AV_HALF - 1.1f)) < .05f }
-        val onStreetCurb = (0 until City.STREETS).any { abs(abs(v.y - City.streetY(it)) - (City.ST_HALF - 1.1f)) < .05f }
+        val hit = com.hustlecity.game.world.RoadHit()
+        val onRoad = e.city.roads.nearest(v.x, v.y, 30f, hit)
+        val road = e.city.roads.edges[hit.edge]
+        val atCurb = onRoad && abs(hit.dist - (road.cls.halfWidth - 1.1f)) < .1f
         val inLot = e.city.buildings.any { (it.kind == BKind.PARKING || it.kind == BKind.GAS) && it.contains(v.x, v.y) }
-        assertTrue("parked at the curb (${v.x}, ${v.y})", onAvenueCurb || onStreetCurb || inLot)
-        assertEquals(0f, ((v.heading / (Math.PI / 2).toFloat()) - Math.round(v.heading / (Math.PI / 2))).toFloat(), .01f)
+        assertTrue("parked at the curb (${v.x}, ${v.y})", atCurb || inLot)
+        // lined up with the road
+        val along = kotlin.math.abs(kotlin.math.sin(v.heading) * road.uy + kotlin.math.cos(v.heading) * road.ux)
+        if (atCurb) assertTrue("parked along the road", along < .05f)
     }
 
     @Test
@@ -114,11 +118,12 @@ class DrivingGpsTest {
         run(e, 2f)
         assertTrue("arrow keys drive the car", e.carSpeed > 3f)
         val h0 = v.heading
-        e.onKey(android.view.KeyEvent.KEYCODE_D, true)
-        assertEquals(1f, e.input.steer, 0f)
+        // steer out into the road (to the right is the sidewalk and the buildings)
+        e.onKey(android.view.KeyEvent.KEYCODE_A, true)
+        assertEquals(-1f, e.input.steer, 0f)
         run(e, 1f)
-        assertTrue("right arrow turns the car", abs(v.heading - h0) > .15f)
-        e.onKey(android.view.KeyEvent.KEYCODE_D, false)
+        assertTrue("left arrow turns the car", abs(v.heading - h0) > .15f)
+        e.onKey(android.view.KeyEvent.KEYCODE_A, false)
         e.onKey(android.view.KeyEvent.KEYCODE_DPAD_UP, false)
         e.onKey(android.view.KeyEvent.KEYCODE_DPAD_DOWN, true)
         assertTrue(e.input.brake && !e.input.gas)

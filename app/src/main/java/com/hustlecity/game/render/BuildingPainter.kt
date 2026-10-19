@@ -158,10 +158,10 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
 
     /** Faces of a box the camera can see. */
     private inline fun visibleFaces(x0: Float, y0: Float, x1: Float, y1: Float, f: (Int) -> Unit) {
-        if (proj.camY < y0) f(0)
-        if (proj.camY > y1) f(1)
-        if (proj.camX < x0) f(2)
-        if (proj.camX > x1) f(3)
+        if (scene.camLY < y0) f(0)
+        if (scene.camLY > y1) f(1)
+        if (scene.camLX < x0) f(2)
+        if (scene.camLX > x1) f(3)
     }
 
     fun cylinder(cx: Float, cy: Float, rad: Float, z0: Float, z1: Float, sides: Int, color: Int, top: Int = color) =
@@ -176,6 +176,12 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
      * distance to the camera. Without [detail] only the massing is drawn.
      */
     fun draw(b: Building, roof: Int, facadeIn: Int, d0: Float, detail: Boolean) {
+        // everything is drawn in the building's own frame: x along the front, y from the back to the street
+        scene.setFrame(b.ox, b.oy, b.cs, b.sn)
+        try { drawLocal(b, roof, facadeIn, d0, detail) } finally { scene.clearFrame() }
+    }
+
+    private fun drawLocal(b: Building, roof: Int, facadeIn: Int, d0: Float, detail: Boolean) {
         if (b.kind == BKind.GAS) { gasStation(b, d0); return }
         val st = style(b)
         val facade = facadeIn
@@ -193,15 +199,15 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         scene.topMaterial = Mat.ROOF
         when {
             st == Arch.DECO && detail && h > 30f -> decoMassing(b, roof, facade, d0, near)
-            st == Arch.INDUSTRIAL && detail && d0 < 260f && b.width > 10f -> industrialMassing(b, roof, facade, d0, near)
-            else -> scene.box(b.minX, b.minY, 0f, b.maxX, b.maxY, h, roof, facade)
+            st == Arch.INDUSTRIAL && detail && d0 < 260f && b.w > 10f -> industrialMassing(b, roof, facade, d0, near)
+            else -> scene.box(0f, 0f, 0f, b.w, b.d, h, roof, facade)
         }
         scene.material = Mat.PLAIN
         scene.topMaterial = -1
         if (!detail) return
         if (st != Arch.DECO && st != Arch.INDUSTRIAL) roofline(b, st, d0, near)
         if (d0 > 330f) return
-        visibleFaces(b.minX, b.minY, b.maxX, b.maxY) { face -> facade(b, st, face, d0, near) }
+        visibleFaces(0f, 0f, b.w, b.d) { face -> facade(b, st, face, d0, near) }
         if (d0 < 300f && q >= 1) rooftop(b, st, d0)
         b.placeId?.let { landmark(b, it, d0) }
     }
@@ -211,14 +217,14 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
     private fun decoMassing(b: Building, roof: Int, facade: Int, d0: Float, near: Boolean) {
         val h = b.height
         val t1 = h * .62f; val t2 = h * .84f
-        val i1 = min(2.6f, min(b.width, b.depth) * .14f); val i2 = i1 * 2f
+        val i1 = min(2.6f, min(b.w, b.d) * .14f); val i2 = i1 * 2f
         val tr = trim(b)
-        scene.box(b.minX, b.minY, 0f, b.maxX, b.maxY, t1, roof, facade)
-        scene.box(b.minX + i1, b.minY + i1, t1, b.maxX - i1, b.maxY - i1, t2, roof, facade)
-        scene.box(b.minX + i2, b.minY + i2, t2, b.maxX - i2, b.maxY - i2, h, roof, facade)
+        scene.box(0f, 0f, 0f, b.w, b.d, t1, roof, facade)
+        scene.box(i1, i1, t1, b.w - i1, b.d - i1, t2, roof, facade)
+        scene.box(i2, i2, t2, b.w - i2, b.d - i2, h, roof, facade)
         // crown: stepped cap and a spire
-        val cx = b.cx; val cy = b.cy
-        val cw = min(b.width, b.depth) * .5f - i2
+        val cx = (b.w * .5f); val cy = (b.d * .5f)
+        val cw = min(b.w, b.d) * .5f - i2
         scene.box(cx - cw * .6f, cy - cw * .6f, h, cx + cw * .6f, cy + cw * .6f, h + 2.2f, tr, tr)
         scene.box(cx - cw * .35f, cy - cw * .35f, h + 2.2f, cx + cw * .35f, cy + cw * .35f, h + 4.2f, tr, tr)
         if (hash(b.id, 1, 2) % 3 != 0) scene.box(cx - .25f, cy - .25f, h + 4.2f, cx + .25f, cy + .25f, h + 4.2f + h * .14f, c(0xFFCFD6DC), c(0xFFB8C0C8))
@@ -229,7 +235,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
             val ins = if (tier == 0) 0f else if (tier == 1) i1 else i2
             val z0 = if (tier == 0) 0f else if (tier == 1) t1 else t2
             val z1 = if (tier == 0) t1 else if (tier == 1) t2 else h
-            val x0 = b.minX + ins; val y0 = b.minY + ins; val x1 = b.maxX - ins; val y1 = b.maxY - ins
+            val x0 = ins; val y0 = ins; val x1 = b.w - ins; val y1 = b.d - ins
             visibleFaces(x0, y0, x1, y1) { face ->
                 val shade = shadeOf(face)
                 val len = faceLen(x0, y0, x1, y1, face)
@@ -262,26 +268,26 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
     private fun industrialMassing(b: Building, roof: Int, facade: Int, d0: Float, near: Boolean) {
         val h = b.height
         val wall = h - 2.6f
-        scene.box(b.minX, b.minY, 0f, b.maxX, b.maxY, wall, roof, facade)
+        scene.box(0f, 0f, 0f, b.w, b.d, wall, roof, facade)
         // sawtooth roof: north-facing glass teeth running east-west
-        val teeth = (b.depth / 6f).toInt().coerceIn(2, 6)
-        val tw = b.depth / teeth
+        val teeth = (b.d / 6f).toInt().coerceIn(2, 6)
+        val tw = b.d / teeth
         val roofCol = scene.lit(scene.snowy(c(0xFF6F7377)), 1f)
         val glass = scene.lit(c(0xFF9FC4DD), scene.sideShade(0f, -1f))
         val sideCol = scene.lit(facade, scene.sideShade(1f, 0f))
         for (t in 0 until teeth) {
-            val y0 = b.minY + t * tw; val y1 = y0 + tw
+            val y0 = t * tw; val y1 = y0 + tw
             // vertical glazing on the north side of each tooth
-            if (proj.camY < y0 + .1f) scene.quad(b.maxX, y0, wall, b.minX, y0, wall, b.minX, y0, h, b.maxX, y0, h, glass)
+            if (scene.camLY < y0 + .1f) scene.quad(b.w, y0, wall, 0f, y0, wall, 0f, y0, h, b.w, y0, h, glass)
             // sloped roof down to the south
-            scene.quad(b.minX, y0, h, b.maxX, y0, h, b.maxX, y1, wall, b.minX, y1, wall, roofCol)
+            scene.quad(0f, y0, h, b.w, y0, h, b.w, y1, wall, 0f, y1, wall, roofCol)
             // gable ends
-            if (proj.camX > b.maxX) { px[0] = b.maxX; py[0] = y0; pz[0] = wall; px[1] = b.maxX; py[1] = y1; pz[1] = wall; px[2] = b.maxX; py[2] = y0; pz[2] = h; scene.poly(3, px, py, pz, sideCol) }
-            if (proj.camX < b.minX) { px[0] = b.minX; py[0] = y0; pz[0] = wall; px[1] = b.minX; py[1] = y1; pz[1] = wall; px[2] = b.minX; py[2] = y0; pz[2] = h; scene.poly(3, px, py, pz, sideCol) }
+            if (scene.camLX > b.w) { px[0] = b.w; py[0] = y0; pz[0] = wall; px[1] = b.w; py[1] = y1; pz[1] = wall; px[2] = b.w; py[2] = y0; pz[2] = h; scene.poly(3, px, py, pz, sideCol) }
+            if (scene.camLX < 0f) { px[0] = 0f; py[0] = y0; pz[0] = wall; px[1] = 0f; py[1] = y1; pz[1] = wall; px[2] = 0f; py[2] = y0; pz[2] = h; scene.poly(3, px, py, pz, sideCol) }
         }
         // smokestack
         if (hash(b.id, 9, 9) % 3 == 0) {
-            val sx = b.minX + 2.5f; val sy = b.maxY - 2.5f
+            val sx = 2.5f; val sy = b.d - 2.5f
             cylinder(sx, sy, 1f, wall, h + 9f, 8, c(0xFF8E4B3A), c(0xFF2A2A2A))
             cylinder(sx, sy, 1.12f, h + 7.6f, h + 8.2f, 8, c(0xFF5B5B5B))
         }
@@ -297,24 +303,24 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
                 // cornice sticking out over the street-facing walls
                 val o = if (st == Arch.CLASSIC) .45f else .32f
                 // the cornice caps the roof edge; it stands a little proud so it never shares a plane with the roof or walls
-                scene.box(b.minX - o * .3f, b.minY - o, h - .7f, b.maxX + o * .3f, b.maxY + o, h + .06f, tr, tr)
-                if (st == Arch.CLASSIC) scene.box(b.minX - .1f, b.minY - .1f, 0f, b.maxX + .1f, b.maxY + .1f, min(7f, h * .3f), tr, tr) // stone base
+                scene.box(0f - o * .3f, 0f - o, h - .7f, b.w + o * .3f, b.d + o, h + .06f, tr, tr)
+                if (st == Arch.CLASSIC) scene.box(0f - .1f, 0f - .1f, 0f, b.w + .1f, b.d + .1f, min(7f, h * .3f), tr, tr) // stone base
             }
             Arch.SHOP, Arch.MODERN -> {
                 // parapet around the roof
                 if (d0 < 220f) {
                     val p = .25f; val ph = .8f
                     val col = tr
-                    scene.box(b.minX, b.minY, h, b.maxX, b.minY + p, h + ph, col, col)
-                    scene.box(b.minX, b.maxY - p, h, b.maxX, b.maxY, h + ph, col, col)
-                    scene.box(b.minX, b.minY, h, b.minX + p, b.maxY, h + ph, col, col)
-                    scene.box(b.maxX - p, b.minY, h, b.maxX, b.maxY, h + ph, col, col)
+                    scene.box(0f, 0f, h, b.w, p, h + ph, col, col)
+                    scene.box(0f, b.d - p, h, b.w, b.d, h + ph, col, col)
+                    scene.box(0f, 0f, h, p, b.d, h + ph, col, col)
+                    scene.box(b.w - p, 0f, h, b.w, b.d, h + ph, col, col)
                 }
             }
             Arch.GLASS -> {
                 // mechanical penthouse
-                val ins = min(b.width, b.depth) * .2f
-                scene.box(b.minX + ins, b.minY + ins, h, b.maxX - ins, b.maxY - ins, h + 3.4f, c(0xFF7D868F), c(0xFF6B737B))
+                val ins = min(b.w, b.d) * .2f
+                scene.box(ins, ins, h, b.w - ins, b.d - ins, h + 3.4f, c(0xFF7D868F), c(0xFF6B737B))
             }
             else -> {}
         }
@@ -331,13 +337,13 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         when (st) {
             Arch.WALKUP, Arch.BROWNSTONE -> {
                 // the classic New York water tower
-                if (k % 3 == 0 && b.width > 9f) waterTower(b.minX + b.width * .7f, b.cy - b.depth * .15f, h)
+                if (k % 3 == 0 && b.w > 9f) waterTower(b.w * .7f, (b.d * .5f) - b.d * .15f, h)
                 // chimneys
                 if (d0 < 200f) {
                     val n = 1 + k % 2
                     for (i in 0 until n) {
-                        val cx = b.minX + 1.6f + i * (b.width - 3.2f) / max(1, n)
-                        scene.box(cx - .4f, b.maxY - 2f, h, cx + .4f, b.maxY - 1.2f, h + 1.8f, c(0xFF5A3B32), c(0xFF7A4B3E))
+                        val cx = 1.6f + i * (b.w - 3.2f) / max(1, n)
+                        scene.box(cx - .4f, b.d - 2f, h, cx + .4f, b.d - 1.2f, h + 1.8f, c(0xFF5A3B32), c(0xFF7A4B3E))
                     }
                 }
             }
@@ -345,22 +351,22 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
                 if (k % 2 == 0) solarPanels(b, h) else roofGarden(b, h)
             }
             Arch.GLASS -> {
-                val ins = min(b.width, b.depth) * .2f
+                val ins = min(b.w, b.d) * .2f
                 if (k % 3 == 0) {
                     // helipad
-                    val r0 = min(b.width, b.depth) * .32f
+                    val r0 = min(b.w, b.d) * .32f
                     if (r0 > 4f) {
-                        scene.disc(b.cx, b.cy, h + 3.45f, r0, r0, 14, scene.lit(c(0xFF3E4650), 1f))
-                        scene.disc(b.cx, b.cy, h + 3.47f, r0 * .82f, r0 * .82f, 14, scene.lit(c(0xFFF2C94C), 1f))
-                        scene.disc(b.cx, b.cy, h + 3.48f, r0 * .74f, r0 * .74f, 14, scene.lit(c(0xFF3E4650), 1f))
+                        scene.disc((b.w * .5f), (b.d * .5f), h + 3.45f, r0, r0, 14, scene.lit(c(0xFF3E4650), 1f))
+                        scene.disc((b.w * .5f), (b.d * .5f), h + 3.47f, r0 * .82f, r0 * .82f, 14, scene.lit(c(0xFFF2C94C), 1f))
+                        scene.disc((b.w * .5f), (b.d * .5f), h + 3.48f, r0 * .74f, r0 * .74f, 14, scene.lit(c(0xFF3E4650), 1f))
                         val hw = r0 * .3f
-                        scene.box(b.cx - hw, b.cy - .2f, h + 3.48f, b.cx + hw, b.cy + .2f, h + 3.5f, c(0xFFFFFFFF), c(0xFFFFFFFF))
-                        scene.box(b.cx - hw, b.cy - hw, h + 3.48f, b.cx - hw + .4f, b.cy + hw, h + 3.5f, c(0xFFFFFFFF), c(0xFFFFFFFF))
-                        scene.box(b.cx + hw - .4f, b.cy - hw, h + 3.48f, b.cx + hw, b.cy + hw, h + 3.5f, c(0xFFFFFFFF), c(0xFFFFFFFF))
+                        scene.box((b.w * .5f) - hw, (b.d * .5f) - .2f, h + 3.48f, (b.w * .5f) + hw, (b.d * .5f) + .2f, h + 3.5f, c(0xFFFFFFFF), c(0xFFFFFFFF))
+                        scene.box((b.w * .5f) - hw, (b.d * .5f) - hw, h + 3.48f, (b.w * .5f) - hw + .4f, (b.d * .5f) + hw, h + 3.5f, c(0xFFFFFFFF), c(0xFFFFFFFF))
+                        scene.box((b.w * .5f) + hw - .4f, (b.d * .5f) - hw, h + 3.48f, (b.w * .5f) + hw, (b.d * .5f) + hw, h + 3.5f, c(0xFFFFFFFF), c(0xFFFFFFFF))
                     }
                 } else {
                     // antenna with a red light
-                    val ax = b.maxX - ins - 1f; val ay = b.minY + ins + 1f
+                    val ax = b.w - ins - 1f; val ay = ins + 1f
                     scene.box(ax - .12f, ay - .12f, h + 3.4f, ax + .12f, ay + .12f, h + 3.4f + 9f, c(0xFFBFC6CC), c(0xFF9AA2A9))
                     if (scene.daylight < .6f || (e.realTime % 2f) < 1f) scene.box(ax - .25f, ay - .25f, h + 12.3f, ax + .25f, ay + .25f, h + 12.7f, c(0xFFFF4D4D), c(0xFFFF4D4D))
                 }
@@ -368,7 +374,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
             Arch.CLASSIC -> {
                 if (k % 2 == 0) {
                     // flagpole with a flag
-                    val fx = b.cx; val fy = if (b.facesNorth) b.minY + 1.5f else b.maxY - 1.5f
+                    val fx = (b.w * .5f); val fy = b.d - 1.5f
                     scene.box(fx - .08f, fy - .08f, h, fx + .08f, fy + .08f, h + 7f, c(0xFFD5D8DC), c(0xFFBFC5CB))
                     val wave = sin(e.realTime * 3f + b.id) * .3f
                     scene.quad(fx + .08f, fy, h + 6.9f, fx + 2.6f, fy + wave, h + 6.9f, fx + 2.6f, fy + wave, h + 5.4f, fx + .08f, fy, h + 5.4f, scene.lit(AD_COLORS[k % AD_COLORS.size], 1f))
@@ -376,7 +382,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
             }
             Arch.SHOP -> {
                 // rooftop billboard on some low buildings
-                if (k % 4 == 0 && b.width > 10f && d0 < 260f) billboard(b, h, k)
+                if (k % 4 == 0 && b.w > 10f && d0 < 260f) billboard(b, h, k)
             }
             else -> {}
         }
@@ -397,34 +403,34 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
     }
 
     private fun solarPanels(b: Building, h: Float) {
-        val rows = ((b.depth - 3f) / 2.6f).toInt().coerceIn(1, 6)
+        val rows = ((b.d - 3f) / 2.6f).toInt().coerceIn(1, 6)
         val panel = scene.lit(c(0xFF22385A), 1f)
         val frame = c(0xFF9AA3AD)
         for (rIdx in 0 until rows) {
-            val y0 = b.minY + 1.5f + rIdx * 2.6f
-            scene.quad(b.minX + 1.2f, y0, h + .3f, b.maxX - 1.2f, y0, h + .3f, b.maxX - 1.2f, y0 + 1.6f, h + 1.1f, b.minX + 1.2f, y0 + 1.6f, h + 1.1f, panel)
-            scene.box(b.minX + 1.2f, y0 + 1.5f, h, b.minX + 1.4f, y0 + 1.7f, h + 1.1f, frame, frame)
-            scene.box(b.maxX - 1.4f, y0 + 1.5f, h, b.maxX - 1.2f, y0 + 1.7f, h + 1.1f, frame, frame)
+            val y0 = 1.5f + rIdx * 2.6f
+            scene.quad(1.2f, y0, h + .3f, b.w - 1.2f, y0, h + .3f, b.w - 1.2f, y0 + 1.6f, h + 1.1f, 1.2f, y0 + 1.6f, h + 1.1f, panel)
+            scene.box(1.2f, y0 + 1.5f, h, 1.4f, y0 + 1.7f, h + 1.1f, frame, frame)
+            scene.box(b.w - 1.4f, y0 + 1.5f, h, b.w - 1.2f, y0 + 1.7f, h + 1.1f, frame, frame)
         }
     }
 
     private fun roofGarden(b: Building, h: Float) {
-        scene.box(b.minX + 1f, b.minY + 1f, h, b.maxX - 1f, b.maxY - 1f, h + .35f, scene.snowy(c(0xFF6DA35C)), c(0xFF8B6A4E))
-        val n = ((b.width - 2f) / 4f).toInt().coerceIn(1, 5)
+        scene.box(1f, 1f, h, b.w - 1f, b.d - 1f, h + .35f, scene.snowy(c(0xFF6DA35C)), c(0xFF8B6A4E))
+        val n = ((b.w - 2f) / 4f).toInt().coerceIn(1, 5)
         for (i in 0 until n) {
-            val tx = b.minX + 2.5f + i * (b.width - 5f) / max(1, n - 1).toFloat()
-            scene.blob(tx, b.cy + (if (i % 2 == 0) -1.5f else 1.5f), h + 1.4f, 1.2f, scene.lit(scene.mix(c(0xFF4C8C3F), c(0xFFF2F5F8), scene.snow * .5f), 1f), 8)
+            val tx = 2.5f + i * (b.w - 5f) / max(1, n - 1).toFloat()
+            scene.blob(tx, (b.d * .5f) + (if (i % 2 == 0) -1.5f else 1.5f), h + 1.4f, 1.2f, scene.lit(scene.mix(c(0xFF4C8C3F), c(0xFFF2F5F8), scene.snow * .5f), 1f), 8)
         }
     }
 
     private fun billboard(b: Building, h: Float, k: Int) {
-        val y = if (b.facesNorth) b.minY + 1.2f else b.maxY - 1.2f
+        val y = b.d - 1.2f
         val leg = c(0xFF3A3D42)
-        val x0 = b.minX + 1.5f; val x1 = b.maxX - 1.5f
+        val x0 = 1.5f; val x1 = b.w - 1.5f
         scene.box(x0 + 1f, y - .1f, h, x0 + 1.2f, y + .1f, h + 3f, leg, leg)
         scene.box(x1 - 1.2f, y - .1f, h, x1 - 1f, y + .1f, h + 3f, leg, leg)
         val ad = AD_COLORS[k % AD_COLORS.size]
-        val face = if (b.facesNorth) 0 else 1
+        val face = 1
         val yy = if (face == 0) y - .12f else y + .12f
         val sh = shadeOf(face)
         scene.box(x0, y - .1f, h + 3f, x1, y + .1f, h + 7f, c(0xFF2C2F33), c(0xFF2C2F33))
@@ -438,16 +444,16 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
 
     private fun facade(b: Building, st: Arch, face: Int, d0: Float, near: Boolean) {
         if (st == Arch.DECO && b.height > 30f) return // drawn with the setbacks
-        val x0 = b.minX; val y0 = b.minY; val x1 = b.maxX; val y1 = b.maxY
+        val x0 = 0f; val y0 = 0f; val x1 = b.w; val y1 = b.d
         val len = faceLen(x0, y0, x1, y1, face)
         val shade = shadeOf(face)
         val night = scene.daylight < .5f
-        val front = (face == 0 && b.facesNorth) || (face == 1 && !b.facesNorth)
+        val front = face == 1
         val biz = r.bizAt(b.id)
         val rival = if (biz == null) r.rivalAt(b.id) else null
         val hasShop = (b.kind == BKind.RETAIL || b.kind == BKind.SPECIAL || biz != null || rival != null) && st != Arch.INDUSTRIAL
         val baseZ = if (hasShop) 4.2f else if (st == Arch.BROWNSTONE) 1.6f else 1.2f
-        val h = if (st == Arch.INDUSTRIAL && b.width > 10f && d0 < 260f) b.height - 2.6f else b.height
+        val h = if (st == Arch.INDUSTRIAL && b.w > 10f && d0 < 260f) b.height - 2.6f else b.height
         val glass = scene.lit(WorldRenderer.GLASS, shade)
         val floors = ((h - baseZ - .8f) / 3.3f).toInt()
         val tr = scene.lit(trim(b), shade)
@@ -564,7 +570,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
     }
 
     private fun entrance(b: Building, st: Arch, face: Int, len: Float, shade: Float, near: Boolean) {
-        val x0 = b.minX; val y0 = b.minY; val x1 = b.maxX; val y1 = b.maxY
+        val x0 = 0f; val y0 = 0f; val x1 = b.w; val y1 = b.d
         val u = len / 2
         val doorZ = if (st == Arch.BROWNSTONE) 1.5f else 0f
         faceQuad(x0, y0, x1, y1, face, u - .8f, u + .8f, doorZ, doorZ + 2.5f, scene.lit(c(0xFF3B2A22), shade), .06f)
@@ -598,7 +604,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
     }
 
     private fun fireEscape(b: Building, face: Int, len: Float) {
-        val x0 = b.minX; val y0 = b.minY; val x1 = b.maxX; val y1 = b.maxY
+        val x0 = 0f; val y0 = 0f; val x1 = b.w; val y1 = b.d
         val floors = ((b.height - 1.2f - .8f) / 3.3f).toInt()
         val u0 = len * .12f; val u1 = u0 + 3.4f
         if (u1 > len - 1f) return
@@ -629,7 +635,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
     }
 
     private fun loadingDocks(b: Building, face: Int, len: Float, shade: Float, night: Boolean) {
-        val x0 = b.minX; val y0 = b.minY; val x1 = b.maxX; val y1 = b.maxY
+        val x0 = 0f; val y0 = 0f; val x1 = b.w; val y1 = b.d
         val doors = ((len - 2f) / 6f).toInt().coerceIn(1, 4)
         val step = len / doors
         for (d in 0 until doors) {
@@ -650,7 +656,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
 
     private fun storefront(b: Building, face: Int, len: Float, shade: Float, d0: Float, near: Boolean,
                            biz: com.hustlecity.game.model.Business?, rival: com.hustlecity.game.model.RivalBusiness?) {
-        val x0 = b.minX; val y0 = b.minY; val x1 = b.maxX; val y1 = b.maxY
+        val x0 = 0f; val y0 = 0f; val x1 = b.w; val y1 = b.d
         val night = scene.daylight < .5f
         val typeId = biz?.typeId ?: rival?.typeId
         val hour = e.state.hour
@@ -725,14 +731,14 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         val out = 1.4f
         when (face) {
             0 -> {
-                val y = b.minY
-                scene.quad(b.maxX - u0, y, 3.2f, b.maxX - u1, y, 3.2f, b.maxX - u1, y - out, 2.7f, b.maxX - u0, y - out, 2.7f, scene.snowy(top))
-                scene.quad(b.maxX - u0, y - out, 2.7f, b.maxX - u1, y - out, 2.7f, b.maxX - u1, y - out, 2.35f, b.maxX - u0, y - out, 2.35f, front)
+                val y = 0f
+                scene.quad(b.w - u0, y, 3.2f, b.w - u1, y, 3.2f, b.w - u1, y - out, 2.7f, b.w - u0, y - out, 2.7f, scene.snowy(top))
+                scene.quad(b.w - u0, y - out, 2.7f, b.w - u1, y - out, 2.7f, b.w - u1, y - out, 2.35f, b.w - u0, y - out, 2.35f, front)
             }
             1 -> {
-                val y = b.maxY
-                scene.quad(b.minX + u0, y, 3.2f, b.minX + u1, y, 3.2f, b.minX + u1, y + out, 2.7f, b.minX + u0, y + out, 2.7f, scene.snowy(top))
-                scene.quad(b.minX + u0, y + out, 2.7f, b.minX + u1, y + out, 2.7f, b.minX + u1, y + out, 2.35f, b.minX + u0, y + out, 2.35f, front)
+                val y = b.d
+                scene.quad(u0, y, 3.2f, u1, y, 3.2f, u1, y + out, 2.7f, u0, y + out, 2.7f, scene.snowy(top))
+                scene.quad(u0, y + out, 2.7f, u1, y + out, 2.7f, u1, y + out, 2.35f, u0, y + out, 2.35f, front)
             }
             else -> {}
         }
@@ -750,7 +756,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
     }
 
     private fun neon(b: Building, face: Int, len: Float, open: Boolean) {
-        val x0 = b.minX; val y0 = b.minY; val x1 = b.maxX; val y1 = b.maxY
+        val x0 = 0f; val y0 = 0f; val x1 = b.w; val y1 = b.d
         val night = scene.daylight < .6f
         val pink = if (night && open) c(0xFFFF5FD8) else c(0xFF8A3A78)
         val blue = if (night && open) c(0xFF5FE3FF) else c(0xFF2E6A7A)
@@ -763,7 +769,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
 
     /** Cinema and theater marquee: a lit canopy with a row of bulbs. */
     private fun marquee(b: Building, face: Int, len: Float, brand: Int, night: Boolean) {
-        val x0 = b.minX; val y0 = b.minY; val x1 = b.maxX; val y1 = b.maxY
+        val x0 = 0f; val y0 = 0f; val x1 = b.w; val y1 = b.d
         faceBox(x0, y0, x1, y1, face, len * .1f, len * .9f, 3.3f, 4.4f, 2f, scene.snowy(c(0xFF2C2F33)), brand)
         val bulbs = ((len * .8f) / .7f).toInt()
         val blink = ((e.realTime * 4f).toInt() % 2)
@@ -777,10 +783,10 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
     private fun sidewalkProps(b: Building, face: Int, len: Float, typeId: String?, brand: Int) {
         // positions just outside the shop window, on the sidewalk
         fun at(u: Float, out: Float): Pair<Float, Float> = when (face) {
-            0 -> (b.maxX - u) to (b.minY - out)
-            1 -> (b.minX + u) to (b.maxY + out)
-            2 -> (b.minX - out) to (b.minY + u)
-            else -> (b.maxX + out) to (b.maxY - u)
+            0 -> (b.w - u) to (0f - out)
+            1 -> (u) to (b.d + out)
+            2 -> (0f - out) to (u)
+            else -> (b.w + out) to (b.d - u)
         }
         when (typeId) {
             "coffee", "fastfood" -> for (k in 0..1) {
@@ -815,9 +821,9 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
 
     private fun landmark(b: Building, placeId: String, d0: Float) {
         if (d0 > 320f) return
-        val face = if (b.facesNorth) 0 else 1
-        val len = b.width
-        val x0 = b.minX; val y0 = b.minY; val x1 = b.maxX; val y1 = b.maxY
+        val face = 1
+        val len = b.w
+        val x0 = 0f; val y0 = 0f; val x1 = b.w; val y1 = b.d
         val h = b.height
         when (placeId) {
             "bank" -> {
@@ -842,7 +848,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
             }
             "school" -> {
                 // clock tower
-                val cx = b.cx; val cy = b.cy
+                val cx = (b.w * .5f); val cy = (b.d * .5f)
                 scene.box(cx - 2f, cy - 2f, h, cx + 2f, cy + 2f, h + 7f, c(0xFFF1EBDF), c(0xFFB5523B))
                 cone(cx, cy, 2.9f, h + 7f, h + 10.5f, 4, c(0xFF3F5160))
                 val (fx, fy) = if (face == 0) cx to (cy - 2.05f) else cx to (cy + 2.05f)
@@ -895,22 +901,22 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
 
     private fun gasStation(b: Building, d0: Float) {
         val color = Catalog.place("fuel").color
-        val x0 = b.minX + 3f; val x1 = b.maxX - 3f; val y0 = b.minY + 5f; val y1 = b.maxY - 5f
+        val x0 = 3f; val x1 = b.w - 3f; val y0 = 5f; val y1 = b.d - 5f
         val pillar = c(0xFFE0E0E0)
         for ((px0, py0) in listOf(x0 + .5f to y0 + .5f, x1 - .9f to y0 + .5f, x0 + .5f to y1 - .9f, x1 - .9f to y1 - .9f)) scene.box(px0, py0, 0f, px0 + .4f, py0 + .4f, 5f, pillar, pillar)
         val mx = (x0 + x1) / 2
         // pumps on islands
         for (s in intArrayOf(-1, 1)) {
             val pxp = mx + s * 2.5f
-            scene.box(pxp - 1.2f, b.cy - 1.4f, 0f, pxp + 1.2f, b.cy + 1.4f, .2f, c(0xFFBDBDBD), c(0xFF9E9E9E))
-            scene.box(pxp - .5f, b.cy - .6f, .2f, pxp + .5f, b.cy + .6f, 1.8f, c(0xFFD32F2F), c(0xFFD32F2F))
-            scene.box(pxp - .45f, b.cy - .62f, 1.1f, pxp + .45f, b.cy - .6f, 1.6f, c(0xFF263238), c(0xFF263238))
+            scene.box(pxp - 1.2f, (b.d * .5f) - 1.4f, 0f, pxp + 1.2f, (b.d * .5f) + 1.4f, .2f, c(0xFFBDBDBD), c(0xFF9E9E9E))
+            scene.box(pxp - .5f, (b.d * .5f) - .6f, .2f, pxp + .5f, (b.d * .5f) + .6f, 1.8f, c(0xFFD32F2F), c(0xFFD32F2F))
+            scene.box(pxp - .45f, (b.d * .5f) - .62f, 1.1f, pxp + .45f, (b.d * .5f) - .6f, 1.6f, c(0xFF263238), c(0xFF263238))
         }
         scene.box(x0, y0, 5f, x1, y1, 5.7f, c(0xFFF5F5F5), color)
-        if (scene.daylight < .5f) scene.disc(b.cx, b.cy, .05f, (x1 - x0) * .45f, (y1 - y0) * .45f, 14, scene.withAlpha(c(0xFFFFF3C4), .25f))
+        if (scene.daylight < .5f) scene.disc((b.w * .5f), (b.d * .5f), .05f, (x1 - x0) * .45f, (y1 - y0) * .45f, 14, scene.withAlpha(c(0xFFFFF3C4), .25f))
         // price sign by the road
         if (d0 < 200f) {
-            val sx = b.minX + 1.5f; val sy = if (b.facesNorth) b.minY + 1.5f else b.maxY - 1.5f
+            val sx = 1.5f; val sy = b.d - 1.5f
             scene.box(sx - .1f, sy - .1f, 0f, sx + .1f, sy + .1f, 5f, c(0xFF6E757C), c(0xFF6E757C))
             scene.box(sx - 1f, sy - .2f, 5f, sx + 1f, sy + .2f, 7.2f, color, c(0xFF263238))
         }

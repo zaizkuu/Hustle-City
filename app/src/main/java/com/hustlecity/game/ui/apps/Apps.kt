@@ -191,7 +191,7 @@ fun PersonaApp(e: GameEngine) {
                 if (home != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         GIcon("home", 16.dp, Modifier.padding(end = 6.dp), tint = HC.Ink)
-                        Text("${home.address}, ${City.neighborhoods[home.neighborhood].name} · ${home.area} m²", style = HT.body, color = HC.Ink, modifier = Modifier.weight(1f))
+                        Text("${home.address}, ${home.hood.name} · ${home.area} m²", style = HT.body, color = HC.Ink, modifier = Modifier.weight(1f))
                         HButton("Pin", small = true) { e.setWaypoint(home.id) }
                     }
                 }
@@ -329,7 +329,7 @@ fun RivalsApp(e: GameEngine) {
                                 Text(" ${rb.name} ", style = HT.body, color = HC.Ink, maxLines = 1)
                                 repeat(rb.level) { GIcon("star", 10.dp, tint = HC.Orange) }
                             }
-                            Text("${b.address} · ${City.neighborhoods[b.neighborhood].name}", style = HT.small, color = HC.InkSoft, modifier = Modifier.weight(1f))
+                            Text("${b.address} · ${b.hood.name}", style = HT.small, color = HC.InkSoft, modifier = Modifier.weight(1f))
                             Text(if (rb.targetBiz >= 0) "price war" else "${(rb.reputation * 100).roundToInt()}% rep", style = HT.small,
                                 color = if (rb.targetBiz >= 0) HC.Red else HC.InkSoft, modifier = Modifier.width(70.dp))
                             Icon(Icons.Filled.Place, null, tint = HC.Blue, modifier = Modifier.size(20.dp).clickable { e.setWaypoint(b.id); e.toast("Waypoint set") })
@@ -581,7 +581,7 @@ fun RealtyApp(e: GameEngine) {
         if (tab == 0) {
             FlowRow {
                 Chip("All areas", hood == -1, HC.Purple) { hood = -1 }
-                for (n in City.neighborhoods) Chip(n.name, hood == n.id, n.color.toColor()) { hood = n.id }
+                for (n in e.city.neighborhoods) Chip(n.name, hood == n.id, n.color.toColor()) { hood = n.id }
             }
             val list = remember(s.rentals.size, s.rivalBusinesses.size, kind, hood, sort) {
                 e.city.buildings.filter { it.kind == kind && e.isVacant(it.id) && (hood == -1 || it.neighborhood == hood) }.let { l ->
@@ -596,8 +596,8 @@ fun RealtyApp(e: GameEngine) {
                             Column(Modifier.weight(1.3f)) {
                                 Text(b.address, style = HT.bodyBold, color = HC.Ink)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Dot(City.neighborhoods[b.neighborhood].color.toColor(), 8.dp)
-                                    Text(" ${City.neighborhoods[b.neighborhood].name}", style = HT.small, color = HC.InkSoft)
+                                    Dot(b.hood.color.toColor(), 8.dp)
+                                    Text(" ${b.hood.name}", style = HT.small, color = HC.InkSoft)
                                 }
                             }
                             Column(Modifier.weight(1f)) {
@@ -634,7 +634,7 @@ fun RealtyApp(e: GameEngine) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(b.address, style = HT.bodyBold, color = HC.Ink)
-                                Text("${b.kind.label} · ${b.area} m² · ${City.neighborhoods[b.neighborhood].name}", style = HT.small, color = HC.InkSoft)
+                                Text("${b.kind.label} · ${b.area} m² · ${b.hood.name}", style = HT.small, color = HC.InkSoft)
                                 Text(
                                     when {
                                         b.id == s.player.home -> "Your home"

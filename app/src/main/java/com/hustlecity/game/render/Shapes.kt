@@ -18,7 +18,7 @@ fun Scene3D.cylinder(cx: Float, cy: Float, rad: Float, z0: Float, z1: Float, sid
         val x0 = cx + cos(a0) * rad; val y0 = cy + sin(a0) * rad
         val x1 = cx + cos(a1) * rad; val y1 = cy + sin(a1) * rad
         val nx = cos((a0 + a1) / 2); val ny = sin((a0 + a1) / 2)
-        if ((proj.camX - (x0 + x1) / 2) * nx + (proj.camY - (y0 + y1) / 2) * ny <= 0f) continue
+        if ((camLX - (x0 + x1) / 2) * nx + (camLY - (y0 + y1) / 2) * ny <= 0f) continue
         quad(x0, y0, z0, x1, y1, z0, x1, y1, z1, x0, y0, z1, lit(color, sideShade(nx, ny)))
     }
     if (proj.camZ > z1) {
@@ -36,7 +36,7 @@ fun Scene3D.cone(cx: Float, cy: Float, rad: Float, z0: Float, z1: Float, sides: 
         val x1 = cx + cos(a1) * rad; val y1 = cy + sin(a1) * rad
         val nx = cos((a0 + a1) / 2); val ny = sin((a0 + a1) / 2)
         // faces turned away are hidden behind the front ones when seen from above
-        if (proj.camZ < z1 && (proj.camX - (x0 + x1) / 2) * nx + (proj.camY - (y0 + y1) / 2) * ny <= 0f) continue
+        if (proj.camZ < z1 && (camLX - (x0 + x1) / 2) * nx + (camLY - (y0 + y1) / 2) * ny <= 0f) continue
         sx[0] = x0; sy[0] = y0; sz[0] = z0
         sx[1] = x1; sy[1] = y1; sz[1] = z0
         sx[2] = cx; sy[2] = cy; sz[2] = z1

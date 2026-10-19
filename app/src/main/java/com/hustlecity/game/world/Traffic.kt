@@ -3,38 +3,45 @@ package com.hustlecity.game.world
 import com.hustlecity.game.data.c
 import kotlin.math.abs
 import kotlin.math.atan2
-import kotlin.math.ceil
 import kotlin.math.cos
-import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
 
-/** Shared lane-following agent for cars (on roads) and pedestrians (on sidewalks). */
+/** A car on a lane or a pedestrian on a sidewalk, moving over the road graph. */
 class Agent {
     var x = 0f
     var y = 0f
     var heading = 0f
     var speed = 0f
     var cruise = 10f
-    /** 0 = moving along an avenue (y axis), 1 = along a street (x axis). */
-    var axis = 0
-    var line = 0
-    var dir = 1
-    var offset = 2.5f
     var color = 0
     var length = 4.2f
     var width = 1.8f
     var height = 1.45f
     var style = 0
-    var lastCross = -999
     var phase = 0f
-    /** Planned move at the next intersection: -1 undecided, 0 straight, 1 right, 2 left. */
-    var plan = -1
-    var planCross = -1
-    /** Pedestrian state: 0 walking, 1 waiting at the curb, 2 crossing, 3 entering a shop, 4 inside, 5 leaving the shop. */
+    /** False until the agent has been placed in the city. */
+    var placed = false
+    /** Road piece, the node it came from, and how far along it is (meters from that node). */
+    var edge = -1
+    var from = -1
+    var s = 0f
+    /** Lane index from the centre line (cars), or side of the road: +1 right of travel, -1 left (pedestrians). */
+    var lane = 0
+    var side = 1
+    /** Next road piece (planned at the coming node) and its lane/side. */
+    var next = -1
+    var nextLane = 0
+    /** Crossing a junction along a curve from (jx0, jy0) via (jcx, jcy) to (jx1, jy1). */
+    var inJunction = false
+    var jNode = -1
+    var jt = 0f
+    var jLen = 1f
+    var jx0 = 0f; var jy0 = 0f; var jcx = 0f; var jcy = 0f; var jx1 = 0f; var jy1 = 0f
+    /** Pedestrian state: 0 walking, 1 waiting at the curb, 2 crossing / walking to the next sidewalk, 3 entering a shop, 4 inside, 5 leaving the shop. */
     var state = 0
     var timer = 0f
     /** Personal sideways spread on the sidewalk, and a temporary side-step to pass someone. */
@@ -43,39 +50,34 @@ class Agent {
     var tx = 0f
     var ty = 0f
     var hidden = false
-    /** Seconds a car has been held up by cross traffic (used to untangle jams in intersections). */
+    /** Seconds a car has been held up by cross traffic (used to untangle jams in junctions). */
     var blocked = 0f
 }
 
+/**
+ * Cars and pedestrians around the camera. Cars keep to their lane (right, or left on left-hand maps), plan a
+ * turn at every junction and follow a curve through it, stop for red lights, give way in unsignalled junctions,
+ * and keep their distance. Pedestrians walk the sidewalks, cross on the walk signal and pop into open shops.
+ */
 class Traffic(private val rnd: Random = Random(7)) {
     val cars = ArrayList<Agent>()
+    val peds = ArrayList<Agent>()
     /** Parked player vehicles (x, y pairs) that NPC cars stop for. */
     var obstacles = FloatArray(0)
     var obstacleCount = 0
-    /** Shop doors near the camera (x, y, chance that a passer-by walks in, +1/-1 = building lies toward +y/-y), kept fresh by the engine. */
+    /** Shop doors near the camera: x, y, chance a passer-by walks in, and the inward direction (x, y). */
     var doors = FloatArray(0)
     var doorCount = 0
-    val peds = ArrayList<Agent>()
     var lightClock = 0f
     /** Weather: cars drive slower on wet or snowy roads, pedestrians walk faster in the rain. */
     var speedFactor = 1f
     var hurry = 1f
 
-    /** Eases the number of pedestrians toward [n]: newcomers walk in from the edge, leavers vanish off-screen. */
-    fun setPedTarget(n: Int, fx: Float, fy: Float) {
-        if (peds.size < n) peds += Agent().also { it.lastCross = EDGE }
-        else if (peds.size > n) {
-            val far = peds.filter { !it.hidden }.maxByOrNull { dist(it.x, it.y, fx, fy) } ?: return
-            if (dist(far.x, far.y, fx, fy) > 60f) peds.remove(far)
-        }
-    }
-
-    private companion object {
-        /** Spawn at the edge of the view (not anywhere). */
-        const val EDGE = Int.MIN_VALUE + 5
-    }
-
-    private val carColors = intArrayOf(
+    private var roads: RoadGraph? = null
+    private var leftHand = false
+    /** Vehicle mix: (style, weight); styles beyond the basic three are map specific (taxis, jeepneys, kei cars…). */
+    var mix: IntArray = intArrayOf(0, 0, 0, 0, 0, 0, 1, 1, 2, 2)
+    var palette: IntArray = intArrayOf(
         c(0xFFC0392B), c(0xFFE0E0E0), c(0xFF2C3E50), c(0xFF7F8C8D), c(0xFF1F3A93), c(0xFFF2F2F2), c(0xFF8E2442),
         c(0xFF212121), c(0xFFB0B7BF), c(0xFFF2C94C), c(0xFF27AE60), c(0xFF6D4C41),
     )
@@ -83,202 +85,300 @@ class Traffic(private val rnd: Random = Random(7)) {
         c(0xFFEB5757), c(0xFF2F80ED), c(0xFF27AE60), c(0xFFF2C94C), c(0xFF9B51E0), c(0xFFF2994A), c(0xFFE0E0E0), c(0xFF333333), c(0xFF56CCF2),
     )
 
+    /** Switches to a city's roads; everyone is placed again. */
+    fun attach(city: City) {
+        roads = city.roads
+        leftHand = city.leftHand
+        walk = FloatArray(city.roads.edges.size * 4) { Float.NaN }
+        for (a in cars) a.placed = false
+        for (p in peds) p.placed = false
+    }
+
+    /** Eases the number of pedestrians toward [n]: newcomers walk in from the edge, leavers vanish off-screen. */
+    fun setPedTarget(n: Int, fx: Float, fy: Float) {
+        if (peds.size < n) peds += Agent()
+        else if (peds.size > n) {
+            val far = peds.filter { !it.hidden }.maxByOrNull { dist(it.x, it.y, fx, fy) } ?: return
+            if (dist(far.x, far.y, fx, fy) > 60f) peds.remove(far)
+        }
+    }
+
     fun ensure(carCount: Int, pedCount: Int) {
-        while (cars.size < carCount) cars += Agent().also { it.lastCross = Int.MIN_VALUE }
+        while (cars.size < carCount) cars += Agent()
         while (cars.size > carCount) cars.removeAt(cars.size - 1)
-        while (peds.size < pedCount) peds += Agent().also { it.lastCross = Int.MIN_VALUE }
+        while (peds.size < pedCount) peds += Agent()
         while (peds.size > pedCount) peds.removeAt(peds.size - 1)
     }
 
-    /** Light state for an axis at intersections: 0 green, 1 yellow, 2 red. */
-    fun light(axis: Int): Int {
-        val t = lightClock % 40f
-        return if (axis == 0) when { t < 20f -> 0; t < 23f -> 1; else -> 2 }
+    // ------------------------------------------------------------------ lights
+
+    /** Which light group an approach belongs to at a junction: roads roughly parallel to the first one share a phase. */
+    private fun group(g: RoadGraph, n: RoadNode, e: RoadEdge): Int {
+        val ref = g.edges[n.edges[0]]
+        val a = atan2(ref.uy, ref.ux); val b = atan2(e.uy, e.ux)
+        var d = abs(a - b) % Math.PI.toFloat()
+        if (d > Math.PI / 2) d = Math.PI.toFloat() - d
+        return if (d < Math.PI / 4) 0 else 1
+    }
+
+    /** Light for traffic on [edge] entering junction [node]: 0 green, 1 yellow, 2 red (always green without lights). */
+    fun light(node: RoadNode, edge: RoadEdge): Int {
+        if (!node.signal) return 0
+        val g = roads ?: return 0
+        val t = (lightClock + node.phase) % 40f
+        return if (group(g, node, edge) == 0) when { t < 20f -> 0; t < 23f -> 1; else -> 2 }
         else when { t in 23f..37f -> 0; t > 37f -> 1; else -> 2 }
     }
 
-    /** Seconds until traffic on [axis] may move again (0 when it already has green or yellow). */
-    private fun redLeft(axis: Int): Float {
-        val t = lightClock % 40f
-        return if (axis == 0) (if (t >= 23f) 40f - t else 0f) else (if (t < 23f) 23f - t else 0f)
+    // ------------------------------------------------------------------ geometry
+
+    private fun clearAt(e: RoadEdge, node: Int) = if (node == e.a) e.clearA else e.clearB
+
+    /**
+     * Clear stretch of each sidewalk, measured from node a: (lo, hi) for the right of a→b, then for the left.
+     * Where roads meet at a sharp angle one road's sidewalk runs over the other's asphalt, so walkers stop short of it.
+     */
+    private var walk = FloatArray(0)
+
+    private fun walkRange(g: RoadGraph, e: RoadEdge, phys: Int): Int {
+        val k = e.id * 4 + phys * 2
+        if (!walk[k].isNaN()) return k
+        val sign = if (phys == 0) 1f else -1f
+        val near = e.cls.halfWidth + .3f; val far = e.cls.halfWidth + e.cls.sidewalk * .8f
+        val steps = max(2, e.len.toInt())
+        var bestLo = 0f; var bestHi = -1f; var runLo = -1f
+        for (i in 0..steps) {
+            val s = e.len * i / steps
+            val bx = e.ax + e.ux * s; val by = e.ay + e.uy * s
+            // right of a→b in a y-down world is (-uy, ux)
+            val nx = -e.uy * sign; val ny = e.ux * sign
+            val clear = !g.onAsphalt(bx + nx * near, by + ny * near) && !g.onAsphalt(bx + nx * far, by + ny * far)
+            if (clear) {
+                if (runLo < 0f) runLo = s
+                if (s - runLo > bestHi - bestLo) { bestLo = runLo; bestHi = s }
+            } else runLo = -1f
+        }
+        if (bestHi - bestLo < 2f) { bestLo = e.len * .5f; bestHi = e.len * .5f }
+        walk[k] = bestLo; walk[k + 1] = bestHi
+        return k
     }
 
-    private fun laneCoord(a: Agent): Float = if (a.axis == 0) {
-        City.avenueX(a.line) + (if (a.dir < 0) a.offset else -a.offset)
-    } else {
-        City.streetY(a.line) + (if (a.dir > 0) a.offset else -a.offset)
+    /** Which physical sidewalk a walker heading away from [from] on [side] (1 right, -1 left) is on. */
+    private fun phys(e: RoadEdge, from: Int, side: Int) = if ((from == e.a) == (side > 0)) 0 else 1
+
+    /** Where the clear sidewalk starts, measured from [from]. */
+    private fun walkStart(g: RoadGraph, e: RoadEdge, from: Int, side: Int): Float {
+        val k = walkRange(g, e, phys(e, from, side))
+        return if (from == e.a) walk[k] else e.len - walk[k + 1]
     }
 
-    /** Sideways direction to the agent's right, along the cross axis. */
-    private fun rightSign(a: Agent) = if (a.axis == 0) -a.dir else a.dir
+    /** Where the clear sidewalk ends, measured from [from]. */
+    private fun walkEnd(g: RoadGraph, e: RoadEdge, from: Int, side: Int): Float {
+        val k = walkRange(g, e, phys(e, from, side))
+        return if (from == e.a) walk[k + 1] else e.len - walk[k]
+    }
 
-    private fun pedOffset(axis: Int) = if (axis == 0) 12f else 8.1f
-    private fun carOffset(axis: Int) = if (axis == 0) (if (rnd.nextBoolean()) 2.6f else 7.4f) else 3f
+    /** Lane centre offset from the road's centre line, to the right of travel (negative = left). */
+    private fun laneOffset(e: RoadEdge, lane: Int): Float {
+        val o = (lane.coerceIn(0, e.cls.lanes - 1) + .5f) * e.cls.laneWidth
+        return if (leftHand) -o else o
+    }
 
-    private fun spawnCar(a: Agent, fx: Float, fy: Float, radius: Float, initial: Boolean) {
-        spawn(a, fx, fy, radius, initial, true)
-        a.color = carColors[rnd.nextInt(carColors.size)]
-        val kind = rnd.nextInt(10)
-        a.style = when { kind < 6 -> 0; kind < 8 -> 1; else -> 2 }
-        a.length = when (a.style) { 0 -> 4.2f + rnd.nextFloat() * .6f; 1 -> 5.2f; else -> 5.8f }
-        a.width = if (a.style == 2) 2.1f else 1.85f
-        a.height = when (a.style) { 0 -> 1.45f; 1 -> 1.8f; else -> 2.5f }
-        // city speeds: about 30-38 km/h on avenues, 25-32 km/h on side streets
-        a.cruise = (if (a.axis == 0) 8.5f else 7f) + rnd.nextFloat() * 2f
+    /** World position [s] meters from node [from] along [e], [off] meters to the right of travel. */
+    private fun at(e: RoadEdge, from: Int, s: Float, off: Float, out: FloatArray) {
+        val fwd = from == e.a
+        val dx = if (fwd) e.ux else -e.ux; val dy = if (fwd) e.uy else -e.uy
+        val ox = if (fwd) e.ax else e.bx; val oy = if (fwd) e.ay else e.by
+        // right of travel in a y-down world is (-dy, dx)
+        out[0] = ox + dx * s - dy * off
+        out[1] = oy + dy * s + dx * off
+    }
+
+    private fun headingOf(e: RoadEdge, from: Int): Float = if (from == e.a) atan2(e.ux, -e.uy) else atan2(-e.ux, e.uy)
+
+    private val tmp = FloatArray(2)
+    private val tmp2 = FloatArray(2)
+
+    // ------------------------------------------------------------------ spawning
+
+    private val candidates = ArrayList<Int>()
+
+    private fun pickEdge(g: RoadGraph, fx: Float, fy: Float, radius: Float, car: Boolean): Int {
+        candidates.clear()
+        g.forCells(fx - radius, fy - radius, fx + radius, fy + radius) { id ->
+            val e = g.edges[id]
+            if (e.len < 6f) return@forCells
+            // bigger roads get more traffic
+            val w = if (car) e.cls.rank + 1 else 2
+            repeat(w) { candidates += id }
+        }
+        return if (candidates.isEmpty()) -1 else candidates[rnd.nextInt(candidates.size)]
+    }
+
+    private fun spawnCar(g: RoadGraph, a: Agent, fx: Float, fy: Float, radius: Float, initial: Boolean) {
+        for (attempt in 0 until 14) {
+            val id = pickEdge(g, fx, fy, radius, true)
+            if (id < 0) return
+            val e = g.edges[id]
+            a.edge = id
+            a.from = if (rnd.nextBoolean()) e.a else e.b
+            val s0 = clearAt(e, a.from); val s1 = e.len - clearAt(e, e.other(a.from))
+            if (s1 - s0 < 4f) continue
+            a.s = s0 + rnd.nextFloat() * (s1 - s0)
+            a.lane = rnd.nextInt(e.cls.lanes)
+            a.inJunction = false
+            a.next = -1
+            at(e, a.from, a.s, laneOffset(e, a.lane), tmp)
+            a.x = tmp[0]; a.y = tmp[1]
+            a.heading = headingOf(e, a.from)
+            if (!initial && dist(a.x, a.y, fx, fy) < radius * .55f) continue
+            if (cars.any { it !== a && it.placed && abs(it.x - a.x) < 7f && abs(it.y - a.y) < 7f }) continue
+            break
+        }
+        a.placed = true
+        a.color = palette[rnd.nextInt(palette.size)]
+        a.style = mix[rnd.nextInt(mix.size)]
+        a.length = when (a.style) { 0 -> 4.2f + rnd.nextFloat() * .6f; 1 -> 5.2f; 2 -> 5.8f; 4 -> 6.2f; 5 -> 2.6f; 6 -> 3.4f; 7 -> 11f; else -> 4.6f }
+        a.width = when (a.style) { 2 -> 2.1f; 4 -> 2.05f; 5 -> 1.4f; 6 -> 1.48f; 7 -> 2.5f; else -> 1.85f }
+        a.height = when (a.style) { 0, 3 -> 1.45f; 1 -> 1.8f; 2 -> 2.5f; 4 -> 2.3f; 5 -> 1.7f; 6 -> 1.65f; 7 -> 3.1f; else -> 1.5f }
+        val e = g.edges[a.edge.coerceAtLeast(0)]
+        // city speeds: a bit under the road's limit, slower on small streets
+        a.cruise = e.cls.speed * (.68f + rnd.nextFloat() * .2f) * (if (a.style == 5 || a.style == 7) .8f else 1f)
         a.speed = a.cruise * .6f
-        a.plan = -1
+        a.blocked = 0f
     }
 
-    private fun spawnPed(a: Agent, fx: Float, fy: Float, radius: Float, initial: Boolean) {
-        spawn(a, fx, fy, radius, initial, false)
+    private fun pedOffset(e: RoadEdge, a: Agent) = e.cls.halfWidth + e.cls.sidewalk * (.5f + a.jitter * .28f)
+
+    private fun spawnPed(g: RoadGraph, a: Agent, fx: Float, fy: Float, radius: Float, initial: Boolean) {
         a.color = shirtColors[rnd.nextInt(shirtColors.size)]
         a.cruise = 1.1f + rnd.nextFloat() * .6f
         a.speed = a.cruise
         a.phase = rnd.nextFloat() * 6f
-        a.jitter = (rnd.nextFloat() * 2f - 1f) * 1.1f
-        a.offset = pedOffset(a.axis) + a.jitter
-        a.x = if (a.axis == 0) laneCoord(a) else a.x
-        a.y = if (a.axis == 1) laneCoord(a) else a.y
+        a.jitter = rnd.nextFloat() * 2f - 1f
         a.dodge = 0f
         a.state = 0
         a.hidden = false
-        a.plan = -1
+        for (attempt in 0 until 12) {
+            val id = pickEdge(g, fx, fy, radius, false)
+            if (id < 0) return
+            val e = g.edges[id]
+            a.edge = id
+            a.from = if (rnd.nextBoolean()) e.a else e.b
+            a.side = if (rnd.nextBoolean()) 1 else -1
+            val s0 = walkStart(g, e, a.from, a.side); val s1 = walkEnd(g, e, a.from, a.side)
+            if (s1 - s0 < 3f) continue
+            a.s = s0 + rnd.nextFloat() * (s1 - s0)
+            at(e, a.from, a.s, pedOffset(e, a) * a.side, tmp)
+            a.x = tmp[0]; a.y = tmp[1]
+            a.heading = headingOf(e, a.from)
+            if (initial || dist(a.x, a.y, fx, fy) > radius * .55f) break
+        }
+        a.next = -1
+        a.placed = true
     }
 
-    private fun spawn(a: Agent, fx: Float, fy: Float, radius: Float, initial: Boolean, car: Boolean) {
-        for (attempt in 0 until 12) {
-            a.axis = rnd.nextInt(2)
-            a.dir = if (rnd.nextBoolean()) 1 else -1
-            if (a.axis == 0) {
-                val i0 = floor((fx - radius) / City.AV_SPACING).toInt().coerceIn(0, City.AVENUES - 1)
-                val i1 = ceil((fx + radius) / City.AV_SPACING).toInt().coerceIn(0, City.AVENUES - 1)
-                a.line = rnd.nextInt(i0, i1 + 1)
-                a.offset = if (car) carOffset(0) else pedOffset(0)
-                a.x = laneCoord(a)
-                a.y = (fy + (rnd.nextFloat() * 2f - 1f) * radius).coerceIn(0f, City.HEIGHT)
-                a.heading = if (a.dir < 0) 0f else Math.PI.toFloat()
-            } else {
-                val k0 = floor((fy - radius) / City.ST_SPACING).toInt().coerceIn(0, City.STREETS - 1)
-                val k1 = ceil((fy + radius) / City.ST_SPACING).toInt().coerceIn(0, City.STREETS - 1)
-                a.line = rnd.nextInt(k0, k1 + 1)
-                a.offset = if (car) carOffset(1) else pedOffset(1)
-                a.y = laneCoord(a)
-                a.x = (fx + (rnd.nextFloat() * 2f - 1f) * radius).coerceIn(0f, City.WIDTH)
-                a.heading = if (a.dir > 0) (Math.PI / 2).toFloat() else (-Math.PI / 2).toFloat()
-            }
-            a.lastCross = Int.MIN_VALUE + 1
-            val d = dist(a.x, a.y, fx, fy)
-            if (initial || d > radius * .55f) return
-        }
-    }
+    // ------------------------------------------------------------------ update
 
     /**
      * @param fx focus point (camera target)
      * @param blockerX the player (or the player's car), which NPC cars stop for
      */
     fun update(dt: Float, fx: Float, fy: Float, radius: Float, blockerX: Float, blockerY: Float, initial: Boolean = false) {
+        val g = roads ?: return
+        if (g.edges.isEmpty()) return
         lightClock += dt
         for (a in cars) {
-            if (initial || a.lastCross == Int.MIN_VALUE || dist(a.x, a.y, fx, fy) > radius) spawnCar(a, fx, fy, radius, initial || a.lastCross == Int.MIN_VALUE)
-            stepCar(a, dt, blockerX, blockerY)
+            if (initial || !a.placed || dist(a.x, a.y, fx, fy) > radius) spawnCar(g, a, fx, fy, radius, initial || !a.placed)
+            stepCar(g, a, dt, blockerX, blockerY)
         }
+        val pr = radius * .7f
         for (p in peds) {
-            if (initial || p.lastCross == Int.MIN_VALUE || p.lastCross == EDGE || (dist(p.x, p.y, fx, fy) > radius * .7f && p.state != 4)) spawnPed(p, fx, fy, radius * .7f, initial || p.lastCross == Int.MIN_VALUE)
-            stepPed(p, dt)
+            if (initial || !p.placed || (dist(p.x, p.y, fx, fy) > pr && p.state != 4)) spawnPed(g, p, fx, fy, pr, initial || !p.placed)
+            stepPed(g, p, dt)
         }
     }
 
-    private fun crossSpacing(a: Agent) = if (a.axis == 0) City.ST_SPACING else City.AV_SPACING
-    private fun crossMax(a: Agent) = if (a.axis == 0) City.STREETS - 1 else City.AVENUES - 1
-    private fun along(a: Agent) = if (a.axis == 0) a.y else a.x
-
-    private fun nextCrossIndex(a: Agent): Int {
-        val s = along(a) / crossSpacing(a)
-        return if (a.dir > 0) floor(s + 1e-3f).toInt() + 1 else ceil(s - 1e-3f).toInt() - 1
+    /** Picks the road to take at [node] after arriving on [from]: no U-turns unless it's a dead end; straight and big roads are likelier. */
+    private fun chooseNext(g: RoadGraph, node: RoadNode, from: RoadEdge, car: Boolean): Int {
+        if (node.degree <= 1) return from.id
+        val inA = if (node.id == from.b) atan2(from.uy, from.ux) else atan2(-from.uy, -from.ux)
+        var total = 0f
+        for (id in node.edges) {
+            if (id == from.id) continue
+            total += weight(g, node, inA, g.edges[id], car)
+        }
+        var r = rnd.nextFloat() * total
+        for (id in node.edges) {
+            if (id == from.id) continue
+            r -= weight(g, node, inA, g.edges[id], car)
+            if (r <= 0f) return id
+        }
+        return node.edges.firstOrNull { it != from.id } ?: from.id
     }
 
-    /** Picks straight (0), right (1) or left (2) at a crossing; roads that leave the map aren't options. */
-    private fun chooseTurn(a: Agent, cross: Int, car: Boolean): Int {
-        val canStraight = (cross + a.dir) in 0..crossMax(a)
-        val options = ArrayList<Int>(4)
-        if (canStraight) { options += 0; options += 0; if (!car) options += 0 }
-        val crossAxis = 1 - a.axis
-        // crossings along the new road are lines of the current axis
-        val maxLine = if (crossAxis == 1) City.AVENUES - 1 else City.STREETS - 1
-        for (t in 1..2) if ((a.line + turnDir(a, t)) in 0..maxLine) options += t
-        return if (options.isEmpty()) 1 else options[rnd.nextInt(options.size)]
+    private fun weight(g: RoadGraph, node: RoadNode, inA: Float, e: RoadEdge, car: Boolean): Float {
+        val out = g.angleAway(e, node.id)
+        val turn = angleDiff(inA, out)
+        val straight = if (turn < .5f) 2.2f else 1f
+        return straight * (if (car) (e.cls.rank + 1f) else 1f)
     }
 
-    private fun applyTurn(a: Agent, cross: Int, turn: Int, car: Boolean) {
-        val newDir = turnDir(a, turn)
-        val leaving = a.line
-        a.axis = 1 - a.axis
-        a.line = cross
-        a.dir = newDir
-        a.offset = if (car) carOffset(a.axis) else pedOffset(a.axis) + a.jitter
-        // the road we just left is now the nearest crossing: go straight over it, don't turn again
-        a.planCross = leaving
-        a.plan = 0
-    }
-
-    /** Direction along the crossing road after a right (1) or left (2) turn. */
-    private fun turnDir(a: Agent, turn: Int): Int {
-        return if (a.axis == 0) { if (turn == 1) -a.dir else a.dir } else { if (turn == 1) a.dir else -a.dir }
-    }
-
-    /** Where (along the current road) the lane of the road we turn onto lies. */
-    private fun turnPoint(a: Agent, cross: Int, turn: Int, offset: Float): Float {
-        val newDir = turnDir(a, turn)
-        return if (a.axis == 0) City.streetY(cross) + (if (newDir > 0) offset else -offset)
-        else City.avenueX(cross) + (if (newDir < 0) offset else -offset)
+    /** Signed turn from the heading on [from] into [to] at [node] (radians, positive = right in a y-down world). */
+    private fun turnAngle(g: RoadGraph, node: RoadNode, from: RoadEdge, to: RoadEdge): Float {
+        val ix = if (node.id == from.b) from.ux else -from.ux; val iy = if (node.id == from.b) from.uy else -from.uy
+        val ox = if (node.id == to.a) to.ux else -to.ux; val oy = if (node.id == to.a) to.uy else -to.uy
+        return atan2(ix * oy - iy * ox, ix * ox + iy * oy)
     }
 
     // ------------------------------------------------------------------ cars
 
-    private fun stepCar(a: Agent, dt: Float, bx: Float, by: Float) {
-        val sp = crossSpacing(a)
-        val cross = nextCrossIndex(a)
-        val s = along(a)
-        val toCross = (cross * sp - s) * a.dir
-        val inRange = cross in 0..crossMax(a)
-        // plan the turn early so the car can slow down and take a smooth arc into the new lane
-        if (inRange && a.planCross != cross && toCross < 40f) {
-            a.planCross = cross
-            a.plan = chooseTurn(a, cross, true)
-            a.timer = if (a.plan == 0) 0f else (if (a.axis == 0) 3f else if (rnd.nextBoolean()) 2.6f else 7.4f)
+    private fun stepCar(g: RoadGraph, a: Agent, dt: Float, bx: Float, by: Float) {
+        if (a.edge < 0) return
+        val e = g.edges[a.edge]
+        val toNode = g.nodes[e.other(a.from)]
+        val sEnd = e.len - clearAt(e, toNode.id)
+        if (!a.inJunction && a.next < 0) {
+            a.next = chooseNext(g, toNode, e, true)
+            val ne = g.edges[a.next]
+            val turn = if (a.next == e.id) Math.PI.toFloat() else turnAngle(g, toNode, e, ne)
+            // turning toward the near side uses the outer lane, toward the far side the inner one
+            val nearSide = if (leftHand) turn < -.5f else turn > .5f
+            val farSide = if (leftHand) turn > .5f else turn < -.5f
+            a.nextLane = when {
+                nearSide -> ne.cls.lanes - 1
+                farSide -> 0
+                else -> min(a.lane, ne.cls.lanes - 1)
+            }
+            a.timer = abs(turn)
         }
         var target = a.cruise * speedFactor
-        val turning = inRange && a.planCross == cross && a.plan > 0
-        if (turning) {
-            // the new lane's position along this road; start the arc a few meters before it
-            val turnAt = turnPoint(a, cross, a.plan, a.timer)
-            val toTurn = (turnAt - s) * a.dir
-            val radius = if (a.plan == 1) 4f else 6.5f
-            target = min(target, if (toTurn < 18f) (if (a.plan == 1) 5.5f else 7f) else target)
-            if (toTurn <= radius) {
-                val off = a.timer
-                applyTurn(a, cross, a.plan, true)
-                a.offset = off
+        val fwdX = sin(a.heading); val fwdY = -cos(a.heading)
+        if (!a.inJunction) {
+            val toEnd = sEnd - a.s
+            // slow down for the turn ahead
+            if (a.timer > .5f && toEnd < 22f) target = min(target, if (a.timer > 2.5f) 3.5f else if (a.timer > 1.2f) 5.5f else 7.5f)
+            // lights, and giving way where there are none
+            if (clearAt(e, toNode.id) > 0f && toNode.degree >= 3) {
+                val l = light(toNode, e)
+                if (toEnd in 0f..26f) {
+                    var stop = false
+                    if (l != 0) stop = l == 2 || toEnd > a.speed * a.speed / 16f
+                    else if (!toNode.signal && junctionBusy(a, toNode.id)) stop = a.blocked < 3f
+                    if (stop) target = min(target, (toEnd - 1.2f).coerceAtLeast(0f) * .9f)
+                }
             }
         }
-        // traffic lights: stop line just before the crosswalk (unless already turning inside the box)
-        val stopDist = toCross - (if (a.axis == 0) City.ST_HALF + 4.5f else City.AV_HALF + 4.5f)
-        if (inRange && stopDist in 0f..24f && light(a.axis) != 0) {
-            // on yellow, go on if too close to stop comfortably
-            val canStop = light(a.axis) == 2 || stopDist > a.speed * a.speed / 16f
-            if (canStop) target = min(target, (stopDist - 1f).coerceAtLeast(0f) * .9f)
-        }
-        val fwdX = sin(a.heading); val fwdY = -cos(a.heading)
-        // keep distance to the car ahead; give way to cross traffic in the intersection, but if two cars
-        // block each other for a few seconds the waiting one creeps through so the junction never locks up
+        // keep distance to whatever is ahead; if two cars hold each other up in a junction for a while, the
+        // waiting one creeps through so nothing locks up
         var heldByCross = false
         for (o in cars) {
-            if (o === a) continue
+            if (o === a || !o.placed) continue
             val dx = o.x - a.x; val dy = o.y - a.y
             if (abs(dx) > 18f || abs(dy) > 18f) continue
             val ahead = dx * fwdX + dy * fwdY
             val side = abs(-dx * fwdY + dy * fwdX)
-            if (ahead <= 0 || ahead >= 15f || side >= 1.7f + (o.width - 1.8f)) continue
+            if (ahead <= 0 || ahead >= 15f || side >= 1.7f + (o.width - 1.8f) * .5f + (a.width - 1.8f) * .5f) continue
             val align = fwdX * sin(o.heading) - fwdY * cos(o.heading)
             if (align < .6f) {
                 if (a.blocked > 2.5f) continue
@@ -286,10 +386,10 @@ class Traffic(private val rnd: Random = Random(7)) {
             }
             target = min(target, (ahead - (a.length + o.length) * .5f - 2f).coerceAtLeast(0f) * 1.3f)
         }
-        a.blocked = if (heldByCross && a.speed < .5f) a.blocked + dt else if (a.blocked > 2.5f && a.blocked < 6f) a.blocked + dt else 0f
-        // yield to pedestrians on the crosswalk
+        a.blocked = if ((heldByCross || target < .3f) && a.speed < .5f) a.blocked + dt else if (a.blocked > 2.5f && a.blocked < 6f) a.blocked + dt else 0f
+        // pedestrians crossing in front
         for (p in peds) {
-            if (p.hidden) continue
+            if (p.hidden || !p.placed) continue
             val dx = p.x - a.x; val dy = p.y - a.y
             if (abs(dx) > 12f || abs(dy) > 12f) continue
             val ahead = dx * fwdX + dy * fwdY
@@ -313,12 +413,88 @@ class Traffic(private val rnd: Random = Random(7)) {
         val brake = if (target < a.speed - 4f) 16f else 9f
         a.speed += (target - a.speed).coerceIn(-brake * dt, 4.5f * dt)
         if (a.speed < .05f && target <= 0f) a.speed = 0f
-        steer(a, dt, if (turning) 5f else 8f, 2.4f)
+        move(g, a, a.speed * dt)
+    }
+
+    /** True when another car is crossing the junction now (unsignalled junctions are first come, first served). */
+    private fun junctionBusy(a: Agent, node: Int): Boolean {
+        for (o in cars) if (o !== a && o.inJunction && o.jNode == node && o.edge != a.edge) return true
+        return false
+    }
+
+    /** Moves a car [d] meters along its lane, through junctions and on to the next road piece. */
+    private fun move(g: RoadGraph, a: Agent, dIn: Float) {
+        var d = dIn
+        var guard = 0
+        while (guard++ < 4) {
+            if (a.inJunction) {
+                a.jt += d / a.jLen
+                if (a.jt < 1f) {
+                    val t = a.jt; val u = 1f - t
+                    a.x = u * u * a.jx0 + 2 * u * t * a.jcx + t * t * a.jx1
+                    a.y = u * u * a.jy0 + 2 * u * t * a.jcy + t * t * a.jy1
+                    val tx = 2 * u * (a.jcx - a.jx0) + 2 * t * (a.jx1 - a.jcx)
+                    val ty = 2 * u * (a.jcy - a.jy0) + 2 * t * (a.jy1 - a.jcy)
+                    if (tx * tx + ty * ty > 1e-6f) a.heading = atan2(tx, -ty)
+                    return
+                }
+                // out the other side
+                d = (a.jt - 1f) * a.jLen
+                val ne = g.edges[a.edge]
+                a.inJunction = false
+                a.s = clearAt(ne, a.from)
+                a.next = -1
+                continue
+            }
+            val e = g.edges[a.edge]
+            val to = e.other(a.from)
+            val sEnd = e.len - clearAt(e, to)
+            a.s += d
+            if (a.s < sEnd) {
+                at(e, a.from, a.s, laneOffset(e, a.lane), tmp)
+                a.x = tmp[0]; a.y = tmp[1]
+                a.heading = headingOf(e, a.from)
+                return
+            }
+            d = a.s - sEnd
+            if (a.next < 0) a.next = chooseNext(g, g.nodes[to], e, true)
+            val ne = g.edges[a.next]
+            val nFrom = if (a.next == e.id) to else to
+            if (clearAt(e, to) <= 0f && clearAt(ne, to) <= 0f && a.next != e.id) {
+                // a bend in the road: carry on
+                a.edge = ne.id; a.from = nFrom; a.lane = a.nextLane.coerceIn(0, ne.cls.lanes - 1); a.s = 0f; a.next = -1
+                continue
+            }
+            // a curve through the junction, from the end of this lane to the start of the next
+            at(e, a.from, sEnd, laneOffset(e, a.lane), tmp)
+            val lane = a.nextLane.coerceIn(0, ne.cls.lanes - 1)
+            at(ne, nFrom, clearAt(ne, nFrom), laneOffset(ne, lane), tmp2)
+            a.jx0 = tmp[0]; a.jy0 = tmp[1]; a.jx1 = tmp2[0]; a.jy1 = tmp2[1]
+            val d0x = if (a.from == e.a) e.ux else -e.ux; val d0y = if (a.from == e.a) e.uy else -e.uy
+            val d1x = if (nFrom == ne.a) ne.ux else -ne.ux; val d1y = if (nFrom == ne.a) ne.uy else -ne.uy
+            // control point where the two lane lines meet (or half way for straight crossings)
+            val den = d0x * d1y - d0y * d1x
+            if (abs(den) > .15f) {
+                val qx = a.jx1 - a.jx0; val qy = a.jy1 - a.jy0
+                val t = (qx * d1y - qy * d1x) / den
+                if (t > 0f && t < 60f) { a.jcx = a.jx0 + d0x * t; a.jcy = a.jy0 + d0y * t } else { a.jcx = (a.jx0 + a.jx1) * .5f; a.jcy = (a.jy0 + a.jy1) * .5f }
+            } else if (a.next == e.id) {
+                // U-turn at a dead end: swing out past the end
+                val nx = g.nodes[to].x; val ny = g.nodes[to].y
+                a.jcx = nx + d0x * 6f; a.jcy = ny + d0y * 6f
+            } else { a.jcx = (a.jx0 + a.jx1) * .5f; a.jcy = (a.jy0 + a.jy1) * .5f }
+            a.jLen = (dist(a.jx0, a.jy0, a.jcx, a.jcy) + dist(a.jcx, a.jcy, a.jx1, a.jy1)).coerceAtLeast(1f)
+            a.jt = 0f
+            a.jNode = to
+            a.inJunction = true
+            a.edge = ne.id; a.from = nFrom; a.lane = lane
+        }
     }
 
     // ------------------------------------------------------------------ pedestrians
 
-    private fun stepPed(a: Agent, dt: Float) {
+    private fun stepPed(g: RoadGraph, a: Agent, dt: Float) {
+        if (a.edge < 0) return
         when (a.state) {
             3 -> { // walking in through a shop door
                 if (walkTo(a, dt, a.tx, a.ty, a.cruise)) { a.state = 4; a.hidden = true; a.timer = 6f + rnd.nextFloat() * 22f }
@@ -329,95 +505,115 @@ class Traffic(private val rnd: Random = Random(7)) {
                 if (a.timer <= 0f) {
                     a.hidden = false
                     a.state = 5
-                    a.dir = if (rnd.nextBoolean()) 1 else -1
+                    if (rnd.nextBoolean()) { val e = g.edges[a.edge]; a.from = e.other(a.from); a.s = e.len - a.s; a.side = -a.side }
                     a.heading += Math.PI.toFloat()
                 }
                 return
             }
             5 -> { // back out onto the sidewalk
-                val lc = laneCoord(a) + rightSign(a) * a.dodge
-                val ox = if (a.axis == 0) lc else a.x
-                val oy = if (a.axis == 1) lc else a.y
-                if (walkTo(a, dt, ox, oy, a.cruise)) { a.state = 0; a.timer = 8f }
+                val e = g.edges[a.edge]
+                at(e, a.from, a.s, pedOffset(e, a) * a.side, tmp)
+                if (walkTo(a, dt, tmp[0], tmp[1], a.cruise)) { a.state = 0; a.timer = 8f }
                 return
             }
+            1, 2 -> { crossing(g, a, dt); return }
         }
-        val sp = crossSpacing(a)
-        val cross = nextCrossIndex(a)
-        val toCross = (cross * sp - along(a)) * a.dir
-        val inRange = cross in 0..crossMax(a)
-        // the corner where this sidewalk meets the cross street's sidewalk
-        val corner = pedOffset(1 - a.axis)
-        val crossHalf = if (a.axis == 0) City.ST_HALF else City.AV_HALF
-        if (a.planCross != cross && toCross < corner + 6f) {
-            a.planCross = cross
-            a.plan = if (!inRange) 3 else if (rnd.nextFloat() < .4f) chooseTurn(a, cross, false) else 0
-            if (a.plan == 0 && !((cross + a.dir) in 0..crossMax(a))) a.plan = 1
-        }
+        val e = g.edges[a.edge]
+        val to = g.nodes[e.other(a.from)]
+        val sEnd = walkEnd(g, e, a.from, a.side)
         var speed = a.cruise * hurry
-        if (a.state == 2) {
-            // on the crosswalk: done once past the far curb; hurry if the light is about to change
-            if ((along(a) - a.tx) * a.dir > 0f) a.state = 0
-            else if (redLeft(1 - a.axis) < 3f) speed = a.cruise * 1.7f
-        }
-        if (a.planCross == cross && a.state != 2) when (a.plan) {
-            3 -> if (toCross <= corner) { a.dir = -a.dir; a.planCross = -1; a.heading += Math.PI.toFloat() } // map edge: turn around
-            1, 2 -> if (toCross <= corner + a.jitter * (if (a.plan == 1) -1f else 1f)) applyTurn(a, cross, a.plan, false)
-            0 -> if (inRange) {
-                // cross the road on the walk signal: wait at the curb
-                val cur = toCross - (crossHalf + .6f)
-                val crossTime = (crossHalf * 2f + 1.5f) / a.cruise
-                if (cur <= 1.2f && cur > -1f) {
-                    if (redLeft(1 - a.axis) > crossTime * .7f) {
-                        a.state = 2
-                        a.tx = cross * sp + a.dir * (crossHalf + .5f)
-                    } else {
-                        a.state = 1
-                        speed = 0f
-                        if (cur < .4f) a.speed = 0f
-                    }
-                } else if (cur <= -1f && cur > -crossHalf * 2f) {
-                    // already on the road (just spawned or turned): keep going
-                    a.state = 2
-                    a.tx = cross * sp + a.dir * (crossHalf + .5f)
-                }
-            }
-        }
         // make room: step aside for people coming the other way, slow behind slower walkers
         var nearest = 99f
+        val fx = sin(a.heading); val fy = -cos(a.heading)
         for (o in peds) {
-            if (o === a || o.hidden) continue
+            if (o === a || o.hidden || !o.placed) continue
             val dx = o.x - a.x; val dy = o.y - a.y
             if (abs(dx) > 3f || abs(dy) > 3f) continue
-            val fx = sin(a.heading); val fy = -cos(a.heading)
             val ahead = dx * fx + dy * fy
             val side = abs(-dx * fy + dy * fx)
             if (ahead <= 0f || ahead > 2.5f || side > .8f) continue
             val facing = fx * sin(o.heading) - fy * cos(o.heading)
             if (facing < 0f) a.dodge = min(a.dodge + dt * 2.2f, .9f)
-            else if (o.speed < speed) { if (ahead < 1.1f) speed = min(speed, o.speed) ; a.dodge = min(a.dodge + dt * 1.2f, .9f) }
+            else if (o.speed < speed) { if (ahead < 1.1f) speed = min(speed, o.speed); a.dodge = min(a.dodge + dt * 1.2f, .9f) }
             nearest = min(nearest, ahead)
         }
         if (nearest > 2.5f) a.dodge = max(0f, a.dodge - dt * .6f)
         // drop into an open shop now and then
-        if (a.state == 0) {
-            a.timer -= dt
-            if (a.timer <= 0f) {
-                a.timer = .5f
-                for (k in 0 until doorCount) {
-                    val dx = doors[k * 4]; val dy = doors[k * 4 + 1]
-                    if (abs(dx - a.x) < 1.4f && abs(dy - a.y) < 3.5f && rnd.nextFloat() < doors[k * 4 + 2]) {
-                        a.state = 3
-                        // a couple of meters past the door step is inside the building
-                        a.tx = dx; a.ty = dy + doors[k * 4 + 3] * 2.4f
-                        break
-                    }
+        a.timer -= dt
+        if (a.timer <= 0f) {
+            a.timer = .5f
+            for (k in 0 until doorCount) {
+                val dx = doors[k * 5]; val dy = doors[k * 5 + 1]
+                if (abs(dx - a.x) < 3f && abs(dy - a.y) < 3f && rnd.nextFloat() < doors[k * 5 + 2]) {
+                    a.state = 3
+                    // a couple of meters past the door step is inside the building
+                    a.tx = dx + doors[k * 5 + 3] * 2.4f; a.ty = dy + doors[k * 5 + 4] * 2.4f
+                    return
                 }
             }
         }
         a.speed += (speed - a.speed).coerceIn(-4f * dt, 3f * dt)
         a.phase += dt * a.speed * 3f
-        steer(a, dt, 2.5f, 6f, rightSign(a) * a.dodge)
+        a.s += a.speed * dt
+        if (a.s >= sEnd) {
+            planCorner(g, a, e, to)
+            return
+        }
+        at(e, a.from, a.s, max(pedOffset(e, a) - a.dodge, e.cls.halfWidth + .3f) * a.side, tmp)
+        val hx = tmp[0] - a.x; val hy = tmp[1] - a.y
+        if (hx * hx + hy * hy > 1e-6f) a.heading = atan2(hx, -hy)
+        a.x = tmp[0]; a.y = tmp[1]
+    }
+
+    /** At the end of a sidewalk: pick the next road and walk to its sidewalk, crossing the road between if needed. */
+    private fun planCorner(g: RoadGraph, a: Agent, e: RoadEdge, node: RoadNode) {
+        if (node.degree <= 1) {
+            // dead end: turn round and walk back on the other side
+            a.from = node.id; a.s = e.len - a.s; a.side = -a.side
+            return
+        }
+        val nextId = chooseNext(g, node, e, false)
+        val ne = g.edges[nextId]
+        // stay on whichever side of the next road we're already on
+        val ox = if (node.id == ne.a) ne.ux else -ne.ux; val oy = if (node.id == ne.a) ne.uy else -ne.uy
+        val rx = -oy; val ry = ox
+        val side = if ((a.x - node.x) * rx + (a.y - node.y) * ry >= 0f) 1 else -1
+        a.next = nextId
+        a.nextLane = side
+        at(ne, node.id, walkStart(g, ne, node.id, side), pedOffset(ne, a) * side, tmp)
+        a.tx = tmp[0]; a.ty = tmp[1]
+        a.jNode = node.id
+        // which road (if any) the walk crosses
+        a.lane = -1
+        for (id in node.edges) {
+            if (id == nextId || id == e.id) continue
+            val f = g.edges[id]
+            val fx = if (node.id == f.a) f.ux else -f.ux; val fy = if (node.id == f.a) f.uy else -f.uy
+            val reach = clearAt(f, node.id) + f.cls.halfWidth + 3f
+            if (Geo.segHit(a.x, a.y, a.tx, a.ty, node.x, node.y, node.x + fx * reach, node.y + fy * reach, tmp2)) { a.lane = id; break }
+        }
+        a.state = if (a.lane >= 0 && node.signal) 1 else 2
+    }
+
+    private fun crossing(g: RoadGraph, a: Agent, dt: Float) {
+        if (a.state == 1) {
+            // waiting for the walk signal: cars on the road we cross must have red
+            val node = g.nodes[a.jNode]
+            val crossed = g.edges.getOrNull(a.lane)
+            if (crossed == null || light(node, crossed) == 2) a.state = 2 else { a.speed = 0f; return }
+        }
+        var speed = a.cruise * hurry
+        val crossed = g.edges.getOrNull(a.lane)
+        if (crossed != null && g.nodes[a.jNode].signal && light(g.nodes[a.jNode], crossed) != 2) speed *= 1.6f
+        if (walkTo(a, dt, a.tx, a.ty, speed)) {
+            val ne = g.edges[a.next]
+            a.edge = ne.id
+            a.from = a.jNode
+            a.side = a.nextLane
+            a.s = walkStart(g, ne, a.from, a.side)
+            a.state = 0
+            a.next = -1
+        }
     }
 
     /** Walks straight toward a point; true on arrival. */
@@ -433,24 +629,11 @@ class Traffic(private val rnd: Random = Random(7)) {
         return false
     }
 
-    private fun steer(a: Agent, dt: Float, look: Float, turnRate: Float, lateral: Float = 0f) {
-        val lc = laneCoord(a) + lateral
-        val tx: Float; val ty: Float
-        if (a.axis == 0) { tx = lc; ty = a.y + a.dir * look } else { tx = a.x + a.dir * look; ty = lc }
-        val desired = atan2(tx - a.x, -(ty - a.y))
-        var diff = desired - a.heading
-        while (diff > Math.PI) diff -= (2 * Math.PI).toFloat()
-        while (diff < -Math.PI) diff += (2 * Math.PI).toFloat()
-        val maxTurn = turnRate * dt * (0.3f + min(1f, a.speed / 6f))
-        a.heading += diff.coerceIn(-maxTurn, maxTurn)
-        a.x += sin(a.heading) * a.speed * dt
-        a.y -= cos(a.heading) * a.speed * dt
-    }
-
     /** Pushes a circle out of NPC cars. Returns true on contact. */
     fun bump(x: Float, y: Float, r: Float, out: FloatArray): Boolean {
         var px = x; var py = y; var hit = false
         for (a in cars) {
+            if (!a.placed) continue
             val dx = px - a.x; val dy = py - a.y
             val minD = r + a.width * .6f
             val d2 = dx * dx + dy * dy
