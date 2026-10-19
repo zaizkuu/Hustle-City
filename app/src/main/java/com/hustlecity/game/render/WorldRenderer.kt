@@ -128,6 +128,8 @@ class WorldRenderer(private val e: GameEngine) {
         val GLASS = c(0xFF3C5266)
         val GLASS_NIGHT = c(0xFF1E2A36)
         val LIT = c(0xFFFFE3A0)
+        private val POOL_OUTER = c(0xFFFFB85C)
+        private val POOL_INNER = c(0xFFFFE3A0)
         val GLASS_DARK = c(0xFF26313D)
         val TRUNK = c(0xFF6B4A32)
         val TREE = intArrayOf(c(0xFF4C8C3F), c(0xFF5E9E45), c(0xFF3F7A3A))
@@ -677,23 +679,16 @@ class WorldRenderer(private val e: GameEngine) {
         features.drawGround(scene, bbox, mapMode, shadowDX, shadowDY,
             e.settings.shadows && !mapMode && scene.daylight > .15f && proj.dist < 400 && scene.gpu?.shadowOn != true)
         if (withRoute) drawRoute()
-        // night street lights
+        // night street lights: soft warm pools on the pavement under every lamp and signal
         if (scene.daylight < .6f && !mapMode) {
-            val glow = scene.withAlpha(c(0xFFFFD27A), .10f * (1f - scene.daylight))
-            val core = scene.withAlpha(c(0xFFFFE6A8), .12f * (1f - scene.daylight))
+            val night = ((.6f - scene.daylight) / .6f).coerceIn(0f, 1f)
             if (proj.dist < 260) {
                 val pr = props
                 pr.forIn(bbox[0] - 6f, bbox[1] - 6f, bbox[2] + 6f, bbox[3] + 6f) { pi ->
-                    if (!pr.isLamp(pi)) return@forIn
-                    val lx = pr.lightX(pi); val ly = pr.lightY(pi)
-                    scene.disc(lx, ly, .05f, 4.5f, 4.5f, 12, glow)
-                    scene.disc(lx, ly, .06f, 2f, 2f, 10, core)
+                    if (pr.isLamp(pi)) lightPool(pr.lightX(pi), pr.lightY(pi), 4.8f, night)
                 }
             }
-            forSignals { _, _, x, y ->
-                scene.disc(x, y, .05f, 5f, 5f, 14, glow)
-                scene.disc(x, y, .06f, 2.2f, 2.2f, 10, core)
-            }
+            forSignals { _, _, x, y -> lightPool(x, y, 4f, night * .8f) }
         }
         // shadows
         if (e.settings.shadows && !mapMode && scene.daylight > .15f && proj.dist < 400 && scene.gpu?.shadowOn != true) {
@@ -711,6 +706,20 @@ class WorldRenderer(private val e: GameEngine) {
             }
         }
         scene.groundPass = false
+    }
+
+    /**
+     * A pool of lamplight on the ground: concentric discs that build up toward a warm centre, so it fades out softly
+     * instead of ending in a hard grey edge. The GPU renderer draws them as light, not as lit paint.
+     */
+    private fun lightPool(x: Float, y: Float, r: Float, strength: Float) {
+        if (strength <= .01f) return
+        scene.glow = true
+        scene.disc(x, y, .05f, r, r, 18, scene.withAlpha(POOL_OUTER, .07f * strength))
+        scene.disc(x, y, .052f, r * .74f, r * .74f, 16, scene.withAlpha(POOL_OUTER, .09f * strength))
+        scene.disc(x, y, .054f, r * .5f, r * .5f, 14, scene.withAlpha(POOL_INNER, .12f * strength))
+        scene.disc(x, y, .056f, r * .28f, r * .28f, 12, scene.withAlpha(POOL_INNER, .18f * strength))
+        scene.glow = false
     }
 
     private var roadSeen = IntArray(0)

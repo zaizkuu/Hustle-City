@@ -200,7 +200,7 @@ fun TopBar(e: GameEngine) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                val bw = if (tiny) 26.dp else if (compact) 38.dp else 62.dp
+                val bw = if (tiny) 20.dp else if (compact) 30.dp else 62.dp
                 NeedBar("energy", HC.Energy, (p.energy / 100).toFloat(), bw)
                 NeedBar("hunger", HC.Hunger, (p.hunger / 100).toFloat(), bw)
                 NeedBar("happiness", HC.Happy, (p.happiness / 100).toFloat(), bw)
@@ -213,19 +213,19 @@ fun TopBar(e: GameEngine) {
                 }
                 Box(Modifier.width(1.dp).height(26.dp).background(Color(0x40FFFFFF)))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (!tiny) GIcon("calendar", 15.dp)
-                    val dayName = if (compact) s.dayName.take(3) else s.dayName
-                    Text(" $dayName (Day ${s.day})", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    if (!compact) GIcon("calendar", 15.dp)
+                    val day = when { tiny -> "D${s.day}"; compact -> "${s.dayName.take(3)} D${s.day}"; else -> " ${s.dayName} (Day ${s.day})" }
+                    Text(day, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    GIcon("clock", 15.dp)
-                    Text(" ${s.clock}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    if (!tiny) GIcon("clock", 15.dp)
+                    Text(if (tiny) s.clock else " ${s.clock}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
                 // weather: tap for the forecast
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { e.ui.info = "Weather" to e.weather.forecastText() }.padding(horizontal = 2.dp)) {
                     val sky = e.weather.sky()
                     GIcon(sky.icon, 17.dp)
-                    if (!tiny) Text(" ${e.weather.temperature().roundToInt()}°", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    if (!compact) Text(" ${e.weather.temperature().roundToInt()}°", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val paused = e.speedIndex == 0
@@ -245,7 +245,7 @@ fun TopBar(e: GameEngine) {
             }
             val unread = s.messages.count { !it.read }
             SquareButton("bell", unread) { e.ui.app = AppId.CONTACTS }
-            if (!tiny) SquareButton("help") { e.ui.panel = Panel.Help }
+            if (!compact) SquareButton("help") { e.ui.panel = Panel.Help }
             SquareButton("settings") { e.ui.panel = Panel.Settings }
         }
     }
@@ -583,8 +583,10 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
     val b = sc.building
     val right = if (e.ui.phoneOpen && !e.ui.designer) 176.dp else 0.dp
     val screenH = LocalConfiguration.current.screenHeightDp
+    // stop above the phone button in the corner (the panel scrolls)
+    val phoneButton = if (!e.ui.phoneOpen && !e.ui.designer) 62 else 0
     Column(
-        modifier.padding(end = right).width(196.dp).heightIn(max = (screenH - 66).dp).shadow(6.dp, RoundedCornerShape(6.dp))
+        modifier.padding(end = right).width(196.dp).heightIn(max = (screenH - 66 - phoneButton).coerceAtLeast(120).dp).shadow(6.dp, RoundedCornerShape(6.dp))
             .clip(RoundedCornerShape(6.dp)).background(HC.GlassDark),
     ) {
         PanelHeader(e.buildingName(b))

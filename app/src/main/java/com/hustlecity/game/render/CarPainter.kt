@@ -25,6 +25,12 @@ class CarPainter(private val scene: Scene3D) {
     var leftHand = false
 
     companion object {
+        private const val BEAM_SIDES = 14
+        private val BEAM_COS = FloatArray(BEAM_SIDES) { cos(it * 2 * Math.PI / BEAM_SIDES).toFloat() }
+        private val BEAM_SIN = FloatArray(BEAM_SIDES) { sin(it * 2 * Math.PI / BEAM_SIDES).toFloat() }
+        private val BEAM_SIZE = floatArrayOf(1f, .7f, .42f)
+        private val BEAM_ALPHA = floatArrayOf(.07f, .1f, .14f)
+        private val HEAD_GLOW = c(0xFFFFEBA8)
         val GLASS = c(0xFF26313D)
         val TIRE = c(0xFF1E2023)
         val RIM = c(0xFFB9C0C7)
@@ -78,7 +84,9 @@ class CarPainter(private val scene: Scene3D) {
         if (night) headGlow(x, y, heading, len)
         if (braking) {
             val bx = x - fx * (hl + .6f); val by = y - fy * (hl + .6f)
+            scene.glow = true
             scene.disc(bx, by, .04f, 1.1f, 1.1f, 10, scene.withAlpha(c(0xFFFF3B30), .22f))
+            scene.glow = false
         }
     }
 
@@ -480,10 +488,25 @@ class CarPainter(private val scene: Scene3D) {
         frontRect(-hl - .11f, -.25f, .25f, z - .02f, z + .12f, c(0xFFF0F0E8), rear = true)
     }
 
+    /** Headlight beams on the road: a soft oval of light ahead of the car, brightest near the bumper. */
     private fun headGlow(x: Float, y: Float, heading: Float, len: Float) {
         val hx = sin(heading); val hy = -cos(heading)
-        scene.disc(x + hx * (len * .5f + 3f), y + hy * (len * .5f + 3f), .05f, 2.4f, 2.4f, 10, scene.withAlpha(c(0xFFFFEBA8), .2f * (1f - scene.daylight)))
+        val night = (1f - scene.daylight).coerceIn(0f, 1f)
+        scene.glow = true
+        for (k in 0..2) {
+            val f = BEAM_SIZE[k]
+            val ahead = len * .5f + .8f + 3.2f * f
+            val cx = x + hx * ahead; val cy = y + hy * ahead
+            for (i in 0 until BEAM_SIDES) {
+                val u = BEAM_COS[i] * 4.2f * f; val v = BEAM_SIN[i] * 2.2f * f
+                gx[i] = cx + hx * u - hy * v; gy[i] = cy + hy * u + hx * v; gz[i] = .05f + k * .002f
+            }
+            scene.poly(BEAM_SIDES, gx, gy, gz, scene.withAlpha(HEAD_GLOW, BEAM_ALPHA[k] * night))
+        }
+        scene.glow = false
     }
+
+    private val gx = FloatArray(BEAM_SIDES); private val gy = FloatArray(BEAM_SIDES); private val gz = FloatArray(BEAM_SIDES)
 
     /** Simple boxes for traffic far away, in the car's frame. */
     private fun farCar(len: Float, wid: Float, hgt: Float, color: Int, style: Int, accent: Int) {

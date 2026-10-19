@@ -755,6 +755,7 @@ fun SettingsPanel(e: GameEngine) {
             }
             Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 HButton("Save game", color = HC.Green) { e.save(showToast = true) }
+                if (e.hasGame) HButton("How to play", color = HC.Blue) { st.save(); e.ui.panel = com.hustlecity.game.engine.Panel.Help }
                 HButton("Main menu", color = HC.Orange) {
                     st.save(); e.save(); close(e)
                     e.ui.app = null

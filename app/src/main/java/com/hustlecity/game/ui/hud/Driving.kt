@@ -353,9 +353,10 @@ fun GpsBanner(e: GameEngine, modifier: Modifier = Modifier) {
         Column(Modifier.padding(start = 8.dp).weight(1f, fill = false)) {
             Text(
                 if (gps.turn == 0) "${meters(gps.distance)} to ${e.buildingName(dest)}" else "In ${meters(gps.turnDistance)}: ${gps.instruction()}",
-                color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
-            Text("${e.buildingName(dest)} · ${meters(gps.distance)} · ${eta(e, gps.distance)}", color = Color(0xDDFFFFFF), fontSize = 10.sp, maxLines = 1)
+            Text("${e.buildingName(dest)} · ${meters(gps.distance)} · ${eta(e, gps.distance)}", color = Color(0xDDFFFFFF), fontSize = 10.sp, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         GIcon("close", 22.dp,
             modifier = Modifier.padding(start = 10.dp).clip(CircleShape).clickable { e.state.player.waypoint = -1; e.gps.clear(); e.bump() }.padding(4.dp))

@@ -74,9 +74,17 @@ fun GameScreen(e: GameEngine) {
                     TopBar(e)
                     if (!e.ui.designer) ObjectivesPanel(e, Modifier.padding(top = 6.dp).width(236.dp))
                 }
-                // tips and toasts sit in the gap between the objectives panel and the right-hand panels
+                // tips and toasts sit in the gap between the objectives panel and whatever is on the right: the
+                // minimap, the phone, the building card or the shop's panel (each beside the open phone)
                 val leftGap = if (!e.ui.designer && e.ui.objectivesOpen) 252.dp else 8.dp
-                val rightGap = if (e.ui.phoneOpen || inside || e.ui.selected >= 0) 186.dp else 8.dp
+                val phoneW = if (e.ui.phoneOpen) 176.dp else 0.dp
+                val minimapOn = e.settings.minimap && !inside && e.ui.selected < 0 && e.skip == null
+                val rightGap = maxOf(
+                    if (minimapOn) 148.dp else 8.dp,
+                    if (e.ui.phoneOpen) 186.dp else 0.dp,
+                    if (inside && !e.ui.designer) 212.dp + phoneW else 0.dp,
+                    if (!inside && e.ui.selected >= 0) 266.dp + phoneW else 0.dp,
+                )
                 Column(
                     Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(top = 56.dp, start = leftGap, end = rightGap),
                     horizontalAlignment = Alignment.CenterHorizontally,
