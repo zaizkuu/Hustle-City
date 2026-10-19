@@ -39,6 +39,7 @@ class Landmarks(private val city: City) {
         private val GRANITE = c(0xFFCFC8BB)
         private val BRONZE = c(0xFF5F5236)
         private val TILE_ROOF = c(0xFF4C535B)
+        private val KOREAN_ROOF = c(0xFF5A626C)
         private val RED_WOOD = c(0xFFA3302A)
         private val DANCHEONG = c(0xFF3C8A74)
         private val PLASTER = c(0xFFF2EFE7)
@@ -46,6 +47,8 @@ class Landmarks(private val city: City) {
         private val SCREEN_BG = intArrayOf(c(0xFF1B3A8C), c(0xFFD62D3A), c(0xFFC2187A), c(0xFF14A6C9), c(0xFFF2C230), c(0xFF1FA35B),
             c(0xFF6A2BB8), c(0xFFF26A1B), c(0xFF15171C), c(0xFFE8E8E8))
         private val SCREEN_FG = intArrayOf(c(0xFFFFFFFF), c(0xFFFFE14D), c(0xFF4DE1FF), c(0xFFFF5FD8), c(0xFF8CFF6B), c(0xFFFF4D4D))
+        private val RIM_LIGHTS = intArrayOf(c(0xFFFF5FD8), c(0xFF5FE3FF), c(0xFFFFE680), c(0xFF2EE87A))
+        private val PILASTERS = floatArrayOf(-8.2f, -2.8f, 2.8f, 8.2f)
         private val GONDOLAS = intArrayOf(c(0xFFE94B5A), c(0xFFF2C94C), c(0xFF2F80ED), c(0xFF27AE60), c(0xFF9B51E0), c(0xFFF2994A))
         /** Seconds per turn of the Ferris wheel. */
         private const val WHEEL_TURN = 300f
@@ -81,32 +84,40 @@ class Landmarks(private val city: City) {
     // ------------------------------------------------------------------ billboard squares
 
     private fun dressSquare(li: Int, l: Landmark) {
-        val reach = 48f * l.size + 10f
+        val square = l.style == Landmark.SCREENS
+        val reach = (if (square) 62f else 48f) * l.size + 10f
         val cand = ArrayList<FloatArray>()
+        val seen = HashSet<Int>()
         city.forBuildingsIn(l.x - reach - 40f, l.y - reach - 40f, l.x + reach + 40f, l.y + reach + 40f) { b ->
-            if (!b.solid || b.height < 8f || cand.any { it[0].toInt() == b.id }) return@forBuildingsIn
-            var best = -1; var bestDot = .45f; var bestD = 0f
+            if (!b.solid || b.height < 8f || !seen.add(b.id)) return@forBuildingsIn
+            // every face looking onto the square (Times Square wraps its corners in screens too)
+            var faces = 0
             for (f in 0 until 4) {
                 val (fx, fy) = faceCentre(b, f)
                 val (nx, ny) = faceNormal(b, f)
                 val dx = l.x - fx; val dy = l.y - fy
                 val d = sqrt(dx * dx + dy * dy)
                 if (d > reach || d < 1f) continue
-                val dot = (dx * nx + dy * ny) / d
-                if (dot > bestDot) { bestDot = dot; best = f; bestD = d }
+                if ((dx * nx + dy * ny) / d > (if (square) .3f else .45f)) { cand += floatArrayOf(b.id.toFloat(), f.toFloat(), d); faces++ }
             }
-            if (best >= 0) cand += floatArrayOf(b.id.toFloat(), best.toFloat(), bestD)
+            if (!square && faces > 1) {
+                // elsewhere just the face looking most squarely at it
+                val mine = cand.subList(cand.size - faces, cand.size)
+                val keep = mine.minByOrNull { it[2] }!!
+                mine.clear(); cand += keep
+            }
         }
         cand.sortBy { it[2] }
         var screens = 0
+        val most = if (square) 26 else 9
         for (cd in cand) {
             val b = city.buildings[cd[0].toInt()]
             val f = cd[1].toInt()
             val len = if (f <= 1) b.w else b.d
             val dense = b.hood.look == Look.DENSE_ASIA
-            val seed = b.id * 7 + li * 131
-            if (screens < 14 && (l.style == Landmark.SCREENS || screens < 9)) {
-                val w = min(min(len - 1.4f, 15f * l.size), b.height * .95f)
+            val seed = b.id * 7 + li * 131 + f * 17
+            if (screens < most) {
+                val w = min(min(len - 1.4f, (if (square) 17f else 15f) * l.size), b.height * .95f)
                 if (w >= 4f) {
                     val h = min(w * .62f + 1.5f, b.height - 4.5f)
                     if (h >= 3f) {
@@ -114,10 +125,15 @@ class Landmarks(private val city: City) {
                         val u0 = (len - w) * (if (seed % 3 == 0) .5f else if (seed % 3 == 1) .25f else .75f).coerceIn(.1f, .9f)
                         dress += Dress(li, b.id, f, u0, u0 + w, z0, z0 + h, false, seed)
                         screens++
-                        // Times Square stacks a second screen up the tower
-                        if (l.style == Landmark.SCREENS && b.height > z0 + h + 12f) {
-                            val h2 = min(h * .8f, b.height - (z0 + h + 2.5f) - 2f)
-                            if (h2 >= 3f) dress += Dress(li, b.id, f, len * .5f - w * .4f, len * .5f + w * .4f, z0 + h + 2.5f, z0 + h + 2.5f + h2, false, seed + 1)
+                        // Times Square stacks more screens up the towers
+                        var top = z0 + h
+                        var k = 1
+                        while (square && k <= 2 && b.height > top + 10f) {
+                            val h2 = min(h * (.85f - k * .1f), b.height - (top + 2.5f) - 2f)
+                            if (h2 < 3f) break
+                            val ww = w * (.9f - k * .1f)
+                            dress += Dress(li, b.id, f, len * .5f - ww * .5f, len * .5f + ww * .5f, top + 2.5f, top + 2.5f + h2, false, seed + k)
+                            top += 2.5f + h2; k++
                         }
                     }
                 }
@@ -271,12 +287,12 @@ class Landmarks(private val city: City) {
                     0, 1 -> {
                         val y0 = if (s.face == 1) b.d + .35f else -1.25f; val y1 = y0 + .9f
                         val x0 = if (s.face == 1) u else b.w - u
-                        for (sd in intArrayOf(-1, 1)) scene.quad(x0 + sd * .19f, y0, z - .55f, x0 + sd * .19f, y1, z - .55f, x0 + sd * .19f, y1, z, x0 + sd * .19f, y0, z, letter)
+                        for (sd in -1..1 step 2) scene.quad(x0 + sd * .19f, y0, z - .55f, x0 + sd * .19f, y1, z - .55f, x0 + sd * .19f, y1, z, x0 + sd * .19f, y0, z, letter)
                     }
                     else -> {
                         val x0 = if (s.face == 3) b.w + .35f else -1.25f; val x1 = x0 + .9f
                         val y0 = if (s.face == 2) u else b.d - u
-                        for (sd in intArrayOf(-1, 1)) scene.quad(x0, y0 + sd * .19f, z - .55f, x1, y0 + sd * .19f, z - .55f, x1, y0 + sd * .19f, z, x0, y0 + sd * .19f, z, letter)
+                        for (sd in -1..1 step 2) scene.quad(x0, y0 + sd * .19f, z - .55f, x1, y0 + sd * .19f, z - .55f, x1, y0 + sd * .19f, z, x0, y0 + sd * .19f, z, letter)
                     }
                 }
                 z -= 1.05f
@@ -323,7 +339,7 @@ class Landmarks(private val city: City) {
             }
             q(scene, cx + cos(a0) * r0, cy + sin(a0) * r0, z0, cx + cos(a1) * r0, cy + sin(a1) * r0, z0,
                 cx + cos(a1) * r1, cy + sin(a1) * r1, z1, cx + cos(a0) * r1, cy + sin(a0) * r1, z1,
-                scene.lit(color, scene.sideShade(nx, ny) * (if (r1 < r0) 1.05f else 1f)))
+                if (scene.glow) color else scene.lit(color, scene.sideShade(nx, ny) * (if (r1 < r0) 1.05f else 1f)))
         }
         if (cap != 0 && r1 > 0f) {
             for (i in 0 until n) { val a = rot + i * 2f * PI.toFloat() / n; tx[i] = (cx + cos(a) * r1) * k; ty[i] = (cy + sin(a) * r1) * k; tz[i] = z1 * k }
@@ -395,11 +411,11 @@ class Landmarks(private val city: City) {
                     Landmark.MONUMENT -> {
                         rect(scene, -12f, -12f, 12f, 12f, .03f, edge); rect(scene, -11.2f, -11.2f, 11.2f, 11.2f, .035f, pave)
                         scene.material = Mat.GRASS
-                        for (sx in intArrayOf(-1, 1)) for (sy in intArrayOf(-1, 1)) rect(scene, sx * 10.5f, sy * 10.5f, sx * 7.5f, sy * 7.5f, .04f, scene.lit(c(0xFF6DA35C), 1f))
+                        for (sx in -1..1 step 2) for (sy in -1..1 step 2) rect(scene, sx * 10.5f, sy * 10.5f, sx * 7.5f, sy * 7.5f, .04f, scene.lit(c(0xFF6DA35C), 1f))
                     }
                     Landmark.CHURCH -> { rect(scene, -14.5f, -34f, 14.5f, 27f, .03f, edge); rect(scene, -13.8f, -33.3f, 13.8f, 26.3f, .035f, pave) }
                     Landmark.WHEEL -> { rect(scene, -33f, -11f, 33f, 11f, .03f, edge); rect(scene, -32f, -10f, 32f, 10f, .035f, pave) }
-                    Landmark.PALACE_GATE -> if (l.style == Landmark.HANOK_GATE) rect(scene, -20f, -10f, 20f, -7f, .035f, pave)
+                    Landmark.PALACE_GATE -> if (l.style == Landmark.HANOK_GATE) rect(scene, -20f, -10f, 20f, -8.6f, .035f, pave)
                 }
             } finally { scene.clearFrame() }
             if (l.kind == Landmark.BILLBOARDS && scrambleNode[i] >= 0) scramble(scene, city.roads.nodes[scrambleNode[i]])
@@ -417,20 +433,18 @@ class Landmarks(private val city: City) {
         for (id in n.edges) { val e = g.edges[id]; reach = max(reach, (if (e.a == n.id) e.clearA else e.clearB) + 2f) }
         reach = reach.coerceIn(10f, 24f)
         val white = scene.lit(WorldRenderer.WHITE_LINE, .95f)
-        for (a in floatArrayOf(PI.toFloat() / 4, 3 * PI.toFloat() / 4)) {
+        for (ai in 0..1) { val a = PI.toFloat() / 4 + ai * PI.toFloat() / 2
             val ux = cos(a); val uy = sin(a)
+            // bars across the band, one after another along the way people walk
+            val px = -uy * 2.2f; val py = ux * 2.2f
             var t = -reach
             while (t < reach) {
-                if (abs(t) > 1.5f) {
-                    val cx = n.x + ux * t; val cy = n.y + uy * t
-                    // stripes run along the walking direction, side by side across the band
-                    for (s in -2..2) {
-                        val ox = -uy * s * 1.15f; val oy = ux * s * 1.15f
-                        scene.quad(cx + ox - uy * .3f, cy + oy + ux * .3f, .045f, cx + ox + uy * .3f, cy + oy - ux * .3f, .045f,
-                            cx + ox + uy * .3f + ux * 1.1f, cy + oy - ux * .3f + uy * 1.1f, .045f, cx + ox - uy * .3f + ux * 1.1f, cy + oy + ux * .3f + uy * 1.1f, .045f, white)
-                    }
+                if (abs(t) > 1.2f) {
+                    val x0 = n.x + ux * t; val y0 = n.y + uy * t
+                    val x1 = x0 + ux * .6f; val y1 = y0 + uy * .6f
+                    scene.quad(x0 - px, y0 - py, .045f, x1 - px, y1 - py, .045f, x1 + px, y1 + py, .045f, x0 + px, y0 + py, .045f, white)
                 }
-                t += 1.6f
+                t += 1.25f
             }
         }
     }
@@ -609,7 +623,7 @@ class Landmarks(private val city: City) {
     private fun torii(scene: Scene3D, y: Float, s: Float, d: Float) {
         val red = VERMILION
         val px = 5f * s; val h = 10.4f * s
-        for (sx in intArrayOf(-1, 1)) {
+        for (sx in -1..1 step 2) {
             scene.cylinder(sx * px * k, y * k, .62f * s * k, .8f * s * k, h * k, 8, red)
             scene.cylinder(sx * px * k, y * k, .78f * s * k, 0f, .8f * s * k, 8, BLACK)
         }
@@ -649,7 +663,7 @@ class Landmarks(private val city: City) {
         if (d > 260f) return
         val night = scene.daylight < .55f
         val stone = c(0xFFB5AFA3)
-        for (y in floatArrayOf(-3.5f, 14f)) for (sx in intArrayOf(-1, 1)) {
+        for (yi in 0..1) for (sx in -1..1 step 2) { val y = if (yi == 0) -3.5f else 14f
             val x = sx * 6.2f
             bx(scene, x - .55f, y - .55f, 0f, x + .55f, y + .55f, .4f, stone, stone)
             scene.cylinder(x * k, y * k, .18f * k, .4f * k, 1.5f * k, 6, stone)
@@ -686,14 +700,21 @@ class Landmarks(private val city: City) {
             scene.blob(0f, y * k, 4.55f * k, .32f * k, scene.lit(BRONZE, 1.05f), 8)
         }
         // a flagpole flying the country's flag
-        val top = when (city.mapId) { Maps.MANILA -> c(0xFF1F3F99); Maps.NYC -> c(0xFFB22234); else -> c(0xFFFFFFFF) }
-        val bottom = when (city.mapId) { Maps.MANILA -> c(0xFFCE2939); else -> c(0xFFFFFFFF) }
-        val mid = when (city.mapId) { Maps.NYC -> c(0xFF3C3B6E); else -> c(0xFFFFFFFF) }
         val fxp = 8.5f; val fyp = -8.5f
         bx(scene, fxp - .1f, fyp - .1f, 0f, fxp + .1f, fyp + .1f, 18f, c(0xFFD5D8DC), c(0xFFBFC5CB))
-        q(scene, fxp + .1f, fyp, 17.8f, fxp + 4.1f, fyp, 17.8f, fxp + 4.1f, fyp, 16.6f, fxp + .1f, fyp, 16.6f, scene.lit(top, 1f))
-        q(scene, fxp + .1f, fyp, 16.6f, fxp + 4.1f, fyp, 16.6f, fxp + 4.1f, fyp, 15.4f, fxp + .1f, fyp, 15.4f, scene.lit(bottom, 1f))
-        q(scene, fxp + .1f, fyp + .01f, 17.8f, fxp + 1.8f, fyp + .01f, 16.6f, fxp + .1f, fyp + .01f, 15.4f, fxp + .1f, fyp + .01f, 16.6f, scene.lit(mid, 1f))
+        if (city.mapId == Maps.NYC) {
+            // stripes and a blue canton
+            for (s in 0 until 5) {
+                val z1 = 17.8f - s * .48f
+                q(scene, fxp + .1f, fyp, z1, fxp + 4.1f, fyp, z1, fxp + 4.1f, fyp, z1 - .48f, fxp + .1f, fyp, z1 - .48f, scene.lit(if (s % 2 == 0) c(0xFFB22234) else c(0xFFFFFFFF), 1f))
+            }
+            q(scene, fxp + .1f, fyp + .01f, 17.8f, fxp + 1.9f, fyp + .01f, 17.8f, fxp + 1.9f, fyp + .01f, 16.6f, fxp + .1f, fyp + .01f, 16.6f, scene.lit(c(0xFF3C3B6E), 1f))
+        } else {
+            // blue over red with a white triangle at the hoist
+            q(scene, fxp + .1f, fyp, 17.8f, fxp + 4.1f, fyp, 17.8f, fxp + 4.1f, fyp, 16.6f, fxp + .1f, fyp, 16.6f, scene.lit(c(0xFF1F3F99), 1f))
+            q(scene, fxp + .1f, fyp, 16.6f, fxp + 4.1f, fyp, 16.6f, fxp + 4.1f, fyp, 15.4f, fxp + .1f, fyp, 15.4f, scene.lit(c(0xFFCE2939), 1f))
+            q(scene, fxp + .1f, fyp + .01f, 17.8f, fxp + 1.8f, fyp + .01f, 16.6f, fxp + .1f, fyp + .01f, 15.4f, fxp + .1f, fyp + .01f, 16.6f, scene.lit(c(0xFFFFFFFF), 1f))
+        }
     }
 
     // ------------------------------------------------------------------ palace gates
@@ -725,7 +746,7 @@ class Landmarks(private val city: City) {
         val night = scene.daylight < .55f
         scene.material = Mat.STONE
         // walls running off along the palace's edge
-        for (sx in intArrayOf(-1, 1)) {
+        for (sx in -1..1 step 2) {
             bx(scene, sx * 17f, -1f, 0f, sx * 46f, 1f, 1.4f, GRANITE, GRANITE)
             scene.material = Mat.PLASTER
             bx(scene, sx * 17f, -.85f, 1.4f, sx * 46f, .85f, 4f, c(0xFFB0574A), c(0xFF9E4B3F))
@@ -734,10 +755,10 @@ class Landmarks(private val city: City) {
             q(scene, x0, -1.5f, 4f, x1, -1.5f, 4f, x1, 0f, 4.9f, x0, 0f, 4.9f, scene.lit(scene.snowy(TILE_ROOF), .9f))
             q(scene, x1, 1.5f, 4f, x0, 1.5f, 4f, x0, 0f, 4.9f, x1, 0f, 4.9f, scene.lit(scene.snowy(TILE_ROOF), 1f))
         }
-        bx(scene, -17f, -7f, 0f, 17f, 7f, 7.5f, scene.snowy(c(0xFFC9C2B2)), GRANITE)
+        bx(scene, -17f, -8.5f, 0f, 17f, 8.5f, 7.5f, scene.snowy(c(0xFFC9C2B2)), GRANITE)
         // three arches on each face
         val dark = scene.lit(c(0xFF2A2622), 1f)
-        for (fy in floatArrayOf(-7.03f, 7.03f)) {
+        for (fs in -1..1 step 2) { val fy = fs * 8.53f
             if (scene.gpu == null && ((fy < 0 && scene.camLY > fy * k) || (fy > 0 && scene.camLY < fy * k))) continue
             for (a in -1..1) archFace(scene, a * 8f, fy, if (a == 0) 2.6f else 1.9f, if (a == 0) 5.4f else 4.4f, dark)
         }
@@ -747,17 +768,19 @@ class Landmarks(private val city: City) {
         scene.material = Mat.PAINT
         bx(scene, -12.2f, -4.8f, 10.3f, 12.2f, 4.8f, 11.2f, DANCHEONG, DANCHEONG)
         if (night) glowBox(scene, -11.8f, -4.65f, 8f, 11.8f, 4.65f, 9.8f, c(0xFFFFD98A))
+        // a broad lower skirt roof, the smaller upper storey and its steeper roof above
         scene.material = Mat.ROOF
-        hipRoof(scene, 16f, 8f, 11.2f, 12.5f, 13.6f, TILE_ROOF, .9f)
+        hipRoof(scene, 18f, 9.6f, 11f, 12.5f, 13.9f, KOREAN_ROOF, 1f)
         scene.material = Mat.WOOD
-        bx(scene, -10f, -3.6f, 13.2f, 10f, 3.6f, 15.6f, RED_WOOD, RED_WOOD)
+        bx(scene, -8.8f, -3.3f, 13.4f, 8.8f, 3.3f, 15.6f, RED_WOOD, RED_WOOD)
         scene.material = Mat.PAINT
-        bx(scene, -10.2f, -3.8f, 15.6f, 10.2f, 3.8f, 16.4f, DANCHEONG, DANCHEONG)
+        bx(scene, -9f, -3.5f, 15.6f, 9f, 3.5f, 16.4f, DANCHEONG, DANCHEONG)
+        if (night) glowBox(scene, -8.6f, -3.35f, 13.8f, 8.6f, 3.35f, 15.2f, c(0xFFFFD98A))
         scene.material = Mat.ROOF
-        hipRoof(scene, 14.5f, 7.2f, 16.4f, 8.5f, 21f, TILE_ROOF, 1.1f)
+        hipRoof(scene, 12.8f, 6f, 16.4f, 7.2f, 20.6f, KOREAN_ROOF, 1.2f)
         scene.material = Mat.PLAIN
-        bx(scene, -9f, -.35f, 20.9f, 9f, .35f, 21.6f, c(0xFFE2DDD2), c(0xFFD4CEC2))
-        for (sx in intArrayOf(-1, 1)) bx(scene, sx * 9f - .5f, -.45f, 21f, sx * 9f + .5f, .45f, 22.4f, c(0xFFD4CEC2), c(0xFFC7C0B3))
+        bx(scene, -7.6f, -.35f, 20.5f, 7.6f, .35f, 21.2f, c(0xFFE2DDD2), c(0xFFD4CEC2))
+        for (sx in -1..1 step 2) bx(scene, sx * 7.6f - .5f, -.45f, 20.6f, sx * 7.6f + .5f, .45f, 22f, c(0xFFD4CEC2), c(0xFFC7C0B3))
     }
 
     /** A round-topped arch opening on a face at y = [fy]. */
@@ -784,7 +807,7 @@ class Landmarks(private val city: City) {
             bx(scene, -5f, y1, -Waterfront.DEPTH, 5f, y0, .25f, scene.snowy(c(0xFFBDB3A0)), ISHIGAKI)
         }
         // stone masses either side of the passage, then walls along the moat with a white plastered wall on top
-        for (sx in intArrayOf(-1, 1)) {
+        for (sx in -1..1 step 2) {
             batter(scene, min(sx * 4.6f, sx * 17f), max(sx * 4.6f, sx * 17f), -6.5f, 6.5f, 0f, 5.2f, 1.6f)
             batter(scene, min(sx * 17f, sx * 46f), max(sx * 17f, sx * 46f), -2.6f, 2.6f, 0f, 4f, 1.1f)
             scene.material = Mat.PLASTER
@@ -803,17 +826,17 @@ class Landmarks(private val city: City) {
             val x = wx * 4f
             val col = if (night) c(0xFFFFE3A0) else c(0xFF2C2F33)
             if (night) scene.glow = true
-            for (fy in floatArrayOf(-5.25f, 5.25f)) {
+            for (fs in -1..1 step 2) { val fy = fs * 5.25f
                 if (scene.gpu == null && ((fy < 0 && scene.camLY > fy * k) || (fy > 0 && scene.camLY < fy * k))) continue
                 q(scene, x - .8f, fy, 8.2f, x + .8f, fy, 8.2f, x + .8f, fy, 9.4f, x - .8f, fy, 9.4f, if (night) col else scene.lit(col, 1f))
             }
             scene.glow = false
         }
         scene.material = Mat.ROOF
-        hipRoof(scene, 18.5f, 7.6f, 11f, 13f, 14.8f, c(0xFF55595F), .55f)
+        hipRoof(scene, 17.6f, 6.3f, 11f, 12.8f, 14.6f, c(0xFF5C6168), .5f)
         scene.material = Mat.PLAIN
         bx(scene, -13.4f, -.4f, 14.6f, 13.4f, .4f, 15.3f, c(0xFF3F4348), c(0xFF3F4348))
-        for (sx in intArrayOf(-1, 1)) bx(scene, sx * 13.4f - .4f, -.3f, 15.1f, sx * 13.4f + .4f, .3f, 16.6f, c(0xFF2F3236), c(0xFF2F3236))
+        for (sx in -1..1 step 2) bx(scene, sx * 13.4f - .4f, -.3f, 15.1f, sx * 13.4f + .4f, .3f, 16.6f, c(0xFF2F3236), c(0xFF2F3236))
     }
 
     /** Stone walls with sloping (battered) faces from [z0] to [z1], insetting [inset] at the top on the long sides. */
@@ -894,7 +917,7 @@ class Landmarks(private val city: City) {
                 cross(scene, 0f, -20.4f, 21.5f, 1.8f)
                 if (scene.gpu != null || scene.camLY < -21f * k) {
                     val dark = scene.lit(c(0xFF3A2E26), 1f)
-                    for (dxp in floatArrayOf(-5f, 0f, 5f)) archFace(scene, dxp, -21.03f, if (dxp == 0f) 1.4f else 1f, if (dxp == 0f) 5f else 3.8f, dark)
+                    for (di in -1..1) archFace(scene, di * 5f, -21.03f, if (di == 0) 1.4f else 1f, if (di == 0) 5f else 3.8f, dark)
                     // rose window
                     val n = 12
                     for (s in 0 until n) { val a = s * 2 * PI.toFloat() / n; tx[s] = cos(a) * 2f * k; ty[s] = -21.04f * k; tz[s] = (11.5f + sin(a) * 2f) * k }
@@ -902,7 +925,7 @@ class Landmarks(private val city: City) {
                     scene.poly(n, tx, ty, tz, if (night) c(0xFFFFD98A) else scene.lit(c(0xFF3E4F6A), 1f))
                     scene.glow = false
                     // pilasters and a cornice
-                    for (px in floatArrayOf(-8.2f, -2.8f, 2.8f, 8.2f)) bx(scene, px - .45f, -21.4f, 0f, px + .45f, -21f, 16.6f, trim, trim)
+                    for (px in PILASTERS) bx(scene, px - .45f, -21.4f, 0f, px + .45f, -21f, 16.6f, trim, trim)
                     bx(scene, -9f, -21.5f, 8.6f, 9f, -21f, 9.2f, trim, trim)
                 }
             }
@@ -960,7 +983,7 @@ class Landmarks(private val city: City) {
         if (night) scene.glow = true
         var y = y0 + 2f
         while (y < y1 - 1f) {
-            for (sx in intArrayOf(-1, 1)) {
+            for (sx in -1..1 step 2) {
                 if (scene.gpu == null && ((sx < 0 && scene.camLX > -hx * k) || (sx > 0 && scene.camLX < hx * k))) continue
                 val x = sx * (hx + .03f)
                 q(scene, x, y - .7f, z0, x, y + .7f, z0, x, y + .7f, z1, x, y - .7f, z1, col)
@@ -1020,10 +1043,10 @@ class Landmarks(private val city: City) {
     /** One of the two A-frames holding the axle, at y = [side]·4.6. */
     private fun aFrame(scene: Scene3D, side: Int, color: Int) {
         val y = side * 4.6f
-        for (sx in intArrayOf(-1, 1)) {
+        for (sx in -1..1 step 2) {
             val fx = sx * 15f
             // a leg from the ground up to the hub, as a slab with some thickness
-            for (t in floatArrayOf(-.45f, .45f)) {
+            for (ts in -1..1 step 2) { val t = ts * .45f
                 q(scene, fx - .9f, y + t, 0f, fx + .9f, y + t, 0f, .5f * sx, y + t, HUB, -.5f * sx, y + t, HUB, scene.lit(color, scene.sideShade(0f, if (t > 0) 1f else -1f)))
             }
             q(scene, fx - .9f * sx, y - .45f, 0f, fx - .9f * sx, y + .45f, 0f, -.5f * sx, y + .45f, HUB, -.5f * sx, y - .45f, HUB, scene.lit(color, .85f))
@@ -1038,10 +1061,10 @@ class Landmarks(private val city: City) {
         val steel = c(0xFFEDEFF1)
         scene.material = Mat.METAL
         if (night) scene.glow = true
-        for (ry in floatArrayOf(-1.7f, 1.7f)) {
+        for (rs in -1..1 step 2) { val ry = rs * 1.7f
             for (s in 0 until segs) {
                 val a0 = spin + s * 2 * PI.toFloat() / segs; val a1 = spin + (s + 1) * 2 * PI.toFloat() / segs
-                val col = if (night) intArrayOf(c(0xFFFF5FD8), c(0xFF5FE3FF), c(0xFFFFE680), c(0xFF2EE87A))[((s + (time * 2f).toInt()) / 4) % 4] else scene.lit(steel, scene.sideShade(0f, if (ry > 0) 1f else -1f))
+                val col = if (night) RIM_LIGHTS[((s + (time * 2f).toInt()) / 4) % 4] else scene.lit(steel, scene.sideShade(0f, if (ry > 0) 1f else -1f))
                 q(scene, sin(a0) * (RIM - .5f), ry, HUB + cos(a0) * (RIM - .5f), sin(a1) * (RIM - .5f), ry, HUB + cos(a1) * (RIM - .5f),
                     sin(a1) * (RIM + .3f), ry, HUB + cos(a1) * (RIM + .3f), sin(a0) * (RIM + .3f), ry, HUB + cos(a0) * (RIM + .3f), col)
             }
@@ -1050,7 +1073,7 @@ class Landmarks(private val city: City) {
         // spokes
         val spokes = if (d < 400f) 16 else 8
         val sc = scene.lit(c(0xFFC9CDD1), 1f)
-        for (ry in floatArrayOf(-1.7f, 1.7f)) for (s in 0 until spokes) {
+        for (rs in -1..1 step 2) for (s in 0 until spokes) { val ry = rs * 1.7f
             val a = spin + s * 2 * PI.toFloat() / spokes
             val ca = cos(a); val sa = sin(a)
             val px = ca * .12f; val pz = -sa * .12f
@@ -1085,12 +1108,12 @@ class Landmarks(private val city: City) {
         val half = e.cls.halfWidth + 1f
         val night = scene.daylight < .55f
         val post = c(0xFF2A2D31)
-        for (sx in intArrayOf(-1, 1)) bx(scene, sx * half - .2f, -.2f, 0f, sx * half + .2f, .2f, 7.6f, post, post)
+        for (sx in -1..1 step 2) bx(scene, sx * half - .2f, -.2f, 0f, sx * half + .2f, .2f, 7.6f, post, post)
         bx(scene, -half - .3f, -.35f, 5.6f, half + .3f, .35f, 7.4f, c(0xFFB0202A), c(0xFFC8232F))
         // lit lettering on both faces
         val letter = if (night) c(0xFFFFE680) else c(0xFFFFFFFF)
         if (night) scene.glow = true
-        for (fy in floatArrayOf(-.37f, .37f)) {
+        for (fs in -1..1 step 2) { val fy = fs * .37f
             var x = -half + .8f
             while (x < half - .8f) {
                 q(scene, x, fy, 5.95f, x + .75f, fy, 5.95f, x + .75f, fy, 7.05f, x, fy, 7.05f, letter)

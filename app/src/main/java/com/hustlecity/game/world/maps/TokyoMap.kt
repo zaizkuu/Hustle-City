@@ -68,8 +68,13 @@ object TokyoMap : PlannedMap("tokyo", "Tokyo", "The palace and its moat, Shinjuk
         // the Imperial Palace and its moat
         val grounds = rotRect(800f, 470f, 290f, 320f, .05f)
         parks += Park("Imperial Palace", grounds, Park.GROUNDS)
-        val moat = Geo.band(rotRect(800f, 470f, 318f, 348f, .05f).let { it + floatArrayOf(it[0], it[1]) }, 8f)
-        water += moat
+        // the moat: one straight band per side, overlapping at the corners (a single ring polygon can't be triangulated)
+        val ring = rotRect(800f, 470f, 318f, 348f, .05f)
+        for (i in 0 until 4) {
+            val ax = ring[i * 2]; val ay = ring[i * 2 + 1]; val bx = ring[(i + 1) % 4 * 2]; val by = ring[(i + 1) % 4 * 2 + 1]
+            val l = kotlin.math.hypot(bx - ax, by - ay); val ux = (bx - ax) / l * 8f; val uy = (by - ay) / l * 8f
+            water += Geo.band(floatArrayOf(ax - ux, ay - uy, bx + ux, by + uy), 8f)
+        }
         landmarks += Landmark(Landmark.PALACE_GATE, 942f, 470f, .05f + Math.PI.toFloat() / 2, 1f, "Otemon", Landmark.YAGURA_GATE)
 
         // avenues

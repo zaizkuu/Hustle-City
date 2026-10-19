@@ -20,11 +20,11 @@ import kotlin.math.sqrt
 class Waterfront(private val city: City) {
     companion object {
         /** How far the water seems to lie below the streets. */
-        const val DEPTH = 3f
+        const val DEPTH = 5f
         private val QUAY = c(0xFF8E8A80)
         private val QUAY_WET = c(0xFF5E5B53)
         private val BRIDGE_STONE = c(0xFFB7AE9C)
-        private val ARCH_SHADOW = c(0xFF1C2A36)
+        private val ARCH_SHADOW = c(0xFF0C1218)
         private val STEEL = c(0xFF35473F)
         private val RAMPART = c(0xFF8A7C66)
         private val RAMPART_LIGHT = c(0xFFA39478)
@@ -74,7 +74,12 @@ class Waterfront(private val city: City) {
         val sh = city.shore
         val b = city.bounds
         val polys = ArrayList<FloatArray>(); val depth = ArrayList<Float>()
-        for (w in sh.water) { polys += w; depth += if (Geo.area(w) < 20000f) 1.4f else DEPTH }
+        // ponds in parks get a low kerb; rivers, moats and the sea a proper quay
+        for (w in sh.water) {
+            polys += w
+            val bb = Geo.bounds(w)
+            depth += if (city.parks.any { Geo.inside((bb[0] + bb[2]) * .5f, (bb[1] + bb[3]) * .5f, it.poly) }) 1.4f else DEPTH
+        }
         for (w in sh.islands) { polys += w; depth += DEPTH }
         for (w in sh.land) { polys += w; depth += DEPTH }
         for ((pi, poly) in polys.withIndex()) {
@@ -138,7 +143,7 @@ class Waterfront(private val city: City) {
             if (wa.isEmpty()) continue
             val sup = ArrayList<Float>()
             for (i in wa.indices) {
-                val n = max(1, ((wb[i] - wa[i]) / 24f).roundToInt())
+                val n = max(1, ((wb[i] - wa[i]) / 18f).roundToInt())
                 for (k in 0..n) sup += wa[i] + (wb[i] - wa[i]) * k / n
             }
             val ra = max(e.clearA, wa.first() - 8f); val rb = min(e.len - e.clearB, wb.last() + 8f)
@@ -159,7 +164,7 @@ class Waterfront(private val city: City) {
             var w = w0
             if (w.size >= 4 && abs(w[0] - w[w.size - 2]) < .01f && abs(w[1] - w[w.size - 1]) < .01f) w = w.copyOf(w.size - 2)
             val n = w.size / 2
-            if (n < 3) { wallSegs += ArrayList(); continue }
+            if (n < 3) { wallSegs.add(ArrayList()); continue }
             var cx = 0f; var cy = 0f
             for (i in 0 until n) { cx += w[i * 2]; cy += w[i * 2 + 1] }
             cx /= n; cy /= n
@@ -173,7 +178,7 @@ class Waterfront(private val city: City) {
                 val so = if ((ax + ux * len * .5f - cx) * -uy + (ay + uy * len * .5f - cy) * ux >= 0f) 1f else -1f
                 segs += WallSeg(ax, ay, ux, uy, len, so)
             }
-            wallSegs += segs
+            wallSegs.add(segs)
             val hit = FloatArray(2)
             for ((si, sg) in segs.withIndex()) {
                 // gates where roads pass through
@@ -271,7 +276,7 @@ class Waterfront(private val city: City) {
             scene.quad(x0, y0, -d + .55f, x1, y1, -d + .55f, x1, y1, -d, x0, y0, -d, scene.lit(QUAY_WET, sh))
         }
         // bridges: the side facing the camera, with arches between the piers
-        val water = scene.lit(ARCH_SHADOW, 1f)
+        val water = ARCH_SHADOW
         for (br in bridges) {
             val e = city.roads.edges[br.edge]
             if (max(e.ax, e.bx) < bbox[0] - 20f || min(e.ax, e.bx) > bbox[2] + 20f || max(e.ay, e.by) < bbox[1] - 20f || min(e.ay, e.by) > bbox[3] + 20f) continue
@@ -282,6 +287,7 @@ class Waterfront(private val city: City) {
             val sh = scene.sideShade(nx * side, ny * side)
             val stone = scene.lit(BRIDGE_STONE, sh)
             val dark = scene.lit(BRIDGE_STONE, sh * .82f)
+            val ring = scene.lit(c(0xFFD3CBB9), sh)
             fun x(s: Float, off: Float) = e.ax + e.ux * s + nx * off
             fun y(s: Float, off: Float) = e.ay + e.uy * s + ny * off
             for (i in br.wetA.indices) {
@@ -294,7 +300,7 @@ class Waterfront(private val city: City) {
                     if (p < a - .1f || p >= b - .1f || k + 1 >= br.supports.size) continue
                     val q = br.supports[k + 1]
                     if (q > b + .1f) continue
-                    arch(scene, p, q, o, ::x, ::y, stone, water)
+                    arch(scene, p, q, o, ::x, ::y, stone, water, ring)
                 }
                 for (p in br.supports) {
                     if (p <= a + .5f || p >= b - .5f) continue
@@ -305,13 +311,15 @@ class Waterfront(private val city: City) {
         scene.material = Mat.PLAIN
     }
 
-    private inline fun arch(scene: Scene3D, p: Float, q: Float, o: Float, x: (Float, Float) -> Float, y: (Float, Float) -> Float, stone: Int, shadow: Int) {
-        val steps = 8
-        val crown = -1.35f
+    private inline fun arch(scene: Scene3D, p: Float, q: Float, o: Float, x: (Float, Float) -> Float, y: (Float, Float) -> Float, stone: Int, shadow: Int, ring: Int) {
+        val steps = 10
+        val crown = -1.55f
         for (k in 0 until steps) {
             val u0 = p + (q - p) * k / steps; val u1 = p + (q - p) * (k + 1) / steps
             val z0 = archZ(k.toFloat() / steps, crown); val z1 = archZ((k + 1f) / steps, crown)
-            scene.quad(x(u0, o), y(u0, o), -1.1f, x(u1, o), y(u1, o), -1.1f, x(u1, o), y(u1, o), z1, x(u0, o), y(u0, o), z0, stone)
+            // spandrel, the arch ring of lighter voussoirs, then the shadow under the arch
+            scene.quad(x(u0, o), y(u0, o), -1.1f, x(u1, o), y(u1, o), -1.1f, x(u1, o), y(u1, o), z1 + .35f, x(u0, o), y(u0, o), z0 + .35f, stone)
+            scene.quad(x(u0, o), y(u0, o), z0 + .35f, x(u1, o), y(u1, o), z1 + .35f, x(u1, o), y(u1, o), z1, x(u0, o), y(u0, o), z0, ring)
             scene.quad(x(u0, o), y(u0, o), z0, x(u1, o), y(u1, o), z1, x(u1, o), y(u1, o), -DEPTH, x(u0, o), y(u0, o), -DEPTH, shadow)
         }
     }
@@ -319,7 +327,7 @@ class Waterfront(private val city: City) {
     /** Height of an arch's underside [f] of the way across, springing just above the water. */
     private fun archZ(f: Float, crown: Float): Float {
         val u = (f * 2f - 1f) * .97f
-        return -DEPTH + .25f + (crown + DEPTH - .25f) * sqrt(max(0f, 1f - u * u))
+        return -DEPTH + .15f + (crown + DEPTH - .15f) * sqrt(max(0f, 1f - u * u))
     }
 
     /** A pier standing out of the bridge's face with a pointed cutwater, its faces toward the camera. */
@@ -358,9 +366,9 @@ class Waterfront(private val city: City) {
         try {
             if (steel) {
                 scene.material = Mat.CONCRETE
-                for (sd in intArrayOf(-1, 1)) scene.box(r.s0, sd * y - .2f, 0f, r.s1, sd * y + .2f, .3f, BRIDGE_STONE, BRIDGE_STONE)
+                for (sd in -1..1 step 2) scene.box(r.s0, sd * y - .2f, 0f, r.s1, sd * y + .2f, .3f, BRIDGE_STONE, BRIDGE_STONE)
                 scene.material = Mat.METAL
-                for (sd in intArrayOf(-1, 1)) {
+                for (sd in -1..1 step 2) {
                     scene.box(r.s0, sd * y - .06f, 1.02f, r.s1, sd * y + .06f, 1.12f, STEEL, STEEL)
                     if (near) {
                         scene.box(r.s0, sd * y - .03f, .62f, r.s1, sd * y + .03f, .68f, STEEL, STEEL)
@@ -370,7 +378,7 @@ class Waterfront(private val city: City) {
                 }
             } else {
                 scene.material = Mat.STONE
-                for (sd in intArrayOf(-1, 1)) {
+                for (sd in -1..1 step 2) {
                     scene.box(r.s0, sd * y - .17f, 0f, r.s1, sd * y + .17f, .98f, BRIDGE_STONE, BRIDGE_STONE)
                     scene.box(r.s0, sd * y - .24f, .98f, r.s1, sd * y + .24f, 1.1f, scene.lit(BRIDGE_STONE, 1.08f), BRIDGE_STONE)
                 }
@@ -378,7 +386,7 @@ class Waterfront(private val city: City) {
             scene.material = Mat.STONE
             for ((k, p) in br.supports.withIndex()) {
                 if (p < r.s0 || p >= r.s1) continue
-                for (sd in intArrayOf(-1, 1)) {
+                for (sd in -1..1 step 2) {
                     scene.box(p - .45f, sd * y - .42f, 0f, p + .45f, sd * y + .42f, 1.45f, BRIDGE_STONE, BRIDGE_STONE)
                     if (k % 2 == 0 && d < 260f) {
                         scene.box(p - .08f, sd * y - .08f, 1.45f, p + .08f, sd * y + .08f, 5.3f, LAMP, LAMP)
@@ -456,18 +464,21 @@ class Waterfront(private val city: City) {
                 scene.box(x, hi - 1f, 9.5f, x + 1.2f, hi, 10.2f, RAMPART_LIGHT, RAMPART_LIGHT)
             }
         }
-        // the arch over the road: spandrels on both faces, the passage's vault and a walk on top
+        // the arch over the road: spandrels on both faces with a lighter ring, and a walk on top
         val steps = 8
         val crown = 6.6f; val spring = 4.6f
         val gs = scene.lit(GATE, scene.sideShade(0f, f)); val gi = scene.lit(GATE, scene.sideShade(0f, -f))
-        val vault = scene.lit(c(0xFF4E463B), 1f)
+        val ring = scene.lit(RAMPART_LIGHT, 1.05f)
+        val camO = scene.camLY * f
         for (k in 0 until steps) {
             val u0 = a + (b - a) * k / steps; val u1 = a + (b - a) * (k + 1) / steps
             val z0 = spring + (crown - spring) * sqrt(max(0f, 1f - sq(2f * k / steps - 1f)))
             val z1 = spring + (crown - spring) * sqrt(max(0f, 1f - sq(2f * (k + 1) / steps - 1f)))
-            wq(scene, f, u0, 3.4f, z0, u1, 3.4f, z1, u1, 3.4f, 8.6f, u0, 3.4f, 8.6f, gs)
-            wq(scene, f, u0, -3.4f, z0, u1, -3.4f, z1, u1, -3.4f, 8.6f, u0, -3.4f, 8.6f, gi)
-            wq(scene, f, u0, -3.4f, z0, u1, -3.4f, z1, u1, 3.4f, z1, u0, 3.4f, z0, vault)
+            for (os in -1..1 step 2) { val o = os * 3.4f
+                if (scene.gpu == null && ((o > 0f && camO < o) || (o < 0f && camO > o))) continue
+                wq(scene, f, u0, o, z0 + .55f, u1, o, z1 + .55f, u1, o, 8.6f, u0, o, 8.6f, if (o > 0f) gs else gi)
+                wq(scene, f, u0, o * 1.003f, z0, u1, o * 1.003f, z1, u1, o * 1.003f, z1 + .55f, u0, o * 1.003f, z0 + .55f, ring)
+            }
         }
         wq(scene, f, a, -3.4f, 8.6f, b, -3.4f, 8.6f, b, 3.4f, 8.6f, a, 3.4f, 8.6f, scene.lit(scene.snowy(RAMPART_LIGHT), 1f))
         // a crest over the outer face

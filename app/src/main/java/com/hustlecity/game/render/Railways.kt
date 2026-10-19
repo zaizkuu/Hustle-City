@@ -239,7 +239,14 @@ class Railways(private val city: City) {
             if (!placed && q - last >= 14f && pierKind(l, q) == 2) { addPier(l, q, true); last = q; placed = true }
             q = (if (placed) last else q) + spacing
         }
-        if (!l.loop && l.len - last > 10f) addPier(l, l.len - 3f, false)
+        // one more near the end of the line, wherever it can stand clear of the streets
+        if (!l.loop && l.len - last > 10f) {
+            for (sh in 0..6) {
+                val qq = l.len - 3f - sh * 3f
+                if (qq - last < 8f) break
+                if (pierKind(l, qq) == 1) { addPier(l, qq, false); break }
+            }
+        }
     }
 
     private fun addPier(l: Line, q: Float, bent: Boolean) {
@@ -328,6 +335,8 @@ class Railways(private val city: City) {
 
     fun carX(i: Int) = carX[i]
     fun carY(i: Int) = carY[i]
+    /** Index (in the city's rails) of the line car [i] runs on. */
+    fun carLine(i: Int) = carLine[i]
 
     /** Places every car for time [t] (seconds); cheap to call again for the same time. */
     fun update(t: Float) {
@@ -416,7 +425,7 @@ class Railways(private val city: City) {
         scene.material = Mat.PLAIN
         val stripe = scene.lit(l.color, 1f)
         val glass = if (night) WorldRenderer.LIT else scene.lit(WINDOW, 1f)
-        for (sd in intArrayOf(-1, 1)) {
+        for (sd in -1..1 step 2) {
             val yy = sd * (hw + .03f)
             if ((sd > 0 && cy <= yy) || (sd < 0 && cy >= yy)) continue
             val shade = scene.sideShade(0f, sd.toFloat())
@@ -438,7 +447,7 @@ class Railways(private val city: City) {
             }
         }
         // the cab ends: a dark windscreen with the line color under it, head or tail lights
-        for (end in intArrayOf(-1, 1)) {
+        for (end in -1..1 step 2) {
             val front = (end > 0 && flags and 1 != 0) || (end < 0 && flags and 2 != 0)
             if (!front) continue
             val xx = end * (hl + .03f)
@@ -448,7 +457,7 @@ class Railways(private val city: City) {
             scene.quad(xx, -hw, z0 + .4f, xx, hw, z0 + .4f, xx, hw, z0 + 1.2f, xx, -hw, z0 + 1.2f, scene.lit(l.color, shade))
             val lamp = if (end > 0) c(0xFFFFF4D6) else c(0xFFFF2E2E)
             val on = night || end > 0
-            for (sd in intArrayOf(-1, 1)) {
+            for (sd in -1..1 step 2) {
                 val yy = sd * (hw - .45f)
                 scene.quad(xx * 1.001f, yy - .22f, z0 + .55f, xx * 1.001f, yy + .22f, z0 + .55f, xx * 1.001f, yy + .22f, z0 + .9f, xx * 1.001f, yy - .22f, z0 + .9f,
                     if (on) lamp else scene.lit(c(0xFF6E7378), 1f))
@@ -538,13 +547,13 @@ class Railways(private val city: City) {
         loft(scene, -1f, 0f, SLAB_Z, -1f, 0f, DECK, CONCRETE, -1)
         loft(scene, -1f, 0f, DECK, 1f, 0f, DECK, scene.lit(CONCRETE, .92f), 0)
         scene.material = Mat.PLAIN
-        if (mid) for (sd in intArrayOf(-1, 1)) {
+        if (mid) for (sd in -1..1 step 2) {
             // ballast beds, and up close the sleepers and rails
             loft(scene, 0f, sd * 1.3f, DECK + .03f, 0f, -sd * 1.3f, DECK + .03f, scene.lit(BALLAST, 1f), 0, sd.toFloat())
             if (near) {
                 sleepers(scene, l, sd)
                 val rail = scene.lit(RAIL, 1.1f)
-                for (r in intArrayOf(-1, 1)) loft(scene, 0f, r * .53f - .05f, DECK + .2f, 0f, r * .53f + .05f, DECK + .2f, rail, 0, sd.toFloat())
+                for (r in -1..1 step 2) loft(scene, 0f, r * .53f - .05f, DECK + .2f, 0f, r * .53f + .05f, DECK + .2f, rail, 0, sd.toFloat())
             }
         } else if (!mapMode) loft(scene, 0f, -3f, DECK + .03f, 0f, 3f, DECK + .03f, scene.lit(BALLAST, 1f), 0)
         // the camera's side of the line, for drawing the far parapet before the trains and the near one after
@@ -666,8 +675,8 @@ class Railways(private val city: City) {
             sample(l, partLo, partHi)
             scene.material = Mat.METAL
             // a shallow gable roof over the island platform and the trains' roof edges
-            loft(scene, 0f, -2.6f, DECK + 4.6f, 0f, 0f, DECK + 4.95f, scene.lit(CANOPY, .95f), 0)
-            loft(scene, 0f, 0f, DECK + 4.95f, 0f, 2.6f, DECK + 4.6f, scene.lit(CANOPY, 1.02f), 0)
+            loft(scene, 0f, -2.2f, DECK + 4.6f, 0f, 0f, DECK + 4.9f, scene.lit(CANOPY, .95f), 0)
+            loft(scene, 0f, 0f, DECK + 4.9f, 0f, 2.2f, DECK + 4.6f, scene.lit(CANOPY, 1.02f), 0)
             scene.material = Mat.PLAIN
             if (night && mid) loft(scene, 0f, -1.2f, DECK + 4.55f, 0f, 1.2f, DECK + 4.55f, c(0xFFFFF1C9), 0)
         }
@@ -678,14 +687,14 @@ class Railways(private val city: City) {
         l.at(sp.q0, tmp)
         val nx = tmp[3]; val ny = -tmp[2]
         val hw = l.halfWidth(sp.q0) - .45f
-        for (sd in intArrayOf(-1, 1)) {
+        for (sd in -1..1 step 2) {
             val px = tmp[0] + nx * hw * sd; val py = tmp[1] + ny * hw * sd
             scene.box(px - .12f, py - .12f, DECK, px + .12f, py + .12f, DECK + 6.1f, POLE, POLE)
         }
         val ax = tmp[0] - nx * hw; val ay = tmp[1] - ny * hw; val bx = tmp[0] + nx * hw; val by = tmp[1] + ny * hw
         val ux = tmp[2] * .1f; val uy = tmp[3] * .1f
         scene.quad(ax - ux, ay - uy, DECK + 5.7f, bx - ux, by - uy, DECK + 5.7f, bx + ux, by + uy, DECK + 5.9f, ax + ux, ay + uy, DECK + 5.9f, scene.lit(POLE, 1f))
-        if (near) for (sd in intArrayOf(-1, 1)) loft(scene, 0f, -.04f, DECK + 5.1f, 0f, .04f, DECK + 5.1f, scene.lit(c(0xFF2A2D31), 1f), 0, sd.toFloat())
+        if (near) for (sd in -1..1 step 2) loft(scene, 0f, -.04f, DECK + 5.1f, 0f, .04f, DECK + 5.1f, scene.lit(c(0xFF2A2D31), 1f), 0, sd.toFloat())
     }
 
     /** The viaduct's painted shadow on the ground (Canvas path), offset by the sun. */

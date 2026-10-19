@@ -174,6 +174,93 @@ class RenderSnapshotTest {
         }
     }
 
+    /** Frames the camera on (x, y) from [dist] meters, looking from direction [yaw], at [hour] o'clock, and saves the view. */
+    private fun shoot(e: GameEngine, x: Float, y: Float, dist: Float, yaw: Float, hour: Int, name: String) {
+        e.ui.tip = null
+        e.state.minute = (e.state.minute / (24 * 60)) * 24 * 60 + hour * 60L
+        e.state.player.x = x; e.state.player.y = y
+        repeat(4) {
+            e.frame(1 / 30f)
+            e.camera.tx = x; e.camera.ty = y; e.camera.zoom = dist; e.camera.dist = dist; e.camera.yaw = yaw
+        }
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        WorldRenderer(e).draw(Canvas(bmp), w, h, 2f)
+        save(bmp, name)
+    }
+
+    /**
+     * Every landmark on every map, a train on each elevated line, a bridge per city and Intramuros' walls, by day and
+     * by night; and a GPU frame per city, built through the cached and per-frame passes.
+     */
+    @Test
+    fun cityFeatures() {
+        for (map in listOf("nyc", "manila", "tokyo", "seoul")) {
+            val e = GameEngine(null)
+            e.newGame("Tester", 1, 0, 1, mapId = map)
+            e.state.weather.clear(); e.state.weather += com.hustlecity.game.model.WeatherSpan(0L, 1L shl 40, com.hustlecity.game.model.Sky.CLEAR)
+            val f = com.hustlecity.game.render.CityFeatures(e.city)
+            // viaduct columns keep out of junctions and crossing roads (a column may stand in a road's median)
+            val at = FloatArray(4)
+            for (line in f.rails.lines) for (p in line.piers) {
+                if (p.bent) continue
+                line.at(p.q, at)
+                for (ed in e.city.roads.edges) {
+                    val d = com.hustlecity.game.world.Geo.distToSeg(at[0], at[1], ed.ax, ed.ay, ed.bx, ed.by)
+                    val parallel = kotlin.math.abs(ed.ux * at[2] + ed.uy * at[3]) > .94f
+                    assertTrue("$map ${line.rail.name}: pier at ${at[0]},${at[1]} on ${ed.name}", d >= ed.cls.halfWidth || (parallel && d < .9f))
+                }
+            }
+            for (night in listOf(false, true)) {
+                val hour = if (night) 21 else 15
+                val sfx = if (night) "_night" else ""
+                for (l in e.city.landmarks) {
+                    val tall = when (l.kind) {
+                        com.hustlecity.game.world.Landmark.TOWER -> 290f
+                        com.hustlecity.game.world.Landmark.WHEEL -> 120f
+                        com.hustlecity.game.world.Landmark.BILLBOARDS -> 95f
+                        com.hustlecity.game.world.Landmark.CHURCH -> 85f
+                        com.hustlecity.game.world.Landmark.PALACE_GATE -> 80f
+                        else -> 60f
+                    } * (.6f + .4f * l.size)
+                    // look at its front (local -y) from a little to one side
+                    val yaw = kotlin.math.atan2(l.sn, -l.cs) + .45f
+                    val lift = if (l.kind == com.hustlecity.game.world.Landmark.TOWER) 40f * l.size else 0f
+                    shoot(e, l.x - l.sn * lift * .3f, l.y + l.cs * lift * .3f, tall, yaw, hour, "feat_${map}_${l.name.lowercase().replace(' ', '_')}$sfx.png")
+                }
+                // a train on each line, seen from the side
+                for (line in f.rails.lines) {
+                    f.rails.update(e.realTime + 4 / 30f)
+                    val car = (0 until f.rails.carCount).firstOrNull { k ->
+                        val x = f.rails.carX(k); val y = f.rails.carY(k)
+                        f.rails.carLine(k) == line.index &&
+                        x in 60f..e.city.bounds[2] - 60f && y in 60f..e.city.bounds[3] - 60f
+                    } ?: continue
+                    shoot(e, f.rails.carX(car), f.rails.carY(car), 70f, .9f + line.index, hour, "feat_${map}_rail_${line.rail.name.lowercase().replace(' ', '_')}$sfx.png")
+                }
+                // the longest bridge
+                f.water.bridges.maxByOrNull { b -> b.wetB.last() - b.wetA.first() }?.let { b ->
+                    val ed = e.city.roads.edges[b.edge]
+                    val s = (b.wetA.first() + b.wetB.last()) * .5f
+                    shoot(e, ed.ax + ed.ux * s, ed.ay + ed.uy * s, 95f, kotlin.math.atan2(ed.uy, -ed.ux) + .5f, hour, "feat_${map}_bridge$sfx.png")
+                }
+                // a gate in the city walls, and a corner bastion
+                f.water.wallPieces.firstOrNull { it.kind == 1 }?.let { shoot(e, it.cx, it.cy, 70f, .6f, hour, "feat_${map}_wall_gate$sfx.png") }
+                f.water.wallPieces.firstOrNull { it.kind == 2 }?.let { shoot(e, it.cx, it.cy, 90f, 2.2f, hour, "feat_${map}_wall_bastion$sfx.png") }
+            }
+            // the GPU path: cache the still features, draw trains and the wheel per frame
+            val r = WorldRenderer(e)
+            val frame = com.hustlecity.game.render.gpu.GpuFrame()
+            r.draw(Canvas(Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)), w, h, 2f, frame)
+            assertTrue("$map: GPU frame has geometry", frame.triangleCount > 0)
+        }
+        // landmark names on the map
+        val e = GameEngine(null)
+        e.newGame("Tester", 1, 0, 1, mapId = "tokyo")
+        e.ui.app = AppId.MAPS
+        e.camera.mapX = 650f; e.camera.mapY = 700f; e.camera.mapDist = 1100f
+        renderWorld(e, "feat_tokyo_map.png")
+    }
+
     @Test
     fun mapMode() {
         val e = engine()
