@@ -460,9 +460,13 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
      * A soft disc of light on the ground: [color] at [alpha] in the middle fading to nothing at the rim. The GPU blends
      * it smoothly per pixel; the Canvas stacks thin rings that add up to the same falloff.
      */
-    fun glowDisc(x: Float, y: Float, z: Float, r: Float, color: Int, alpha: Float) {
+    fun glowDisc(x: Float, y: Float, z: Float, r: Float, color: Int, alpha: Float) = glowOval(x, y, z, r, r, 1f, 0f, color, alpha)
+
+    /** [glowDisc] stretched into an oval: [rx] along the unit direction ([ux], [uy]), [ry] across it. */
+    fun glowOval(x: Float, y: Float, z: Float, rx: Float, ry: Float, ux: Float, uy: Float, color: Int, alpha: Float) {
         val g = gpu
         if (g != null && !fOn) {
+            val r = max(rx, ry)
             val cz = proj.camZOf(x, y, z)
             if (cz < -r) return
             if (cz > proj.near) {
@@ -471,14 +475,20 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
                 val pr = proj.focal * r / cz * 1.5f
                 if (px < -pr || px > proj.screenW + pr || py < -pr || py > proj.screenH + pr) return
             }
-            g.radial(streamFor(withAlpha(color, alpha * .99f)), x, y, z, r, 28, withAlpha(color, alpha), withAlpha(color, alpha * .38f), .42f,
-                withAlpha(color, 0f), true, materialFor(color))
+            g.radial(streamFor(withAlpha(color, alpha * .99f)), x, y, z, rx, ry, ux, uy, 28, withAlpha(color, alpha),
+                withAlpha(color, alpha * .38f), .42f, withAlpha(color, 0f), true, materialFor(color))
             return
         }
         // each ring adds a little alpha, building toward the centre
         for (i in 0 until 6) {
             val f = 1f - i / 6f
-            disc(x, y, z + i * .002f, r * f, r * f, 18 - i, withAlpha(color, alpha * .2f))
+            val n = 18 - i
+            for (k in 0 until n) {
+                val a = (k.toFloat() / n) * (Math.PI * 2).toFloat()
+                val u = cos(a) * rx * f; val v = sin(a) * ry * f
+                wx[k] = x + ux * u - uy * v; wy[k] = y + uy * u + ux * v; wz[k] = z + i * .002f
+            }
+            poly(n, wx, wy, wz, withAlpha(color, alpha * .2f))
         }
     }
 

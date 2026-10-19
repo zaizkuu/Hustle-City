@@ -20,6 +20,7 @@ import com.hustlecity.game.render.StreetProps
 import com.hustlecity.game.render.WorldRenderer
 import com.hustlecity.game.render.gpu.GpuFrame
 import com.hustlecity.game.world.BKind
+import com.hustlecity.game.world.Building
 import com.hustlecity.game.world.RoadClass
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -115,6 +116,21 @@ class CinematicTest {
     }
 
     /**
+     * Stops a shot whose camera ends up inside (or brushing) a building: the canvas preview culls the walls it is behind
+     * and looks fine, but the HD render shows nothing but the inside of the walls.
+     */
+    private fun checkCamera(e: GameEngine, r: WorldRenderer, name: String, f: Int) {
+        val p = r.proj
+        var hit: Building? = null
+        e.city.forBuildingsIn(p.camX - 3f, p.camY - 3f, p.camX + 3f, p.camY + 3f) { b ->
+            if (b.height > 0f && p.camZ < b.height + 1.5f &&
+                (b.contains(p.camX, p.camY) || b.contains(p.camX + 1.5f, p.camY) || b.contains(p.camX - 1.5f, p.camY) ||
+                    b.contains(p.camX, p.camY + 1.5f) || b.contains(p.camX, p.camY - 1.5f))) hit = b
+        }
+        check(hit == null) { "$name frame $f: the camera is inside building ${hit!!.id} at ${p.camX.toInt()},${p.camY.toInt()},${p.camZ.toInt()}" }
+    }
+
+    /**
      * Flies the camera along [keys] for [seconds], the game running underneath (traffic and people follow the camera).
      * [each] runs before every frame with the frame index and 0..1 progress; [warm] seconds of simulation fill the
      * streets first.
@@ -141,6 +157,7 @@ class CinematicTest {
             e.frame(1f / fps)
             place(u)
             out.frame({ c -> r.draw(c, w, h, 2f) }, { c, g -> r.draw(c, w, h, 3f, g) }, weather)
+            checkCamera(e, r, name, f)
         }
         println("$name: ${out.n} frames")
     }
@@ -214,6 +231,7 @@ class CinematicTest {
             e.frame(1f / fps)
             place(u, .12f)
             out.frame({ c -> r.draw(c, w, h, 2f) }, { c, g -> r.draw(c, w, h, 3f, g) }, weather)
+            checkCamera(e, r, name, f)
         }
         println("$name: ${out.n} frames")
     }
@@ -282,6 +300,15 @@ class CinematicTest {
         val e = engine("seoul", 18.25f)
         val g = landmark(e, "Gwanghwamun")
         fly(e, "a4_seoul", 2.4f, listOf(Key(g.x - 10f, g.y + 10f, 125f, .35f, 14f), Key(g.x + 5f, g.y, 110f, .05f, 16f)),
+            easing = .2f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The original grid at sunset, the fifth city, sweeping in over Midtown. */
+    @Test
+    fun a5() {
+        if (!on("a5")) { assumeTrue(false); return }
+        val e = engine(com.hustlecity.game.world.Maps.CLASSIC, 18.1f)
+        fly(e, "a5_classic", 1.7f, listOf(Key(640f, 760f, 300f, -.15f, 15f), Key(650f, 700f, 270f, .1f, 17f)),
             easing = .2f) { _, _ -> clearWeather(e) }
     }
 
@@ -379,7 +406,7 @@ class CinematicTest {
         val e = engine("nyc", 8.6f)
         val m = e.city.placeBuilding("metro")!!
         val v = startCar(e, "hauler", m.doorX, m.doorY - 60f, color = 0xFF1F4FA0.toInt(), minRank = 1)
-        chase(e, "c7_fleet", 2.4f, v, 8f, relYaw = { u -> PI.toFloat() - .75f + .35f * u }, dist = { 19f }, pitch = { u -> 11f + 3f * u }, lead = 1f) { _, _ -> clearWeather(e) }
+        chase(e, "c7_fleet", 2.4f, v, 8f, relYaw = { u -> PI.toFloat() + .45f - .2f * u }, dist = { 19f }, pitch = { u -> 11f + 3f * u }, lead = 1f) { _, _ -> clearWeather(e) }
     }
 
     /** Manila's streets: tangled wires, food carts and jeepneys. */
@@ -440,7 +467,7 @@ class CinematicTest {
         if (!on("c15")) { assumeTrue(false); return }
         val e = engine("seoul", 21.0f)
         val t = landmark(e, "N Seoul")
-        fly(e, "c15_seoul_night", 2.4f, listOf(Key(t.x, t.y, 520f, -.45f, 6.5f), Key(t.x, t.y, 480f, -.3f, 7f)), easing = .2f, haze = .3f) { _, _ -> clearWeather(e) }
+        fly(e, "c15_seoul_night", 2.4f, listOf(Key(t.x, t.y, 520f, -.3f, 8.2f), Key(t.x, t.y, 480f, -.15f, 8.8f)), easing = .2f, haze = .3f) { _, _ -> clearWeather(e) }
     }
 
     /** The Shibuya scramble at night, full of people. */
@@ -457,7 +484,8 @@ class CinematicTest {
     fun e1() {
         if (!on("e1")) { assumeTrue(false); return }
         val e = engine("nyc", 21.6f)
-        fly(e, "e1_finale", 6.6f, listOf(Key(690f, 820f, 120f, 2.6f, 22f), Key(700f, 800f, 230f, 2.9f, 16f), Key(720f, 780f, 380f, 3.1f, 12f)),
+        // over the tops of the towers the whole way: the tallest stands about 120 m
+        fly(e, "e1_finale", 6.6f, listOf(Key(690f, 820f, 250f, 2.6f, 34f), Key(700f, 800f, 330f, 2.85f, 27f), Key(720f, 780f, 440f, 3.05f, 21f)),
             easing = .5f, haze = .4f) { _, _ -> clearWeather(e) }
     }
 }

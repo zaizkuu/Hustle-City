@@ -208,10 +208,12 @@ class GpuFrame {
     }
 
     /**
-     * Appends a flat disc whose color fades smoothly from [inner] at the centre through [mid] at [midFrac] of the
-     * radius to [outer] at the rim: a soft pool of light rather than stepped rings.
+     * Appends a flat oval whose color fades smoothly from [inner] at the centre through [mid] at [midFrac] of the
+     * radius to [outer] at the rim: a soft pool of light rather than stepped rings. [rx] runs along the unit direction
+     * ([ux], [uy]) and [ry] across it.
      */
-    fun radial(stream: Int, x: Float, y: Float, z: Float, r: Float, segs: Int, inner: Int, mid: Int, midFrac: Float, outer: Int, emissive: Boolean, material: Int = 0) {
+    fun radial(stream: Int, x: Float, y: Float, z: Float, rx: Float, ry: Float, ux: Float, uy: Float, segs: Int, inner: Int, mid: Int, midFrac: Float,
+               outer: Int, emissive: Boolean, material: Int = 0) {
         val s = streams[stream]
         s.ensure(1 + segs * 2, segs * 9)
         val base = s.nv
@@ -230,9 +232,10 @@ class GpuFrame {
         val cm = rgba(mid); val co = rgba(outer)
         for (i in 0 until segs) {
             val a = i * (Math.PI * 2 / segs)
-            val c = kotlin.math.cos(a).toFloat(); val sn = kotlin.math.sin(a).toFloat()
-            put(x + c * r * midFrac, y + sn * r * midFrac, cm)
-            put(x + c * r, y + sn * r, co)
+            val c = kotlin.math.cos(a).toFloat() * rx; val sn = kotlin.math.sin(a).toFloat() * ry
+            val dx = ux * c - uy * sn; val dy = uy * c + ux * sn
+            put(x + dx * midFrac, y + dy * midFrac, cm)
+            put(x + dx, y + dy, co)
         }
         s.nv += 1 + segs * 2
         val idx = s.idx
