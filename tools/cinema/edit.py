@@ -520,6 +520,7 @@ def frame_at(n):
     a += g[..., None] * .016
     bar = int(round(letterbox(t)))
     if bar: a[:bar] = 0; a[H - bar:] = 0
+    if t < .6: a *= ease_in_out(t / .6)
     if t >= 59.0: a *= 1 - ease_in_out((t - 59.0) / .9)
     return to_img(a)
 

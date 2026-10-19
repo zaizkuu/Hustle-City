@@ -371,15 +371,16 @@ d = 2.2; t = t_axis(d)
 place('sfx', np.stack([filt(noise(d), 'bandpass', [800, 9000]), filt(noise(d), 'bandpass', [800, 9000])], 1) * .12
       * np.minimum(1, np.minimum(t / .2, (d - t) / .3))[:, None], 23.95, 1)
 # an engine for the drives, and the hypercar passing
-for a, b, base in ((22.0, 24.0, 44), (38.0, 40.0, 70)):
+for a, b, base in ((22.0, 24.0, 44), (26.0, 28.0, 32), (38.0, 40.0, 70)):
     d = b - a; t = t_axis(d)
     f = base + base * .9 * (t / d) ** 1.4
     eng = saw(f, d) * .5 + saw(f * 2.01, d) * .25
     eng = sweep(eng, 'lowpass', lambda s: 900 + 1500 * s / d) * np.minimum(1, np.minimum(t / .15, (d - t) / .2))
     place('sfx', eng * .35, a, 1, pan=0)
 # a whoosh under each headline
-for t0 in (13.8, 17.8, 21.8, 25.8, 29.8, 33.8, 35.8, 37.8, 39.8, 41.8, 43.8):
+for t0 in (13.85, 17.85, 21.85, 23.85, 25.85, 27.85, 29.85, 33.85, 35.85, 37.85, 39.85):
     place('fx', whoosh(.6), t0, .35, send=.2)
+place('drums', boom(1.6, 90, 40), 42.0, .45, send=.4)  # FIVE CITIES.
 
 # ---------------------------------------------------------------- mix
 side = env_follow_kicks(kicks, .55, .16)[:, None]
