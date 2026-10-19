@@ -85,7 +85,7 @@ object SeoulMap : PlannedMap("seoul", "Seoul", "The Han River and its bridges, G
         // Gyeongbokgung and Sejong-daero
         val palace = rect(480f, -80f, 720f, 150f)
         parks += Park("Gyeongbokgung", palace, Park.GROUNDS)
-        landmarks += Landmark(Landmark.PALACE_GATE, 600f, 156f, 0f, 1.2f, "Gwanghwamun")
+        landmarks += Landmark(Landmark.PALACE_GATE, 600f, 148f, Math.PI.toFloat(), 1.2f, "Gwanghwamun")
         roads.add(600f, 160f, 600f, 430f, RoadClass.BOULEVARD, "Sejong-daero")
         roads.add(600f, 430f, 560f, 600f, RoadClass.AVENUE, "Namdaemun-ro")
         parks += Park("Gwanghwamun Square", rect(590f, 175f, 610f, 300f), Park.PLAZA, roads = true)
@@ -101,7 +101,7 @@ object SeoulMap : PlannedMap("seoul", "Seoul", "The Han River and its bridges, G
         organic(floatArrayOf(620f, 175f, 1360f, 160f, 1360f, 425f, 620f, 425f), 44f, 11f, -.05f, .15f, RoadClass.LANE, jongno, ring = null)
         // Myeongdong: shopping streets packed together
         organic(floatArrayOf(610f, 455f, 840f, 455f, 840f, 560f, 610f, 560f), 36f, 8f, .08f, .1f, RoadClass.LANE, myeongdong, ring = null)
-        landmarks += Landmark(Landmark.BILLBOARDS, 720f, 500f, 0f, .8f, "Myeongdong")
+        landmarks += Landmark(Landmark.BILLBOARDS, 720f, 500f, 0f, .8f, "Myeongdong", Landmark.SIGNS)
         // Namsan and N Seoul Tower
         val namsan = Geo.ellipse(860f, 590f, 150f, 92f, 30, -.1f)
         parks += Park("Namsan Park", namsan, Park.GREEN)

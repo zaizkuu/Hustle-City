@@ -102,22 +102,27 @@ object ManilaMap : PlannedMap("manila", "Manila", "Manila Bay, the Pasig River, 
             { RoadClass.STREET }, { RoadClass.STREET }, { tondo[Math.floorMod(it, tondo.size)] }, { tondo[Math.floorMod(it + 3, tondo.size)] })
         // Binondo: Chinatown's crowded old streets
         organic(floatArrayOf(180f, 262f, 600f, 230f, 600f, 440f, 180f, 450f), 38f, 9f, .05f, .12f, RoadClass.LANE, binondo, ring = null)
-        landmarks += Landmark(Landmark.CHURCH, 470f, 300f, 0f, .9f, "Binondo Church")
+        landmarks += Landmark(Landmark.CHURCH, 420f, 320f, 0f, .9f, "Binondo Church", Landmark.PAGODA_TOWER)
         // Quiapo and Sampaloc: an older grid at an angle
         grid(floatArrayOf(470f, -60f, 1360f, -60f, 1360f, 470f, 600f, 470f, 480f, 420f), 900f, 200f, -.42f, 85f, 66f,
             { if (it % 3 == 0) RoadClass.AVENUE else RoadClass.STREET }, { RoadClass.STREET },
             { sampaloc[Math.floorMod(it, sampaloc.size)] }, { sampaloc[Math.floorMod(it + 5, sampaloc.size)] })
-        landmarks += Landmark(Landmark.CHURCH, 600f, 420f, -.42f, 1f, "Quiapo Church")
+        landmarks += Landmark(Landmark.CHURCH, 650f, 440f, -.42f, 1f, "Quiapo Church", Landmark.BASILICA)
         // Intramuros: the walled city
         val walled = rotRect(360f, 615f, 230f, 205f, .12f)
         grid(walled, 360f, 615f, .12f, 52f, 48f, { RoadClass.STREET }, { RoadClass.STREET },
             { intramuros[Math.floorMod(it, intramuros.size)] }, { intramuros[Math.floorMod(it + 2, intramuros.size)] })
-        walls += rotRect(360f, 615f, 246f, 221f, .12f).let { it + floatArrayOf(it[0], it[1]) }
-        open += Geo.band(rotRect(360f, 615f, 262f, 237f, .12f).let { it + floatArrayOf(it[0], it[1]) }, 7f)
-        landmarks += Landmark(Landmark.CHURCH, 380f, 600f, .12f, 1.2f, "Manila Cathedral")
+        // the walls' centre line: 6 m of rampart between the old town's outer streets and Roxas Boulevard
+        walls += rotRect(360f, 615f, 240f, 221f, .12f).let { it + floatArrayOf(it[0], it[1]) }
+        // no lots on the ramparts or the strip of lawn outside them: a ring between two rectangles
+        val ringOut = rotRect(360f, 615f, 264f, 245f, .12f); val ringIn = rotRect(360f, 615f, 231f, 212f, .12f)
+        open += ringOut + floatArrayOf(ringOut[0], ringOut[1], ringIn[0], ringIn[1], ringIn[6], ringIn[7], ringIn[4], ringIn[5], ringIn[2], ringIn[3], ringIn[0], ringIn[1])
+        landmarks += Landmark(Landmark.CHURCH, 388f, 601f, .12f, 1.2f, "Manila Cathedral", Landmark.CATHEDRAL)
         // Rizal Park (Luneta) between the walls and the bay
         parks += Park("Rizal Park", floatArrayOf(232f, 742f, 470f, 735f, 478f, 845f, 236f, 852f))
         landmarks += Landmark(Landmark.MONUMENT, 300f, 795f, 0f, 1.1f, "Rizal Monument")
+        // a Ferris wheel on the bay walk, between the water and Roxas Boulevard
+        landmarks += Landmark(Landmark.WHEEL, 183f, 1215f, Math.PI.toFloat() / 2, 1f, "MOA Eye")
         // Ermita and Malate: the grid along the bay
         grid(floatArrayOf(205f, 860f, 760f, 850f, 760f, 1360f, 205f, 1360f), 300f, 900f, -.05f, 78f, 60f,
             { RoadClass.STREET }, { RoadClass.STREET }, { ermita[Math.floorMod(it, ermita.size)] }, { ermita[Math.floorMod(it + 6, ermita.size)] })

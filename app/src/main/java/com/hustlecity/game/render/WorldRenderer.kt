@@ -77,6 +77,12 @@ class WorldRenderer(private val e: GameEngine) {
     private var propsCache: StreetProps? = null
     private val props: StreetProps
         get() = propsCache?.takeIf { it.city === e.city } ?: StreetProps(e.city).also { propsCache = it }
+    private var featCache: CityFeatures? = null
+    /** Landmarks, elevated railways, bridges, quays and city walls. */
+    private val features: CityFeatures
+        get() = featCache?.takeIf { it.city === e.city } ?: CityFeatures(e.city).also { featCache = it }
+    private val addFeature: (Int, Float) -> Unit = { part, key -> add(12, part, key) }
+    private val addTrainCar: (Int, Float, Float) -> Unit = { car, x, y -> add(13, car, keyFor(x, y)) }
 
     // weather particles in screen space: x, y, speed, size
     private val pX = FloatArray(420); private val pY = FloatArray(420); private val pV = FloatArray(420); private val pS = FloatArray(420)
@@ -438,6 +444,8 @@ class WorldRenderer(private val e: GameEngine) {
                 6 -> drawTrafficLight(dIdx[i])
                 7 -> drawParkedCar(dIdx[i])
                 8 -> props.draw(scene, dIdx[i], dKey[i] < 55f * 55f, e.realTime)
+                12 -> features.draw(scene, dIdx[i], e.realTime, scene.gpu == null, mapMode, if (e.hasGame) e.state.hour else 12)
+                13 -> features.drawCar(scene, dIdx[i])
             }
         }
     }
@@ -666,6 +674,8 @@ class WorldRenderer(private val e: GameEngine) {
         }
         scene.material = Mat.PLAIN
         if (proj.dist < 420) drawMarkings()
+        features.drawGround(scene, bbox, mapMode, shadowDX, shadowDY,
+            e.settings.shadows && !mapMode && scene.daylight > .15f && proj.dist < 400 && scene.gpu?.shadowOn != true)
         if (withRoute) drawRoute()
         // night street lights
         if (scene.daylight < .6f && !mapMode) {
@@ -955,6 +965,10 @@ class WorldRenderer(private val e: GameEngine) {
                 add(6, (n.id shl 4) or n.edges.indexOf(ed.id).coerceIn(0, 15), keyFor(x, y))
             }
         }
+        // landmarks, viaducts, bridges and walls are cached; trains and the wheel's rotor move (the Canvas path draws
+        // them with the span or landmark they're on, so they sort with it)
+        features.collect(bbox, proj.camX, proj.camY, stat, mode == DYNAMIC, mapMode, addFeature)
+        if (mode == DYNAMIC && !mapMode) features.forCars(e.realTime, bbox, addTrainCar)
         if (dyn) for (v in e.state.vehicles) if (v.x in bbox[0] - 5..bbox[2] + 5 && v.y in bbox[1] - 5..bbox[3] + 5) add(5, v.id, keyFor(v.x, v.y))
         if (dyn && e.hasGame && p.driving < 0 && p.inBuilding < 0 && !mapMode) add(4, 0, playerKey)
     }
@@ -1305,6 +1319,7 @@ class WorldRenderer(private val e: GameEngine) {
                 canvas.drawText(name, px, py - r * 1.4f, textPaint)
             }
         }
+        features.mapLabels(canvas, proj, density)
         // player marker
         val (fx, fy) = e.focusPoint()
         if (proj.project(fx, fy, 2f, tmp)) {

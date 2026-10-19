@@ -105,7 +105,7 @@ object NewYorkMap : PlannedMap("nyc", "New York", "Manhattan's tilted grid, Cent
         organic(downtown, 52f, 13f, THETA + .38f, .16f, RoadClass.STREET, fidi, ring = null)
         skyline += downtown to 1.6f
         parks += Park("Battery Park", g(200f, 1270f, 470f, 1300f, 430f, 1345f, 300f, 1360f, 170f, 1310f), Park.GREEN)
-        landmarks += Landmark(Landmark.MONUMENT, wx(330f, 1300f), wy(330f, 1300f), 0f, 1f, "Battery")
+        landmarks += Landmark(Landmark.MONUMENT, wx(320f, 1322f), wy(320f, 1322f), 0f, 1f, "Battery")
         // the waterfront highways
         curve(g(-8f, -60f, -6f, 300f, -8f, 700f, -2f, 1062f, 60f, 1185f, 170f, 1270f), RoadClass.BOULEVARD, "West Side Highway")
         curve(g(786f, -60f, 788f, 300f, 786f, 700f, 784f, 1062f, 705f, 1150f, 610f, 1232f), RoadClass.AVENUE, "FDR Drive")
