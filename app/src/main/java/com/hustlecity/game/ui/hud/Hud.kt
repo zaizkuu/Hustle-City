@@ -121,6 +121,7 @@ import com.hustlecity.game.engine.carryIn
 import com.hustlecity.game.engine.carryMinutes
 import com.hustlecity.game.engine.vehicleNear
 import com.hustlecity.game.engine.unloadInto
+import com.hustlecity.game.engine.stockShelves
 import com.hustlecity.game.engine.unloadDestination
 import com.hustlecity.game.engine.unloadableCount
 import com.hustlecity.game.engine.workUntilClosing
@@ -593,7 +594,12 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
             val ownPlace = sc.mode == InteriorMode.BUSINESS || sc.mode == InteriorMode.HOME
             if (ownPlace && unload > 0) {
                 val carried = e.state.player.hand.count { it.id != HAND_TRUCK && !it.unpaid }
-                if (carried > 0) HButton("Put down what you carry ($carried)", full, color = HC.Orange, icon = Icons.Filled.Inventory2) { e.unloadInto(b.id, true, null) }
+                // product boxes for your store: carry them to the displays and unpack them there
+                val forShelves = sc.business?.let { biz -> e.state.player.hand.count { it.isProduct && !it.unpaid && BizCalc.sells(biz, it.id) } } ?: 0
+                if (forShelves > 0 && sc.shelf != null) HButton("Restock shelves ($forShelves)", full, color = HC.Blue, icon = Icons.Filled.Inventory2) {
+                    if (!e.stockShelves()) e.toast("No display or storage shelf has room for what you carry")
+                }
+                if (carried > 0) HButton("Put down what you carry ($carried)", full, small = forShelves > 0, color = HC.Orange, icon = Icons.Filled.Inventory2) { e.unloadInto(b.id, true, null) }
                 e.vehicleNear(b.id)?.let { v ->
                     val boxes = v.cargo.count { it.id != HAND_TRUCK }
                     if (boxes > 0) HButton("Carry in from ${v.def.name} ($boxes, ~${e.carryMinutes(boxes)} min)", full, small = true, color = HC.Orange) { e.carryIn(b.id, v) }
@@ -636,6 +642,13 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                     HButton(if (working) "Stop working" else "Start working", full, small = true, color = if (working) HC.Red else HC.Green) { e.toggleWork(biz) }
                     HButton("Work until %02d:00".format(biz.closeHour), full, small = true, color = HC.Teal) { e.workUntilClosing(biz) }
                     HButton("Clean (${biz.cleanliness.roundToInt()}%)", full, small = true, color = HC.GlassLight) { e.cleanStore(biz) }
+                    // the back room: boxes waiting on the storage shelves
+                    val shelves = BizCalc.storageBoxes(biz)
+                    if (sc.backRoom != null || shelves > 0) {
+                        Text(if (shelves > 0) "Back room: ${BizCalc.storageBoxesUsed(biz)} / $shelves boxes" else "Back room: add Storage Shelves to keep spare stock",
+                            color = Color.White.copy(alpha = .8f), fontSize = 10.sp)
+                    }
+                    Text("Tap a display to see its stock and restock it.", color = Color.White.copy(alpha = .6f), fontSize = 9.sp)
                 }
                 InteriorMode.HOME -> {
                     HButton("Sleep", full, small = true) { e.ui.panel = Panel.Sleep }
@@ -671,6 +684,13 @@ fun DesignerBar(e: GameEngine, modifier: Modifier = Modifier) {
                 for ((i, col) in WALL_COLORS.withIndex()) Swatch(col.toColor(), biz.wallColor == i) { biz.wallColor = i; e.bump() }
             }
             Spacer(Modifier.width(8.dp))
+            if (biz != null && com.hustlecity.game.engine.BackRoom.eligible(biz)) {
+                val on = sc.backRoom != null
+                HButton(if (on) "Back room: on" else "Back room: off", small = true, color = if (on) HC.Orange else HC.GlassLight) {
+                    sc.setBackRoom(!on); e.bump()
+                }
+                Spacer(Modifier.width(6.dp))
+            }
             HButton("Done", small = true, color = HC.Green) { e.ui.designer = false; sc.cancelGhost(); sc.selectedIndex = -1; e.bump() }
         }
         Box(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
@@ -725,7 +745,14 @@ fun DesignerBar(e: GameEngine, modifier: Modifier = Modifier) {
             val def = Catalog.item(sc.ghostId!!)
             if (def != null) {
                 val (fw, fd) = itemDims(def, sc.ghostRot)
-                Text("Size ${fw}×$fd tiles · ${if (sc.ghostValid) "fits here" else "blocked"}", color = if (sc.ghostValid) HC.GreenLight else HC.Red, fontSize = 10.sp, modifier = Modifier.padding(start = 8.dp, bottom = 6.dp))
+                val problem = sc.ghostProblem
+                val hint = sc.ghostHint
+                val status = when {
+                    sc.ghostValid -> "fits here" + (hint?.let { " · $it" } ?: "")
+                    problem != null && problem != "Blocked" -> problem
+                    else -> "blocked"
+                }
+                Text("Size ${fw}×$fd tiles · $status", color = if (sc.ghostValid) HC.GreenLight else HC.Red, fontSize = 10.sp, modifier = Modifier.padding(start = 8.dp, bottom = 6.dp))
             }
         }
     }

@@ -90,6 +90,7 @@ fun GameScreen(e: GameEngine) {
                     else {
                         InteriorPanel(e, Modifier.align(Alignment.TopEnd).padding(top = 58.dp, end = 8.dp))
                         com.hustlecity.game.ui.places.ShopItemCard(e, Modifier.align(Alignment.BottomStart).padding(8.dp))
+                        com.hustlecity.game.ui.hud.DisplayCard(e, Modifier.align(Alignment.BottomStart).padding(8.dp))
                     }
                 } else {
                     if (e.state.player.driving >= 0) {
@@ -334,6 +335,18 @@ private fun onTap(e: GameEngine, r: Renderers, pos: Offset) {
             if (hit >= 0 && (hit in sc.forSale || hit == sc.registerIndex || hit == sc.rackIndex)) {
                 sc.inspect = hit
                 sc.walkToItem(hit)
+                com.hustlecity.game.audio.Audio.play(com.hustlecity.game.audio.Sfx.TAP)
+            } else if (tx in 0 until sc.w && ty in 0 until sc.d) {
+                sc.inspect = -1
+                sc.walkPlayerTo(tx, ty)
+            }
+        } else if (sc.mode == com.hustlecity.game.engine.InteriorMode.BUSINESS && sc.shelf != null) {
+            // your own store: tap a display or storage shelf to see its stock (and restock it), or the floor to walk
+            val hit = r.interior.pickItem(sc, pos.x, pos.y)
+            val def = sc.items.getOrNull(hit)?.let { com.hustlecity.game.data.Catalog.item(it.itemId) }
+            val biz = sc.business!!
+            if (def != null && (def.fn == com.hustlecity.game.data.ItemFn.STORAGE || com.hustlecity.game.engine.BizCalc.displayTag(biz, def) != null)) {
+                sc.inspect = hit
                 com.hustlecity.game.audio.Audio.play(com.hustlecity.game.audio.Sfx.TAP)
             } else if (tx in 0 until sc.w && ty in 0 until sc.d) {
                 sc.inspect = -1
