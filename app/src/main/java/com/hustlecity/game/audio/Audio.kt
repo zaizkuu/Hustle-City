@@ -72,6 +72,9 @@ object Audio {
         queue += sfxCache.getOrPut(s) { renderSfx(s) }
     }
 
+    /** The samples of a sound effect (22 kHz mono, -1..1), for rendering the trailer's sound offline. */
+    fun effectSamples(s: Sfx): FloatArray = renderSfx(s).copyOf()
+
     fun nextTrack() { pendingSkip = true }
 
     fun setStation(i: Int) { pendingStation = ((i % stations.size) + stations.size) % stations.size }

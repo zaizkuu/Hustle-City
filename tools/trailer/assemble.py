@@ -32,8 +32,11 @@ YELLOW = (242, 201, 76); GREEN = (39, 174, 96); WHITE = (255, 255, 255); INK = (
 
 SILENT = f'{S}/trailer/video_silent.mp4'
 ff = subprocess.Popen(['ffmpeg', '-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{W}x{H}', '-r', str(FPS), '-i', '-',
-                       '-c:v', 'libx264', '-preset', 'medium', '-crf', '19', '-pix_fmt', 'yuv420p', SILENT], stdin=subprocess.PIPE)
+                       '-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-profile:v', 'main', '-level', '4.0', '-pix_fmt', 'yuv420p', SILENT], stdin=subprocess.PIPE)
 frames = 0
+# the soundtrack's sound effects: (seconds, effect, gain); beds of engine or footsteps: (start, end, kind); music dips
+events, beds, ducks = [], [], []
+def clock(): return frames / FPS
 def emit(img):
     global frames
     ff.stdin.write(img.convert('RGB').tobytes()); frames += 1
@@ -116,10 +119,75 @@ def load(path):
 def seq(name):
     return sorted(glob.glob(f'{SCENES}/{name}/*.jpg'))
 
+def mix_effects(music_path, out_path, sfx_dir, events, beds, ducks):
+    """Lays the game's own sounds over the music: effects at their moments, an engine hum or footsteps under the
+    gameplay, and the music dipped a little beneath them."""
+    import numpy as np, wave
+    with wave.open(music_path) as w:
+        sr = w.getframerate(); ch = w.getnchannels()
+        mus = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32).reshape(-1, ch) / 32768
+    n = len(mus)
+    gain = np.ones(n, dtype=np.float32)
+    for a, b in ducks:
+        i0, i1 = int(a * sr), min(n, int(b * sr))
+        ramp = int(.25 * sr)
+        for i in range(i0, i1): gain[i] = min(gain[i], .45)
+        for k in range(ramp):
+            if i0 - ramp + k >= 0: gain[i0 - ramp + k] = min(gain[i0 - ramp + k], 1 - .55 * k / ramp)
+            if i1 + k < n: gain[i1 + k] = min(gain[i1 + k], .45 + .55 * k / ramp)
+    out = mus * gain[:, None]
+    fx = np.zeros(n, dtype=np.float32)
+    def load(name):
+        p = f'{sfx_dir}/{name}.wav'
+        if not os.path.exists(p): return None
+        with wave.open(p) as w:
+            d = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768
+            r = w.getframerate()
+        return np.interp(np.arange(0, len(d), r / sr), np.arange(len(d)), d).astype(np.float32)
+    cache = {}
+    for t, name, g in events:
+        if name not in cache: cache[name] = load(name)
+        d = cache[name]
+        if d is None: continue
+        i = int(t * sr)
+        if i >= n: continue
+        m = min(len(d), n - i)
+        fx[i:i + m] += d[:m] * g
+    rng = np.random.default_rng(3)
+    for a, b, kind in beds:
+        i0, i1 = int(a * sr), min(n, int(b * sr))
+        L = i1 - i0
+        if L <= 0: continue
+        t = np.arange(L) / sr
+        env = np.minimum(1, np.minimum(t / .4, (L / sr - t) / .4))
+        if kind == 'engine':
+            # the game's engine hum: a low saw and square, revving up, with a little road noise
+            f = 48 + 30 * np.minimum(1, t / 2.5)
+            ph = np.cumsum(f / sr) % 1
+            raw = (ph * 2 - 1) + .5 * np.where(ph < .5, 1, -1)
+            y = np.empty(L, dtype=np.float32); acc = 0.0
+            for i in range(L): acc += (raw[i] - acc) * .03; y[i] = acc
+            noise = rng.standard_normal(L).astype(np.float32)
+            road = np.convolve(noise, np.ones(40) / 40, mode='same') * .5
+            fx[i0:i1] += (y * .6 + road * .2) * env
+        elif kind == 'steps':
+            # soft footsteps on the pavement
+            step = int(.33 * sr)
+            for k in range(0, L - step, step):
+                burst = rng.standard_normal(int(.06 * sr)).astype(np.float32)
+                burst = np.convolve(burst, np.ones(12) / 12, mode='same') * np.exp(-np.arange(len(burst)) / (.012 * sr))
+                fx[i0 + k:i0 + k + len(burst)] += burst * .7
+    out += fx[:, None]
+    out = np.tanh(out * 1.1) / np.tanh(1.1)
+    pcm = (np.clip(out, -1, 1) * 32000).astype(np.int16)
+    with wave.open(out_path, 'wb') as w:
+        w.setnchannels(ch); w.setsampwidth(2); w.setframerate(sr); w.writeframes(pcm.tobytes())
+
 # ---------------------------------------------------------------- 1. cold open (4 s)
 for i in range(int(1.6 * FPS)):
     t = i / (1.6 * FPS)
     emit(card([("One phone. One idea.", 34, (200, 205, 212))], t=min(1, t * 2.5) if t < .7 else max(0, (1 - t) * 3.3)))
+events.append((clock() + .05, 'cash', .8))
 for i in range(int(2.4 * FPS)):
     t = i / (2.4 * FPS)
     img = card([("HUSTLE", 110, WHITE), ("CITY", 110, YELLOW), ("a development timelapse", 26, (200, 205, 212))], t=min(1, t * 3))
@@ -167,7 +235,8 @@ for k, (img, hour, cap) in enumerate(shots):
     prev = fr
 
 # ---------------------------------------------------------------- 3. gameplay scenes
-def scene(name, title, sub, fade_in=True):
+def scene(name, title, sub, fade_in=True, hold=None):
+    """A rendered clip with a caption; with [hold] the caption fades out after that many seconds (gameplay keeps its HUD clear)."""
     files = seq(name)
     if not files: return None
     last = None
@@ -175,7 +244,8 @@ def scene(name, title, sub, fade_in=True):
         img = Image.open(f).convert('RGB')
         if img.size != (W, H): img = fit(img)
         a = min(1, i / 10) if i < len(files) - 15 else max(0, (len(files) - 1 - i) / 15)
-        img = lower_third(img, title, sub, alpha=a)
+        if hold is not None: a = min(a, max(0, 1 - (i / FPS - hold) / .5))
+        if a > 0: img = lower_third(img, title, sub, alpha=a)
         if fade_in and i < 6: img = fade(img, i / 6)
         emit(img); last = img
     return last
@@ -189,8 +259,21 @@ scene('03_tokyo', 'Tokyo', 'The Shibuya scramble after dark · cars keep left')
 scene('03b_tokyo_tower', 'Tokyo Tower', 'and the Yamanote line, at dusk')
 scene('04_seoul', 'Seoul', 'From Gwanghwamun over the hanok roofs of Bukchon')
 scene('05_classic_snow', 'Hustle City', 'The original grid, under snow')
+# gameplay, straight from the game with its HUD
+for i in range(int(1.4 * FPS)):
+    emit(card([("PLAY IT YOUR WAY", 84, WHITE), ("drive, walk, shop and run your business", 24, (210, 214, 220))], t=min(1, i / 8)))
+t0 = clock(); events.append((t0 + .15, 'car_door', 1.2))
+scene('08_drive_hud', 'Drive across town', 'Steering wheel, pedals and turn-by-turn GPS', fade_in=False, hold=2.2)
+beds.append((t0 + .5, clock(), 'engine')); ducks.append((t0, clock()))
+t1 = clock()
+scene('09_walk_hud', 'Walk the streets', 'Tokyo at dusk, on foot', fade_in=False, hold=2.2)
+beds.append((t1, clock(), 'steps')); ducks.append((t1, clock()))
 for i in range(int(1.4 * FPS)):
     emit(card([("BUILD AN EMPIRE", 84, YELLOW), ("rent, furnish, stock and staff your stores", 24, (210, 214, 220))], t=min(1, i / 8)))
+t2 = clock(); events.append((t2 + .1, 'door', 1.0)); events.append((t2 + .35, 'chime', .9))
+scene('10_store_hud', 'Run your store', 'Money comes in with every sale', fade_in=False, hold=2.2)
+for k in range(5): events.append((t2 + 1.1 + k * 1.05, 'cash', .9))
+ducks.append((t2, clock()))
 scene('07_store', 'Every shelf, every customer', 'Staff restock from the back room as shoppers pick')
 scene('06_skyline', 'Downtown at night', 'From one food truck to a skyline')
 
@@ -209,6 +292,7 @@ beat_frames = int(BEAT * 2 * FPS)
 for name, cap in MONTAGE:
     img = load(f'{SNAP}/{name}')
     if img is None: continue
+    events.append((clock(), 'tap', .45))
     for i in range(beat_frames):
         t = i / beat_frames
         fr = kenburns(img, t, 1.04, 1.0)
@@ -219,6 +303,7 @@ for name, cap in MONTAGE:
 # ---------------------------------------------------------------- 5. end card (5 s)
 end_bg = load(f'{SNAP}/city_tokyo_wide.png') or load(f'{SNAP}/midtown.png')
 if end_bg is not None: end_bg = end_bg.filter(ImageFilter.GaussianBlur(6))
+events.append((clock() + .1, 'cash', .8))
 for i in range(int(5 * FPS)):
     t = i / (5 * FPS)
     img = card([("HUSTLE", 104, WHITE), ("CITY", 104, YELLOW), ("Start with nothing. Build an empire.", 28, WHITE),
@@ -229,6 +314,7 @@ ff.stdin.close(); ff.wait()
 dur = frames / FPS
 # a soundtrack cut to the video's length, then both into the final file
 subprocess.run([sys.executable, f'{HERE}/music.py', f'{S}/trailer/music.wav', f'{dur:.2f}'], check=True)
-subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', SILENT, '-i', f'{S}/trailer/music.wav', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+mix_effects(f'{S}/trailer/music.wav', f'{S}/trailer/soundtrack.wav', f'{REPO}/app/build/trailer/sfx', events, beds, ducks)
+subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', SILENT, '-i', f'{S}/trailer/soundtrack.wav', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
                 '-shortest', '-movflags', '+faststart', OUT], check=True)
 print(f'{OUT}: {frames} frames, {dur:.1f} s')
