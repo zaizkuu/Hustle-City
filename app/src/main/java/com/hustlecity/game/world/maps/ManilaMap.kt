@@ -142,4 +142,26 @@ object ManilaMap : PlannedMap("manila", "Manila", "Manila Bay, the Pasig River, 
     }
 
     override fun parkSpecies(park: Park, rnd: kotlin.random.Random) = if (rnd.nextFloat() < .5f) 1 else 0
+
+    // a quarter jeepneys, tricycles on the side streets, white cabs, buses and AUV vans; mostly white and silver cars
+    override val trafficMix = intArrayOf(4, 4, 4, 4, 4, 5, 5, 5, 0, 0, 0, 0, 0, 0, 1, 2, 2, 6, 7, 7)
+    override val trafficPalette = intArrayOf(
+        c(0xFFF2F2F2), c(0xFFE8E8E4), c(0xFFB0B7BF), c(0xFF7F8C8D), c(0xFF212121), c(0xFFC0392B), c(0xFF2C3E50),
+        c(0xFF8E2442), c(0xFFCFC2A8),
+    )
+    /** Jeepneys: bright paint or bare stainless steel, with stripes. */
+    private val jeepneys = intArrayOf(
+        c(0xFFD32F2F), c(0xFFF2C230), c(0xFF1E5BC6), c(0xFFE74C3C), c(0xFFC9CED3), c(0xFFD32F2F), c(0xFFC9CED3), c(0xFF1E5BC6),
+        c(0xFFF2C230), c(0xFF27AE60), c(0xFF2E9E4F), c(0xFFF2C230), c(0xFF8E2442), c(0xFFF5F5F5), c(0xFFDADFE3), c(0xFF8E44AD),
+        c(0xFFF5F5F5), c(0xFFD32F2F),
+    )
+    /** Tricycles wear their drivers' association colors. */
+    private val tricycles = intArrayOf(
+        c(0xFF1E5BC6), c(0xFFF5F5F5), c(0xFFD32F2F), c(0xFFF2C230), c(0xFF27AE60), c(0xFFF5F5F5), c(0xFFF2C230), c(0xFF1E5BC6),
+        c(0xFF8E44AD), c(0xFFF2F2F2), c(0xFFE67E22), c(0xFF2B2B2B),
+    )
+    private val buses = intArrayOf(c(0xFFF2F2F2), c(0xFF1F4FA0), c(0xFFF2F2F2), c(0xFFC0392B), c(0xFF1F4FA0), c(0xFFF2C230))
+    override fun livery(style: Int) = when (style) { 4 -> jeepneys; 5 -> tricycles; 7 -> buses; else -> null }
+    override val taxiEvery = 3
+    override val taxiColors = intArrayOf(c(0xFFF4F4F2))
 }

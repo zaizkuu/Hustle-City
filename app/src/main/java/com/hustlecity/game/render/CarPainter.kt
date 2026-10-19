@@ -8,7 +8,8 @@ import kotlin.math.sqrt
 
 /**
  * Low-poly vehicles built from extruded side profiles: sedans with a hood and trunk, pickups with a bed, vans,
- * sports cars, taxis with a roof sign. Wheels, lights, bumpers and a contact shadow up close; plain boxes far away.
+ * sports cars, taxis with a roof sign, and the city's own rides: Manila's jeepneys and tricycles, boxy kei cars and
+ * city buses. Wheels, lights, bumpers and a contact shadow up close; plain boxes far away.
  */
 class CarPainter(private val scene: Scene3D) {
     private val proj get() = scene.proj
@@ -20,6 +21,9 @@ class CarPainter(private val scene: Scene3D) {
     // frame of the car being drawn
     private var ox = 0f; private var oy = 0f; private var fx = 0f; private var fy = 0f; private var rx = 0f; private var ry = 0f
 
+    /** Traffic keeps left: bus doors and tricycle sidecars go on the left. */
+    var leftHand = false
+
     companion object {
         val GLASS = c(0xFF26313D)
         val TIRE = c(0xFF1E2023)
@@ -28,23 +32,31 @@ class CarPainter(private val scene: Scene3D) {
         val TAXI = c(0xFFF2C230)
         val HEAD = c(0xFFFFF4D6)
         val TAIL = c(0xFFC0392B)
+        val CHROME = c(0xFFD3D8DD)
+        /** Open window holes and doorways: the dim inside of a jeepney or a sidecar. */
+        val INSIDE = c(0xFF2B2622)
+        val BUS_ROOF = c(0xFFE4E7EA)
+        /** Lit bus windows at night and the amber destination display. */
+        val LIT_WINDOW = c(0xFFFFE3A0)
+        val LED = c(0xFFFFD34D)
+        private val SKIN = intArrayOf(c(0xFFC68B59), c(0xFF8D5524), c(0xFFE0AC69))
+        private val SHIRTS = intArrayOf(c(0xFFEB5757), c(0xFF2F80ED), c(0xFFF2F2F2), c(0xFF27AE60), c(0xFF333333), c(0xFFF2C94C))
     }
 
     /**
-     * Draws a vehicle. [style] 0 sedan, 1 pickup, 2 van, 3 sports. [near] adds wheels, lights and trim.
-     * [braking] brightens the tail lights; [taxi] adds the roof sign.
+     * Draws a vehicle. [style] 0 sedan, 1 pickup, 2 van, 3 sports, 4 jeepney, 5 tricycle, 6 kei car, 7 city bus.
+     * [near] adds wheels, lights and trim. [braking] brightens the tail lights; [taxi] adds the roof sign. [accent]
+     * is a livery's second color (stripes, a two-tone roof); 0 lets the painter pick one.
      */
     fun draw(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int,
-             near: Boolean, taxi: Boolean = false, braking: Boolean = false) {
+             near: Boolean, taxi: Boolean = false, braking: Boolean = false, accent: Int = 0) {
         val night = scene.daylight < .5f
+        frame(x, y, heading)
         if (!near) {
-            farCar(x, y, heading, len, wid, hgt, color, style)
+            farCar(len, wid, hgt, color, style, accent)
             if (night) headGlow(x, y, heading, len)
             return
         }
-        ox = x; oy = y
-        fx = sin(heading); fy = -cos(heading)
-        rx = -fy; ry = fx
         val hl = len / 2; val hw = wid / 2
         // contact shadow
         quadFlat(-hl - .15f, -hw - .1f, hl + .15f, hw + .1f, .03f, scene.withAlpha(0xFF000000.toInt(), .28f))
@@ -53,6 +65,32 @@ class CarPainter(private val scene: Scene3D) {
         val camF = (scene.camLX - x) * fx + (scene.camLY - y) * fy
         val camL = (scene.camLX - x) * rx + (scene.camLY - y) * ry
         val nearSide = if (camL >= 0f) 1 else -1
+        // the smallest trim (ornaments, mirrors, lettering) only close to the camera
+        val fine = proj.camZOf(x, y, 1f) < 42f
+        when (style) {
+            4 -> jeepney(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
+            5 -> tricycle(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
+            6 -> kei(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
+            7 -> bus(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
+            else -> classic(hl, hw, len, wid, hgt, body, style, taxi, night, braking, camF, nearSide)
+        }
+        scene.material = Mat.PLAIN
+        if (night) headGlow(x, y, heading, len)
+        if (braking) {
+            val bx = x - fx * (hl + .6f); val by = y - fy * (hl + .6f)
+            scene.disc(bx, by, .04f, 1.1f, 1.1f, 10, scene.withAlpha(c(0xFFFF3B30), .22f))
+        }
+    }
+
+    private fun frame(x: Float, y: Float, heading: Float) {
+        ox = x; oy = y
+        fx = sin(heading); fy = -cos(heading)
+        rx = -fy; ry = fx
+    }
+
+    /** Sedan, pickup, van and sports car. */
+    private fun classic(hl: Float, hw: Float, len: Float, wid: Float, hgt: Float, body: Int, style: Int, taxi: Boolean, night: Boolean,
+                        braking: Boolean, camF: Float, nearSide: Int) {
         // far wheels and the end facing away first, so the body covers them
         wheels(len, wid, style, -nearSide)
         if (camF > 0f) rearParts(hl, hw, hgt, style, night, braking, body) else frontParts(hl, hw, hgt, night)
@@ -87,22 +125,333 @@ class CarPainter(private val scene: Scene3D) {
                 P(0, c0, hgt * .56f); P(1, c1, hgt * .56f); P(2, c1 - .7f, hgt); P(3, c0 + .45f, hgt)
                 prism(4, -hw * .88f, hw * .88f, GLASS, body, roofIdx = 2)
                 if (taxi) {
-                    // roof sign and a checker band
+                    // roof sign and a checker band, light on dark cabs
                     val mid = (c0 + c1) / 2 - .1f
                     slab(mid - .35f, mid + .35f, -.28f, .28f, hgt, hgt + .28f, if (night) c(0xFFFFF2B0) else c(0xFFFAFAFA))
-                    sideRect(-hl + .4f, hl - .4f, hgt * .4f, hgt * .46f, hw, c(0xFF222222))
+                    sideRect(-hl + .4f, hl - .4f, hgt * .4f, hgt * .46f, hw, if (luma(body) < 70) c(0xFFD9C27A) else c(0xFF222222))
                 }
             }
         }
         if (camF > 0f) frontParts(hl, hw, hgt, night) else rearParts(hl, hw, hgt, style, night, braking, body)
         wheels(len, wid, style, nearSide)
-        scene.material = Mat.PLAIN
-        if (night) headGlow(x, y, heading, len)
-        if (braking) {
-            val bx = x - fx * (hl + .6f); val by = y - fy * (hl + .6f)
-            scene.disc(bx, by, .04f, 1.1f, 1.1f, 10, scene.withAlpha(c(0xFFFF3B30), .22f))
+    }
+
+    // ------------------------------------------------------------------ jeepney
+
+    /**
+     * The jeepney: a long chromed body on a jeep's front end. Separate fenders flank a narrow hood with a chrome grille
+     * and horse ornaments; the passenger cab has open, glassless windows, painted stripes, a roof rack and a route
+     * signboard on top, and an open doorway with a step at the back.
+     */
+    private fun jeepney(hl: Float, hw: Float, hgt: Float, body: Int, accent: Int, night: Boolean, braking: Boolean, camF: Float, nearSide: Int, fine: Boolean) {
+        val stripe = if (accent != 0) accent else scene.mix(body, 0xFFFFFFFF.toInt(), .65f)
+        val rz = hgt * .9f
+        val c1 = hl - 1.6f // front of the passenger cab
+        val hood = hw * .6f
+        val bottom = .48f
+        val front = hl - .85f; val rear = -hl + 1.55f
+        wheelPair(front, rear, .4f, hw - .3f, hw + .02f, -nearSide)
+        // whatever faces away goes first: the back, or the front end with its hood
+        if (camF > 0f) jeepRear(hl, hw, rz, bottom, night, braking)
+        else { jeepFront(hl, hw, hood, bottom, night, fine); jeepHood(hl, hood, hw, bottom, body, front, nearSide, fine) }
+        // the passenger cab, its skirt hanging over the near rear wheel
+        wheelAt(rear, .4f, nearSide * (hw - .3f), nearSide * (hw + .02f), nearSide)
+        P(0, -hl, bottom); P(1, c1, bottom); P(2, c1, 1.32f); P(3, c1 - .22f, rz); P(4, -hl, rz)
+        prism(5, -hw, hw, body, CHROME, glassIdx = 2)
+        // stripes, chrome skirt and the open windows along both sides
+        sideRect(-hl, c1, bottom, bottom + .1f, hw, CHROME)
+        sideRect(-hl, c1, .78f, .86f, hw, scene.mix(stripe, 0xFF000000.toInt(), .2f))
+        sideRect(-hl, c1, 1.04f, 1.2f, hw, stripe)
+        sideRect(-hl, c1 - .2f, rz - .2f, rz - .03f, hw, stripe)
+        val w0 = -hl + .3f; val w1 = c1 - .28f
+        val n = if (fine) 6 else 4
+        val step = (w1 - w0) / n
+        for (k in 0 until n) sideRect(w0 + k * step + .07f, w0 + (k + 1) * step - .07f, 1.3f, rz - .26f, hw, INSIDE)
+        if (fine) {
+            // the route painted on the roof band, and side mirrors on stalks
+            sideRect(-hl + .9f, -hl + 2.6f, rz - .16f, rz - .07f, hw + .01f, c(0xFF1F1F1F))
+            slab(c1 + .05f, c1 + .14f, -hw - .22f, -hw - .02f, 1.45f, 1.7f, BUMPER)
+            slab(c1 + .05f, c1 + .14f, hw + .02f, hw + .22f, 1.45f, 1.7f, BUMPER)
+        }
+        if (camF > 0f) { jeepHood(hl, hood, hw, bottom, body, front, nearSide, fine); jeepFront(hl, hw, hood, bottom, night, fine) }
+        // roof: a visor over the windscreen, rails round the rack and the route signboard up front
+        slab(c1 - .3f, c1 + .28f, -hw, hw, rz - .07f, rz, CHROME)
+        slab(-hl + .15f, c1 - .35f, -hw + .02f, -hw + .1f, rz, rz + .12f, CHROME)
+        slab(-hl + .15f, c1 - .35f, hw - .1f, hw - .02f, rz, rz + .12f, CHROME)
+        if (fine) for (k in 0..2) { val f = -hl + .3f + k * (c1 + hl - .8f) / 2f; slab(f, f + .07f, -hw + .1f, hw - .1f, rz + .06f, rz + .1f, CHROME) }
+        val sb = c1 - .12f
+        slab(sb - .08f, sb, -hw * .62f, hw * .62f, rz, rz + .34f, c(0xFFF7F3E6))
+        if (fine) {
+            frontRect(sb + .005f, -hw * .5f, hw * .1f, rz + .2f, rz + .27f, c(0xFFC0392B))
+            frontRect(sb + .005f, -hw * .5f, hw * .4f, rz + .08f, rz + .15f, c(0xFF1F3A93))
+        }
+        if (camF <= 0f) jeepRear(hl, hw, rz, bottom, night, braking)
+    }
+
+    /**
+     * The jeep front end: a fender either side of a narrow hood, horses standing on it. The near front wheel at
+     * [axle] goes in just before its fender, which arches over it.
+     */
+    private fun jeepHood(hl: Float, hood: Float, hw: Float, bottom: Float, body: Int, axle: Float, nearSide: Int, fine: Boolean) {
+        val h0 = hl - 1.65f
+        for (pass in 0..2) {
+            if (pass == 1) {
+                P(0, h0, bottom); P(1, hl, bottom); P(2, hl, 1.1f); P(3, hl - .14f, 1.24f); P(4, h0, 1.3f)
+                prism(5, -hood, hood, body, body)
+                // a chrome strip down the middle of the hood
+                slab(h0 + .1f, hl - .2f, -.07f, .07f, 1.25f, 1.29f, CHROME)
+                if (fine) for (s in -1..1 step 2) horse(hl - .5f, s * hood * .6f, 1.27f, nearSide)
+                continue
+            }
+            // the fender on the far side first, the near one last, flaring out over the wheel
+            val side = if (pass == 0) -nearSide else nearSide
+            if (pass == 2) wheelAt(axle, .4f, side * (hw - .3f), side * (hw + .02f), side)
+            P(0, h0 + .05f, .58f); P(1, hl - .04f, .58f); P(2, hl - .04f, .82f); P(3, hl - .36f, 1.02f); P(4, h0 + .35f, 1.02f); P(5, h0 + .05f, .88f)
+            if (side > 0) prism(6, hood, hw + .05f, body, body) else prism(6, -hw - .05f, -hood, body, body)
         }
     }
+
+    private fun jeepFront(hl: Float, hw: Float, hood: Float, bottom: Float, night: Boolean, fine: Boolean) {
+        // a wide chrome bumper, the grille and round lamps either side of it
+        slab(hl - .02f, hl + .16f, -hw + .02f, hw - .02f, bottom, bottom + .16f, CHROME)
+        frontRect(hl + .01f, -hood + .08f, hood - .08f, .66f, 1.06f, CHROME)
+        if (fine) for (k in -2..2) frontRect(hl + .015f, k * .16f - .04f, k * .16f + .04f, .7f, 1.0f, c(0xFF5B6168))
+        val head = if (night) HEAD else c(0xFFE8ECEF)
+        frontRect(hl + .02f, -hood + .1f, -hood + .32f, .84f, 1.0f, head)
+        frontRect(hl + .02f, hood - .32f, hood - .1f, .84f, 1.0f, head)
+        // amber signal lamps on the fenders
+        frontRect(hl - .03f, -hw - .02f, -hw + .2f, .66f, .76f, c(0xFFF39C12))
+        frontRect(hl - .03f, hw - .2f, hw + .02f, .66f, .76f, c(0xFFF39C12))
+    }
+
+    private fun jeepRear(hl: Float, hw: Float, rz: Float, bottom: Float, night: Boolean, braking: Boolean) {
+        // the open doorway with grab bars and a step
+        frontRect(-hl - .01f, -.42f, .42f, bottom + .12f, rz - .14f, INSIDE, rear = true)
+        slab(-hl - .26f, -hl, -.55f, .55f, bottom - .06f, bottom + .04f, CHROME)
+        slab(-hl - .06f, -hl - .01f, -.5f, -.45f, bottom + .2f, rz - .2f, CHROME)
+        slab(-hl - .06f, -hl - .01f, .45f, .5f, bottom + .2f, rz - .2f, CHROME)
+        val tail = if (braking) c(0xFFFF2E2E) else if (night) c(0xFFE53935) else TAIL
+        frontRect(-hl - .01f, -hw + .08f, -hw + .3f, .9f, 1.25f, tail, rear = true)
+        frontRect(-hl - .01f, hw - .3f, hw - .08f, .9f, 1.25f, tail, rear = true)
+    }
+
+    /** A rearing chrome horse standing on the hood, side on. */
+    private fun horse(f: Float, l: Float, z: Float, nearSide: Int) {
+        val col = scene.lit(CHROME, max(.85f, scene.sideShade(rx * nearSide, ry * nearSide)))
+        fz4(l, f - .17f, z, f - .1f, z, f - .04f, z + .2f, f - .15f, z + .2f, col)                // hind legs
+        fz4(l, f - .2f, z + .17f, f + .1f, z + .2f, f + .1f, z + .31f, f - .19f, z + .29f, col)   // body
+        fz4(l, f + .03f, z + .26f, f + .12f, z + .24f, f + .24f, z + .42f, f + .15f, z + .46f, col) // neck and head
+        fz4(l, f + .06f, z + .21f, f + .22f, z + .27f, f + .2f, z + .32f, f + .05f, z + .28f, col)  // raised forelegs
+    }
+
+    // ------------------------------------------------------------------ tricycle
+
+    /**
+     * The Philippine tricycle: a small motorbike with a covered sidecar bolted on its curb side. The sidecar's roof
+     * reaches over the rider, leaving the bike's nose and tail in the open, with the drivers' association signboard
+     * on top.
+     */
+    private fun tricycle(hl: Float, hw: Float, hgt: Float, body: Int, accent: Int, night: Boolean, braking: Boolean, camF: Float, nearSide: Int, fine: Boolean) {
+        val sd = if (leftHand) -1 else 1
+        val trim = if (accent != 0) accent else scene.mix(body, 0xFFFFFFFF.toInt(), .7f)
+        val rz = hgt * .9f
+        val carL = sd * (hw - .46f)  // sidecar centre
+        val bikeL = -sd * (hw - .27f)
+        // the part further from the camera goes first
+        val bikeFirst = nearSide == sd
+        for (pass in 0..1) {
+            if ((pass == 0) == bikeFirst) bike(bikeL, hl, body, trim, night, braking, camF, nearSide, fine)
+            else sidecar(carL, hl, rz, body, trim, night, nearSide, sd, fine)
+        }
+        // the roof over the sidecar, reaching across over the rider's head
+        val c0 = carL - .46f; val c1 = carL + .46f
+        slab(-hl + .1f, .5f, c0, c1, rz, rz + .08f, body)
+        sideRectAt(-hl + .1f, .5f, rz + .005f, rz + .075f, c0, c1, trim)
+        val b0 = if (sd > 0) bikeL - .22f else c1 - .02f
+        val b1 = if (sd > 0) c0 + .02f else bikeL + .22f
+        slab(-.72f, .2f, b0, b1, rz - .01f, rz + .07f, body)
+        sideRectAt(-.72f, .2f, rz - .005f, rz + .065f, b0, b1, trim, only = -sd)
+        if (fine) {
+            // the association's signboard
+            val l0 = carL - .34f; val l1 = carL + .34f
+            slab(.4f, .47f, l0, l1, rz + .08f, rz + .28f, c(0xFFF7F3E6))
+            frontRect(.475f, l0 + .06f, l1 - .06f, rz + .14f, rz + .21f, trim)
+        }
+    }
+
+    private fun sidecar(l: Float, hl: Float, rz: Float, body: Int, trim: Int, night: Boolean, nearSide: Int, sd: Int, fine: Boolean) {
+        shift(l)
+        val hw = .44f
+        // its wheel on the outer side
+        if (nearSide != sd) wheelAt(-.35f, .27f, sd * hw - .04f, sd * hw + .1f, sd)
+        // the tub with a rounded nose, then the cab with a windscreen
+        P(0, -hl + .1f, .24f); P(1, .52f, .24f); P(2, .76f, .46f); P(3, .7f, .8f); P(4, -hl + .1f, .82f)
+        prism(5, -hw, hw, body, body)
+        P(0, -hl + .1f, .8f); P(1, .6f, .8f); P(2, .38f, rz); P(3, -hl + .1f, rz)
+        prism(4, -hw, hw, body, body, glassIdx = 1)
+        // chrome and a painted band, a doorway on the curb side and a small window toward the bike
+        sideRect(-hl + .1f, .55f, .3f, .38f, hw, CHROME)
+        sideRect(-hl + .1f, .58f, .66f, .76f, hw, trim)
+        sideRectAt(-.75f, .1f, .52f, rz - .1f, -hw - .01f, hw + .01f, INSIDE, only = sd)
+        sideRectAt(-.85f, .15f, .95f, rz - .12f, -hw, hw, INSIDE, only = -sd)
+        val tail = if (night) c(0xFFE53935) else TAIL
+        frontRect(-hl + .09f, -hw + .06f, -hw + .2f, .5f, .68f, tail, rear = true)
+        frontRect(-hl + .09f, hw - .2f, hw - .06f, .5f, .68f, tail, rear = true)
+        if (nearSide == sd) wheelAt(-.35f, .27f, sd * hw - .04f, sd * hw + .1f, sd)
+        shift(-l)
+    }
+
+    private fun bike(l: Float, hl: Float, body: Int, trim: Int, night: Boolean, braking: Boolean, camF: Float, nearSide: Int, fine: Boolean) {
+        shift(l)
+        val frame = c(0xFF2B2E33)
+        val wf = hl - .42f; val wr = -hl + .6f
+        // wheels and the engine low down, then the rider on the seat
+        if (camF > 0f) wheelAt(wr, .29f, -.05f, .05f, nearSide) else wheelAt(wf, .29f, -.05f, .05f, nearSide)
+        slab(wr - .1f, wf - .35f, -.12f, .12f, .28f, .55f, frame)
+        // rear fender, fuel tank and seat
+        slab(wr - .16f, wr + .22f, -.13f, .13f, .58f, .64f, body)
+        slab(-.02f, .38f, -.15f, .15f, .58f, .82f, body)
+        slab(-.6f, .0f, -.14f, .14f, .64f, .74f, c(0xFF1E1E1E))
+        if (fine) slab(-.62f, -.15f, .13f, .21f, .3f, .4f, CHROME) // exhaust
+        rider(body xor trim, fine)
+        // the raked fork, handlebars and headlamp
+        P(0, wf - .04f, .29f); P(1, wf + .04f, .29f); P(2, wf - .2f, 1.02f); P(3, wf - .28f, 1.02f)
+        prism(4, -.035f, .035f, frame, frame)
+        slab(wf - .32f, wf - .26f, -.36f, .36f, .98f, 1.03f, frame)
+        slab(wf - .22f, wf - .1f, -.09f, .09f, .78f, .94f, trim)
+        frontRect(wf - .095f, -.07f, .07f, .81f, .92f, if (night) HEAD else c(0xFFE8ECEF))
+        val tail = if (braking) c(0xFFFF2E2E) else if (night) c(0xFFE53935) else TAIL
+        frontRect(wr - .17f, -.07f, .07f, .58f, .64f, tail, rear = true)
+        if (camF > 0f) wheelAt(wf, .29f, -.05f, .05f, nearSide) else wheelAt(wr, .29f, -.05f, .05f, nearSide)
+        shift(-l)
+    }
+
+    /** The driver astride the bike: knees forward, hands on the bars, a helmet up close. */
+    private fun rider(seed: Int, fine: Boolean) {
+        val h = (seed ushr 3) and 0xffff
+        val shirt = SHIRTS[h % SHIRTS.size]
+        val skin = SKIN[h % SKIN.size]
+        val pants = c(0xFF34383F)
+        slab(-.3f, .2f, -.21f, -.11f, .64f, .78f, pants)
+        slab(-.3f, .2f, .11f, .21f, .64f, .78f, pants)
+        slab(.12f, .22f, -.21f, -.11f, .32f, .7f, pants)
+        slab(.12f, .22f, .11f, .21f, .32f, .7f, pants)
+        slab(-.34f, -.08f, -.17f, .17f, .74f, 1.2f, shirt)
+        // arms reaching for the handlebars
+        P(0, -.16f, 1.08f); P(1, -.1f, 1.15f); P(2, .54f, 1.04f); P(3, .5f, .98f)
+        prism(4, -.24f, -.17f, shirt, shirt)
+        prism(4, .17f, .24f, shirt, shirt)
+        scene.blob(ox - fx * .2f, oy - fy * .2f, 1.32f, .12f, scene.lit(skin, 1f), if (fine) 10 else 7)
+        if (fine) scene.blob(ox - fx * .22f, oy - fy * .22f, 1.37f, .12f, scene.lit(c(0xFF2A2A2A), 1f), 8, 0f, -.3f, .7f)
+    }
+
+    // ------------------------------------------------------------------ kei car
+
+    /**
+     * Kei car or boxy minivan: a stubby hood, a tall glasshouse with near-vertical sides and a flat roof (two-tone with
+     * an [accent]), tall tail lamps up the rear corners and small wheels pushed to the ends.
+     */
+    private fun kei(hl: Float, hw: Float, hgt: Float, body: Int, accent: Int, night: Boolean, braking: Boolean, camF: Float, nearSide: Int, fine: Boolean) {
+        val roof = if (accent != 0) accent else body
+        val belt = hgt * .5f
+        val front = hl - .52f; val rear = -hl + .5f
+        wheelPair(front, rear, .29f, hw - .2f, hw + .02f, -nearSide)
+        if (camF > 0f) keiRear(hl, hw, belt, night, braking, body) else frontParts(hl, hw, hgt, night, .54f)
+        P(0, -hl, .26f); P(1, hl, .26f); P(2, hl, .6f); P(3, hl - .34f, belt); P(4, -hl, belt)
+        prism(5, -hw, hw, body, body)
+        val gw = hw * .95f
+        P(0, -hl + .03f, belt); P(1, hl - .36f, belt); P(2, hl - .95f, hgt); P(3, -hl + .1f, hgt)
+        prism(4, -gw, gw, GLASS, roof, roofIdx = 2)
+        // thick pillars make it read as a box, a roof edge in the roof color
+        sideRect(-.12f, .04f, belt, hgt - .09f, gw, body)
+        sideRect(-hl + .1f, -hl + .42f, belt, hgt - .09f, gw, body)
+        sideRect(-hl + .1f, hl - .95f, hgt - .09f, hgt, gw, roof)
+        sideRect(-hl + .1f, hl - .1f, .3f, .38f, hw, scene.mix(body, 0xFF000000.toInt(), .3f))
+        if (fine) {
+            slab(hl - .5f, hl - .4f, -hw - .14f, -hw + .02f, belt + .02f, belt + .18f, body)
+            slab(hl - .5f, hl - .4f, hw - .02f, hw + .14f, belt + .02f, belt + .18f, body)
+        }
+        if (camF > 0f) frontParts(hl, hw, hgt, night, .54f) else keiRear(hl, hw, belt, night, braking, body)
+        wheelPair(front, rear, .29f, hw - .2f, hw + .02f, nearSide)
+    }
+
+    private fun keiRear(hl: Float, hw: Float, belt: Float, night: Boolean, braking: Boolean, body: Int) {
+        slab(-hl - .08f, -hl + .02f, -hw + .05f, hw - .05f, .26f, .46f, BUMPER)
+        val tail = if (braking) c(0xFFFF2E2E) else if (night) c(0xFFE53935) else TAIL
+        // tall lamps up the corners
+        frontRect(-hl - .01f, -hw + .06f, -hw + .24f, .5f, belt + .32f, tail, rear = true)
+        frontRect(-hl - .01f, hw - .24f, hw - .06f, .5f, belt + .32f, tail, rear = true)
+        frontRect(-hl - .01f, -.22f, .22f, .5f, .62f, c(0xFFF0F0E8), rear = true)
+    }
+
+    // ------------------------------------------------------------------ city bus
+
+    /**
+     * Single-decker city bus: a long box with a band of big windows (lit at night), doors on the curb side, a wide
+     * windscreen under an amber destination display, an air-conditioning pod on the white roof, and the city's livery:
+     * [body] with an [accent] stripe.
+     */
+    private fun bus(hl: Float, hw: Float, hgt: Float, body: Int, accent: Int, night: Boolean, braking: Boolean, camF: Float, nearSide: Int, fine: Boolean) {
+        val stripe = if (accent != 0) accent else scene.mix(body, 0xFF000000.toInt(), .35f)
+        val front = hl - 2.5f; val rear = -hl + 3f
+        val curb = if (leftHand) -1 else 1
+        wheelPair(front, rear, .5f, hw - .34f, hw + .01f, -nearSide)
+        if (camF > 0f) busRear(hl, hw, hgt, night, braking, fine) else busFront(hl, hw, hgt, night, fine)
+        P(0, -hl, .32f); P(1, hl, .32f); P(2, hl, hgt - .16f); P(3, hl - .16f, hgt); P(4, -hl + .1f, hgt); P(5, -hl, hgt - .1f)
+        prism(6, -hw, hw, body, BUS_ROOF)
+        // livery: a stripe under the windows and a band above them, a dark skirt
+        sideRect(-hl, hl, .32f, .5f, hw, scene.mix(body, 0xFF000000.toInt(), .45f))
+        sideRect(-hl, hl, .9f, 1.08f, hw, stripe)
+        sideRect(-hl, hl, 2.66f, 2.78f, hw, stripe)
+        // the window band, broken by pillars
+        val win = if (night) LIT_WINDOW else GLASS
+        val w0 = -hl + .45f; val w1 = hl - 1.45f
+        val n = if (fine) ((w1 - w0) / 1.35f).toInt() else 3
+        val step = (w1 - w0) / n
+        for (k in 0 until n) sideRect(w0 + k * step + .07f, w0 + (k + 1) * step - .07f, 1.2f, 2.58f, hw, win)
+        // driver's window on one side, the front door opposite, the middle door behind it
+        sideRectAt(hl - 1.35f, hl - .25f, 1.15f, 2.6f, -hw, hw, win, only = -curb)
+        sideRectAt(hl - 1.4f, hl - .3f, .4f, 2.62f, -hw, hw, c(0xFF1B2128), only = curb)
+        sideRectAt(hl - 1.33f, hl - .37f, .5f, 2.55f, -hw - .01f, hw + .01f, GLASS, only = curb)
+        sideRectAt(-.65f, .65f, .4f, 2.62f, -hw, hw, c(0xFF1B2128), only = curb)
+        sideRectAt(-.58f, .58f, .5f, 2.55f, -hw - .01f, hw + .01f, GLASS, only = curb)
+        if (fine) {
+            // a destination display on the side and mirrors on stalks
+            sideRectAt(hl - 2.6f, hl - 1.6f, 2.3f, 2.52f, -hw - .01f, hw + .01f, c(0xFF15171A), only = curb)
+            slab(hl + .02f, hl + .22f, -hw - .2f, -hw - .04f, 1.9f, 2.4f, BUMPER)
+            slab(hl + .02f, hl + .22f, hw + .04f, hw + .2f, 1.9f, 2.4f, BUMPER)
+        }
+        // an air-conditioning pod and an escape hatch on the roof
+        slab(-1.6f, 1.3f, -hw * .62f, hw * .62f, hgt, hgt + .24f, c(0xFFD4D8DC))
+        if (fine) slab(-hl + 1.5f, -hl + 2.3f, -.4f, .4f, hgt, hgt + .06f, c(0xFFB9BEC3))
+        if (camF > 0f) busFront(hl, hw, hgt, night, fine) else busRear(hl, hw, hgt, night, braking, fine)
+        wheelPair(front, rear, .5f, hw - .34f, hw + .01f, nearSide)
+    }
+
+    private fun busFront(hl: Float, hw: Float, hgt: Float, night: Boolean, fine: Boolean) {
+        slab(hl - .02f, hl + .1f, -hw + .03f, hw - .03f, .32f, .58f, BUMPER)
+        frontRect(hl + .01f, -hw + .1f, hw - .1f, 1.0f, 2.6f, GLASS)
+        // the destination display: amber letters on black
+        frontRect(hl + .01f, -hw + .15f, hw - .15f, 2.66f, hgt - .2f, c(0xFF15171A))
+        frontRect(hl + .015f, -hw + .4f, hw - .7f, 2.74f, hgt - .28f, LED)
+        if (fine) frontRect(hl + .015f, hw - .55f, hw - .3f, 2.74f, hgt - .28f, LED)
+        val head = if (night) HEAD else c(0xFFE8ECEF)
+        frontRect(hl + .11f, -hw + .15f, -hw + .55f, .62f, .78f, head)
+        frontRect(hl + .11f, hw - .55f, hw - .15f, .62f, .78f, head)
+    }
+
+    private fun busRear(hl: Float, hw: Float, hgt: Float, night: Boolean, braking: Boolean, fine: Boolean) {
+        slab(-hl - .1f, -hl + .02f, -hw + .03f, hw - .03f, .32f, .55f, BUMPER)
+        frontRect(-hl - .01f, -hw + .35f, hw - .35f, 1.75f, 2.55f, GLASS, rear = true)
+        // the engine grille, the route number and tall tail lamps
+        frontRect(-hl - .01f, -.75f, .75f, .62f, 1.2f, c(0xFF2A2E33), rear = true)
+        if (fine) frontRect(-hl - .015f, -.35f, .35f, 2.62f, 2.85f, LED, rear = true)
+        val tail = if (braking) c(0xFFFF2E2E) else if (night) c(0xFFE53935) else TAIL
+        frontRect(-hl - .01f, -hw + .08f, -hw + .3f, .62f, 1.5f, tail, rear = true)
+        frontRect(-hl - .01f, hw - .3f, hw - .08f, .62f, 1.5f, tail, rear = true)
+    }
+
+    // ------------------------------------------------------------------ shared parts
 
     private fun bed(hl: Float, hw: Float, hgt: Float, cab0: Float, body: Int) {
         val b0 = -hl + .05f; val b1 = cab0 - .05f
@@ -112,9 +461,9 @@ class CarPainter(private val scene: Scene3D) {
         slab(b0, b0 + .1f, -hw, hw, hgt * .56f, hgt * .78f, body)
     }
 
-    private fun frontParts(hl: Float, hw: Float, hgt: Float, night: Boolean) {
+    private fun frontParts(hl: Float, hw: Float, hgt: Float, night: Boolean, lampZ: Float = hgt * .38f) {
         slab(hl - .02f, hl + .1f, -hw + .05f, hw - .05f, .25f, .48f, BUMPER)
-        val z = hgt * .38f
+        val z = lampZ
         val head = if (night) HEAD else c(0xFFE8ECEF)
         frontRect(hl + .11f, -hw + .15f, -hw + .55f, z - .1f, z + .06f, head)
         frontRect(hl + .11f, hw - .55f, hw - .15f, z - .1f, z + .06f, head)
@@ -136,20 +485,43 @@ class CarPainter(private val scene: Scene3D) {
         scene.disc(x + hx * (len * .5f + 3f), y + hy * (len * .5f + 3f), .05f, 2.4f, 2.4f, 10, scene.withAlpha(c(0xFFFFEBA8), .2f * (1f - scene.daylight)))
     }
 
-    /** The old two-box car, for traffic far away. */
-    private fun farCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int) {
+    /** Simple boxes for traffic far away, in the car's frame. */
+    private fun farCar(len: Float, wid: Float, hgt: Float, color: Int, style: Int, accent: Int) {
+        val hl = len / 2; val hw = wid / 2
         when (style) {
             1 -> {
-                scene.orientedBox(x, y, heading, len, wid, .32f, hgt * .55f, color, color)
-                scene.orientedBox(x, y, heading, len * .36f, wid * .9f, hgt * .55f, hgt, color, GLASS, GLASS, len * .14f)
+                slab(-hl, hl, -hw, hw, .32f, hgt * .55f, color)
+                slab(-len * .04f, len * .32f, -hw * .9f, hw * .9f, hgt * .55f, hgt, GLASS, color)
             }
-            2 -> scene.orientedBox(x, y, heading, len, wid, .3f, hgt, color, color, GLASS)
+            2 -> slab(-hl, hl, -hw, hw, .3f, hgt, color)
+            4 -> {
+                slab(hl - 1.65f, hl, -hw * .75f, hw * .75f, .5f, 1.28f, color)
+                slab(-hl, hl - 1.6f, -hw, hw, .48f, hgt * .9f, color, CHROME)
+            }
+            5 -> {
+                val sd = if (leftHand) -1 else 1
+                val l = sd * (hw - .46f)
+                slab(-hl + .1f, .7f, l - .44f, l + .44f, .24f, hgt * .9f, color)
+                val b = -sd * (hw - .27f)
+                slab(-hl + .3f, hl, b - .12f, b + .12f, .2f, 1.1f, c(0xFF2B2E33))
+            }
+            6 -> {
+                slab(-hl, hl, -hw, hw, .26f, hgt * .5f, color)
+                slab(-hl + .05f, hl - .5f, -hw * .95f, hw * .95f, hgt * .5f, hgt, GLASS, if (accent != 0) accent else color)
+            }
+            7 -> {
+                slab(-hl, hl, -hw, hw, .32f, 1.15f, color)
+                slab(-hl, hl, -hw, hw, 1.15f, 2.6f, GLASS, GLASS)
+                slab(-hl, hl, -hw, hw, 2.6f, hgt, color, BUS_ROOF)
+            }
             else -> {
-                scene.orientedBox(x, y, heading, len, wid, .25f, hgt * .55f, color, color)
-                scene.orientedBox(x, y, heading, len * .48f, wid * .84f, hgt * .55f, hgt, color, GLASS, GLASS, -len * .05f)
+                slab(-hl, hl, -hw, hw, .25f, hgt * .55f, color)
+                slab(-len * .29f, len * .19f, -hw * .84f, hw * .84f, hgt * .55f, hgt, GLASS, color)
             }
         }
     }
+
+    private fun luma(color: Int) = (((color shr 16) and 255) * 3 + ((color shr 8) and 255) * 6 + (color and 255)) / 10
 
     /** Sets point [i] of the profile (forward, height). */
     private fun P(i: Int, f: Float, z: Float) { pf[i] = f; pzz[i] = z }
@@ -157,6 +529,9 @@ class CarPainter(private val scene: Scene3D) {
     private fun wpt(f: Float, l: Float, z: Float, i: Int) {
         wx[i] = ox + fx * f + rx * l; wy[i] = oy + fy * f + ry * l; wz[i] = z
     }
+
+    /** Moves the frame [l] meters to the right, so off-centre parts (a sidecar) can be built centred. */
+    private fun shift(l: Float) { ox += rx * l; oy += ry * l }
 
     private fun shadeFor(nx: Float, ny: Float, nz: Float): Float {
         if (nz >= .7f) return 1f
@@ -202,17 +577,21 @@ class CarPainter(private val scene: Scene3D) {
         }
     }
 
-    /** An axis-aligned box in the car's frame (bumpers, bed walls, roof signs). */
-    private fun slab(f0: Float, f1: Float, l0: Float, l1: Float, z0: Float, z1: Float, color: Int) {
+    /** An axis-aligned box in the car's frame (bumpers, bed walls, roof signs); [top] colors its upper face. */
+    private fun slab(f0: Float, f1: Float, l0: Float, l1: Float, z0: Float, z1: Float, color: Int, top: Int = color) {
         P(0, f0, z0); P(1, f1, z0); P(2, f1, z1); P(3, f0, z1)
-        prism(4, l0, l1, color, color)
+        prism(4, l0, l1, color, top, roofIdx = 2)
     }
 
     /** A flat rectangle on both sides of the body (windows, stripes). */
-    private fun sideRect(f0: Float, f1: Float, z0: Float, z1: Float, hw: Float, color: Int) {
+    private fun sideRect(f0: Float, f1: Float, z0: Float, z1: Float, hw: Float, color: Int) = sideRectAt(f0, f1, z0, z1, -hw, hw, color)
+
+    /** A flat rectangle on the left face at [l0] and the right face at [l1]; [only] -1 or 1 keeps just that side. */
+    private fun sideRectAt(f0: Float, f1: Float, z0: Float, z1: Float, l0: Float, l1: Float, color: Int, only: Int = 0) {
         for (si in 0..1) {
             val sgn = if (si == 0) -1 else 1
-            val l = (hw + .02f) * sgn
+            if (only != 0 && only != sgn) continue
+            val l = (if (si == 0) l0 else l1) + .02f * sgn
             val px = ox + rx * l; val py = oy + ry * l
             if ((scene.camLX - px) * rx * sgn + (scene.camLY - py) * ry * sgn <= 0f) continue
             wpt(f0, l, z0, 0); wpt(f1, l, z0, 1); wpt(f1, l, z1, 2); wpt(f0, l, z1, 3)
@@ -229,6 +608,12 @@ class CarPainter(private val scene: Scene3D) {
         scene.poly(4, wx, wy, wz, scene.lit(color, max(.85f, scene.sideShade(fx * sgn, fy * sgn))))
     }
 
+    /** A flat cut-out standing upright along the car at lateral offset [l] (ornaments). */
+    private fun fz4(l: Float, f0: Float, z0: Float, f1: Float, z1: Float, f2: Float, z2: Float, f3: Float, z3: Float, color: Int) {
+        wpt(f0, l, z0, 0); wpt(f1, l, z1, 1); wpt(f2, l, z2, 2); wpt(f3, l, z3, 3)
+        scene.poly(4, wx, wy, wz, color)
+    }
+
     private fun quadFlat(f0: Float, l0: Float, f1: Float, l1: Float, z: Float, color: Int) {
         wpt(f0, l0, z, 0); wpt(f1, l0, z, 1); wpt(f1, l1, z, 2); wpt(f0, l1, z, 3)
         scene.poly(4, wx, wy, wz, color)
@@ -238,23 +623,30 @@ class CarPainter(private val scene: Scene3D) {
         val r = if (style == 2) .4f else if (style == 3) .34f else .36f
         val axle = len / 2 - (if (style == 2) .8f else .75f)
         val hw = wid / 2
+        wheelPair(axle, -axle, r, hw - .22f, hw + .03f, only)
+    }
+
+    /** Both wheels on side [only] (-1 left, 1 right), the tread between [lIn] and [lOut] from the centre line. */
+    private fun wheelPair(front: Float, rear: Float, r: Float, lIn: Float, lOut: Float, only: Int) {
+        wheelAt(front, r, only * lIn, only * lOut, only)
+        wheelAt(rear, r, only * lIn, only * lOut, only)
+    }
+
+    /** One wheel at [af] spanning lateral [la]..[lb], with a hub cap on its [outer] (-1/1) face. */
+    private fun wheelAt(af: Float, r: Float, la: Float, lb: Float, outer: Int) {
         for (k in 0 until 8) {
             val a = k * 6.2832f / 8 + .3927f
             wheelF[k] = cos(a) * r; wheelZ[k] = sin(a) * r
         }
-        val sgn = only
-        for (ai in 0..1) {
-            val af = if (ai == 0) axle else -axle
-            for (k in 0 until 8) { pf[k] = af + wheelF[k]; pzz[k] = r + wheelZ[k] }
-            val lIn = (hw - .22f) * sgn; val lOut = (hw + .03f) * sgn
-            prism(8, if (sgn < 0) lOut else lIn, if (sgn < 0) lIn else lOut, TIRE, TIRE)
-            // hub cap on the outer side
-            val l = (hw + .04f) * sgn
-            val px = ox + rx * l; val py = oy + ry * l
-            if ((scene.camLX - px) * rx * sgn + (scene.camLY - py) * ry * sgn > 0f) {
-                for (k in 0 until 8) wpt(af + wheelF[k] * .55f, l, r + wheelZ[k] * .55f, k)
-                scene.poly(8, wx, wy, wz, scene.lit(RIM, scene.sideShade(rx * sgn, ry * sgn)))
-            }
+        for (k in 0 until 8) { pf[k] = af + wheelF[k]; pzz[k] = r + wheelZ[k] }
+        val l0 = minOf(la, lb); val l1 = maxOf(la, lb)
+        prism(8, l0, l1, TIRE, TIRE)
+        // hub cap on the outer side
+        val l = (if (outer > 0) l1 else l0) + .01f * outer
+        val px = ox + rx * l; val py = oy + ry * l
+        if ((scene.camLX - px) * rx * outer + (scene.camLY - py) * ry * outer > 0f) {
+            for (k in 0 until 8) wpt(af + wheelF[k] * .55f, l, r + wheelZ[k] * .55f, k)
+            scene.poly(8, wx, wy, wz, scene.lit(RIM, scene.sideShade(rx * outer, ry * outer)))
         }
     }
 }

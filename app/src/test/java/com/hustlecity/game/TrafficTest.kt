@@ -37,8 +37,9 @@ class TrafficTest {
         var movingSum = 0.0; var jaywalk = 0; var pedFrames = 0; var entered = 0
         val stuck = IntArray(t.cars.size)
         var maxStuck = 0
+        val styles = HashSet<Int>()
         for (f in 0 until 30 * 180) {
-            for ((i, a) in t.cars.withIndex()) { px[i] = a.x; py[i] = a.y }
+            for ((i, a) in t.cars.withIndex()) { px[i] = a.x; py[i] = a.y; styles += a.style }
             for ((i, a) in t.peds.withIndex()) { qx[i] = a.x; qy[i] = a.y }
             t.update(dt, fx, fy, 230f, -9999f, -9999f)
             frames++
@@ -73,5 +74,7 @@ class TrafficTest {
         assertTrue("${city.mapId}: cars drive at city speeds (max $maxSpeed m/s)", maxSpeed < 14f)
         assertTrue("${city.mapId}: a car waited too long (${maxStuck / 30} s)", maxStuck < 30 * 75)
         assertTrue("${city.mapId}: pedestrians walk down the middle of the street ($jaywalk/$pedFrames)", jaywalk < pedFrames / 30)
+        // the city's own vehicles (jeepneys, kei cars, buses…) are out on its roads
+        assertTrue("${city.mapId}: traffic mix ${city.map.trafficMix.toSet()} but saw $styles", styles == city.map.trafficMix.toSet())
     }
 }
