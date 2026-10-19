@@ -363,10 +363,15 @@ def logo(layer, t):
     tag = 'BUILD YOUR EMPIRE'
     a2 = ease_out((t - 2.4) / .6) * out
     draw_text(d, (W - text_w(tag, fs, 18)) / 2, H / 2 + 222, tag, fs, (255, 255, 255, int(240 * a2)), 18)
+
+
+def footer(img, t):
+    """The platform line, set in the lower letterbox bar (drawn after the bars)."""
+    a = ease_out((t - 3.6) / .6) * (1 - ease_in_out((t - 6.0) / .8))
+    if a <= 0: return
     fm = font('Inter-Medium', 22)
     foot = 'ANDROID  ·  VERSION 1.7 BETA'
-    a3 = ease_out((t - 3.6) / .6) * out
-    draw_text(d, (W - text_w(foot, fm, 6)) / 2, H - 70, foot, fm, (205, 209, 216, int(230 * a3)), 6)
+    draw_text(ImageDraw.Draw(img), (W - text_w(foot, fm, 6)) / 2, H - 66, foot, fm, (205, 209, 216, int(230 * a)), 6)
 
 
 # ---------------------------------------------------------------- the phone
@@ -520,6 +525,12 @@ def frame_at(n):
     a += g[..., None] * .016
     bar = int(round(letterbox(t)))
     if bar: a[:bar] = 0; a[H - bar:] = 0
+    if t >= 53.0:
+        im = to_img(a).convert('RGBA')
+        fl = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+        footer(fl, t - 53.0)
+        im.alpha_composite(fl)
+        a = np.asarray(im.convert('RGB'), np.float32) / 255
     if t < .6: a *= ease_in_out(t / .6)
     if t >= 59.0: a *= 1 - ease_in_out((t - 59.0) / .9)
     return to_img(a)
