@@ -143,7 +143,7 @@ fl = int(.42 * FPS)
 for k, img in enumerate(flip):
     for i in range(fl):
         fr = kenburns(img, (k * fl + i) / (len(flip) * fl), 1.0, 1.12)
-        fr = lower_third(fr, 'Same block, twenty hours apart', alpha=1.0, tag=f'BUILD {k + 1} OF {len(flip)}')
+        fr = lower_third(fr, 'Same block, thirty hours apart', alpha=1.0, tag=f'BUILD {k + 1} OF {len(flip)}')
         emit(fr)
 shots = []
 for c, hour, cap, names in MILESTONES:
@@ -153,7 +153,7 @@ for c, hour, cap, names in MILESTONES:
         if img is not None: break
     if img is not None: shots.append((img, hour, cap))
 now = load(f'{REPO}/app/build/glframes/city_tokyo_21/gpu.png') or load(f'{SNAP}/ui_newgame.png')
-if now is not None: shots.append((now, 'HOUR 20', 'Five cities, each with its own streets and buildings'))
+if now is not None: shots.append((now, 'HOUR 30', 'Five cities, each with its own streets, buildings and landmarks'))
 per = int(2.0 * FPS); xf = int(.35 * FPS)
 prev = None
 for k, (img, hour, cap) in enumerate(shots):
@@ -184,17 +184,20 @@ bg = shots[-1][0] if shots else None
 for i in range(int(1.4 * FPS)):
     emit(card([("FIVE CITIES", 92, WHITE), ("each with its own streets, buildings and traffic", 24, (210, 214, 220))], t=min(1, i / 8)))
 scene('01_nyc', 'New York', 'Manhattan at golden hour')
-scene('02_manila', 'Manila', 'Tin roofs, colonial balconies and jeepneys')
-scene('03_tokyo', 'Tokyo', 'Kabukicho in the rain · cars keep left')
-scene('04_seoul', 'Seoul', 'Hanok roofs at sunset')
+scene('02_manila', 'Manila', 'Binondo Church, the LRT overhead and jeepneys below')
+scene('03_tokyo', 'Tokyo', 'The Shibuya scramble after dark · cars keep left')
+scene('03b_tokyo_tower', 'Tokyo Tower', 'and the Yamanote line, at dusk')
+scene('04_seoul', 'Seoul', 'From Gwanghwamun over the hanok roofs of Bukchon')
 scene('05_classic_snow', 'Hustle City', 'The original grid, under snow')
 for i in range(int(1.4 * FPS)):
     emit(card([("BUILD AN EMPIRE", 84, YELLOW), ("rent, furnish, stock and staff your stores", 24, (210, 214, 220))], t=min(1, i / 8)))
-scene('07_store', 'Walk in, shop, restock', 'Every shelf, every customer')
+scene('07_store', 'Every shelf, every customer', 'Staff restock from the back room as shoppers pick')
 scene('06_skyline', 'Downtown at night', 'From one food truck to a skyline')
 
 # ---------------------------------------------------------------- 4. montage on the beat
 MONTAGE = [
+    ('feat_manila_moa_eye.png', 'Landmarks in every city'), ('vehicles_city.png', 'Jeepneys, tricycles, kei cars and buses'),
+    ('store_stocked_close.png', 'Shelves that empty and refill'), ('ui_newgame_custom.png', 'Pick your city, set your rules'),
     ('ui_bizhub_insight.png', 'BizHub insights'), ('ui_realty.png', 'Rent anywhere in the city'),
     ('ui_store_shopping.png', 'Shop for furniture'), ('ui_driving.png', 'Drive across town'),
     ('ui_maps_route.png', 'GPS routes'), ('ui_finance.png', 'Loans and finances'),

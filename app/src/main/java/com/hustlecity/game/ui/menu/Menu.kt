@@ -131,7 +131,7 @@ fun MainMenu(e: GameEngine) {
             }
             HButton("New game", Modifier.fillMaxWidth().padding(bottom = 8.dp)) { e.ui.screen = Screen.NEW_GAME }
             HButton("Settings", Modifier.fillMaxWidth(), color = HC.GlassLight) { e.ui.panel = com.hustlecity.game.engine.Panel.Settings }
-            Text("v1.6.0 beta · A business life sim for Android", color = Color.White.copy(alpha = .5f), fontSize = 11.sp, modifier = Modifier.padding(top = 18.dp))
+            Text("v1.6.0 · A business life sim for Android", color = Color.White.copy(alpha = .5f), fontSize = 11.sp, modifier = Modifier.padding(top = 18.dp))
         }
         if (e.ui.panel == com.hustlecity.game.engine.Panel.Settings) SettingsPanel(e)
         Dialogs(e)
