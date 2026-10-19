@@ -125,4 +125,14 @@ object NewYorkMap : PlannedMap("nyc", "New York", "Manhattan's tilted grid, Cent
     }
 
     override fun streetSpecies(hood: Neighborhood, rnd: kotlin.random.Random) = if (rnd.nextFloat() < .15f) 4 else 0
+
+    // yellow cabs everywhere (every other sedan), MTA buses, delivery vans; dark and silver cars
+    override val trafficMix = intArrayOf(0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 3, 7, 7)
+    override val trafficPalette = intArrayOf(
+        c(0xFF1C1C1E), c(0xFFF2F2F2), c(0xFFB0B7BF), c(0xFF6E757C), c(0xFF2C3E50), c(0xFF1F3A93), c(0xFF8E2442),
+        c(0xFF4A4F55), c(0xFFDADDE0), c(0xFF3B2F2F), c(0xFFC0392B),
+    )
+    private val mta = intArrayOf(c(0xFFF4F5F2), c(0xFF1C5DAA), c(0xFFF4F5F2), c(0xFF1C5DAA), c(0xFF2F6FC0), c(0xFFF4F5F2))
+    override fun livery(style: Int) = if (style == 7) mta else null
+    override val taxiEvery = 2
 }

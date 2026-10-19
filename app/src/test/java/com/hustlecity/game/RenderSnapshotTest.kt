@@ -144,6 +144,70 @@ class RenderSnapshotTest {
             batch.flush()
             save(bmp, if (night) "vehicles_night.png" else "vehicles.png")
         }
+        // the cities' own rides: jeepneys, tricycles, kei cars, buses and cabs in local colors; close up, at street
+        // zoom, and far away (simple boxes) in the bottom row
+        val c = { v: Long -> v.toInt() }
+        val city = listOf(
+            Ride(4, c(0xFFD32F2F), c(0xFFF2C230)), Ride(4, c(0xFFC9CED3), c(0xFF1E5BC6)), Ride(5, c(0xFF1E5BC6), c(0xFFF5F5F5)),
+            Ride(5, c(0xFFF2C230), c(0xFF1E5BC6)), Ride(6, c(0xFFBFE3D0), c(0xFFF7F7F5)), Ride(6, c(0xFFF5F5F2), 0),
+            Ride(7, c(0xFFF4F5F2), c(0xFF1C5DAA)), Ride(7, c(0xFF1F6FD1), c(0xFFF4F5F2)), Ride(0, c(0xFF1C1D20), 0, true), Ride(0, c(0xFFF0812E), 0, true),
+        )
+        for ((name, dist, night) in listOf(Triple("vehicles_city", 30f, false), Triple("vehicles_city_night", 30f, true), Triple("vehicles_city_street", 62f, false))) {
+            val proj = com.hustlecity.game.render.Projector()
+            val batch = com.hustlecity.game.render.RenderBatch()
+            val scene = com.hustlecity.game.render.Scene3D(proj, batch)
+            val painter = com.hustlecity.game.render.CarPainter(scene)
+            val rows = if (dist > 40f) 2 else 1
+            proj.tx = 0f; proj.ty = if (rows == 2) 6f else 0f; proj.dist = dist
+            proj.pitch = Math.toRadians(if (dist > 40f) 58.0 else 40.0).toFloat(); proj.yaw = .25f; proj.near = .5f
+            proj.update(w.toFloat(), h.toFloat())
+            scene.applyDaylight(if (night) .2f else 1f)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            canvas.drawColor(scene.lit(0xFF4A4D53.toInt(), 1f))
+            batch.begin(canvas)
+            // columns: jeepneys, tricycles, kei cars, buses, cabs; the back line first, its partner in front turned round
+            val colX = floatArrayOf(-19f, -11.5f, -5.5f, 4f, 14f)
+            for (row in 0 until rows) for (line in 0..1) for ((k, v) in city.withIndex()) {
+                if (k % 2 != line) continue
+                val (len, wid, hgt) = when (v.style) { 4 -> Triple(6.2f, 2.05f, 2.3f); 5 -> Triple(2.5f, 1.5f, 1.75f); 6 -> Triple(3.4f, 1.48f, 1.7f); 7 -> Triple(11f, 2.5f, 3.1f); else -> Triple(4.5f, 1.85f, 1.45f) }
+                val y = (if (line == 0) -4f else 4f) + row * 14f
+                painter.draw(colX[k / 2], y, if (line == 0) 1.3f else 4.45f, len, wid, hgt, v.color, v.style, row == 0, v.taxi, braking = k == 3, accent = v.accent)
+            }
+            batch.flush()
+            save(bmp, "$name.png")
+        }
+    }
+
+    private data class Ride(val style: Int, val color: Int, val accent: Int, val taxi: Boolean = false)
+
+    /** Every tree kind (broadleaf, park broadleaf, conifer, cherry, palm, ginkgo) through the year, up close and far. */
+    @Test
+    fun treeGallery() {
+        for ((name, month) in listOf("summer" to 6, "autumn" to 9, "november" to 10, "winter" to 0, "spring" to 3)) {
+            val proj = com.hustlecity.game.render.Projector()
+            val batch = com.hustlecity.game.render.RenderBatch()
+            val scene = com.hustlecity.game.render.Scene3D(proj, batch)
+            val painter = com.hustlecity.game.render.TreePainter(scene)
+            proj.tx = 0f; proj.ty = 3f; proj.dist = 36f
+            proj.pitch = Math.toRadians(42.0).toFloat(); proj.yaw = .35f; proj.near = .5f
+            proj.update(w.toFloat(), h.toFloat())
+            scene.applyDaylight(1f)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            canvas.drawColor(scene.lit(0xFFB4B8BD.toInt(), 1f))
+            batch.begin(canvas)
+            val shade = scene.withAlpha(0xFF000000.toInt(), .22f)
+            // the near row in front, the far versions behind; shadows first
+            for (pass in 0..1) for (row in 1 downTo 0) for (kind in 0..5) {
+                val x = -15f + kind * 6f; val y = if (row == 0) 6f else -6f
+                val i = kind * 7 + row
+                if (pass == 0) painter.shadow(x, y, 2f, 5.5f, kind, i, -.45f * .9f, -.89f * .9f, shade)
+                else painter.draw(x, y, 2f, 5.5f, kind % 3, kind, month, i, row == 0)
+            }
+            batch.flush()
+            save(bmp, "trees_$name.png")
+        }
     }
 
     @Test

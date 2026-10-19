@@ -18,6 +18,8 @@ class Agent {
     var speed = 0f
     var cruise = 10f
     var color = 0
+    /** A livery's second color (stripes, a two-tone roof); 0 when the vehicle has none. */
+    var accent = 0
     var length = 4.2f
     var width = 1.8f
     var height = 1.45f
@@ -75,20 +77,22 @@ class Traffic(private val rnd: Random = Random(7)) {
 
     private var roads: RoadGraph? = null
     private var leftHand = false
-    /** Vehicle mix: (style, weight); styles beyond the basic three are map specific (taxis, jeepneys, kei cars…). */
+    /** Vehicle mix: styles weighted by repetition; beyond the basic four they're map specific (jeepneys, kei cars, buses…). */
     var mix: IntArray = intArrayOf(0, 0, 0, 0, 0, 0, 1, 1, 2, 2)
-    var palette: IntArray = intArrayOf(
-        c(0xFFC0392B), c(0xFFE0E0E0), c(0xFF2C3E50), c(0xFF7F8C8D), c(0xFF1F3A93), c(0xFFF2F2F2), c(0xFF8E2442),
-        c(0xFF212121), c(0xFFB0B7BF), c(0xFFF2C94C), c(0xFF27AE60), c(0xFF6D4C41),
-    )
+    var palette: IntArray = DEFAULT_PALETTE
+    /** Per style: body and accent color pairs for vehicles with a livery, or null to take the palette. */
+    var liveries = arrayOfNulls<IntArray>(8)
     private val shirtColors = intArrayOf(
         c(0xFFEB5757), c(0xFF2F80ED), c(0xFF27AE60), c(0xFFF2C94C), c(0xFF9B51E0), c(0xFFF2994A), c(0xFFE0E0E0), c(0xFF333333), c(0xFF56CCF2),
     )
 
-    /** Switches to a city's roads; everyone is placed again. */
+    /** Switches to a city's roads and its own traffic; everyone is placed again. */
     fun attach(city: City) {
         roads = city.roads
         leftHand = city.leftHand
+        mix = city.map.trafficMix
+        palette = city.map.trafficPalette
+        liveries = Array(8) { city.map.livery(it) }
         walk = FloatArray(city.roads.edges.size * 4) { Float.NaN }
         for (a in cars) a.placed = false
         for (p in peds) p.placed = false
@@ -238,9 +242,15 @@ class Traffic(private val rnd: Random = Random(7)) {
         a.placed = true
         a.color = palette[rnd.nextInt(palette.size)]
         a.style = mix[rnd.nextInt(mix.size)]
-        a.length = when (a.style) { 0 -> 4.2f + rnd.nextFloat() * .6f; 1 -> 5.2f; 2 -> 5.8f; 4 -> 6.2f; 5 -> 2.6f; 6 -> 3.4f; 7 -> 11f; else -> 4.6f }
-        a.width = when (a.style) { 2 -> 2.1f; 4 -> 2.05f; 5 -> 1.4f; 6 -> 1.48f; 7 -> 2.5f; else -> 1.85f }
-        a.height = when (a.style) { 0, 3 -> 1.45f; 1 -> 1.8f; 2 -> 2.5f; 4 -> 2.3f; 5 -> 1.7f; 6 -> 1.65f; 7 -> 3.1f; else -> 1.5f }
+        val livery = liveries.getOrNull(a.style)
+        if (livery != null) {
+            val k = rnd.nextInt(livery.size / 2) * 2
+            a.color = livery[k]; a.accent = livery[k + 1]
+        } else a.accent = 0
+        // jeepney, tricycle, kei car and bus at their real sizes (CarPainter builds them to fit)
+        a.length = when (a.style) { 0 -> 4.2f + rnd.nextFloat() * .6f; 1 -> 5.2f; 2 -> 5.8f; 4 -> 6.2f; 5 -> 2.5f; 6 -> 3.4f; 7 -> 11f; else -> 4.6f }
+        a.width = when (a.style) { 2 -> 2.1f; 4 -> 2.05f; 5 -> 1.5f; 6 -> 1.48f; 7 -> 2.5f; else -> 1.85f }
+        a.height = when (a.style) { 0, 3 -> 1.45f; 1 -> 1.8f; 2 -> 2.5f; 4 -> 2.3f; 5 -> 1.75f; 6 -> 1.7f; 7 -> 3.1f; else -> 1.5f }
         val e = g.edges[a.edge.coerceAtLeast(0)]
         // city speeds: a bit under the road's limit, slower on small streets
         a.cruise = e.cls.speed * (.68f + rnd.nextFloat() * .2f) * (if (a.style == 5 || a.style == 7) .8f else 1f)
@@ -288,9 +298,10 @@ class Traffic(private val rnd: Random = Random(7)) {
         val g = roads ?: return
         if (g.edges.isEmpty()) return
         lightClock += dt
-        for (a in cars) {
+        for (i in cars.indices) {
+            val a = cars[i]
             if (initial || !a.placed || dist(a.x, a.y, fx, fy) > radius) spawnCar(g, a, fx, fy, radius, initial || !a.placed)
-            stepCar(g, a, dt, blockerX, blockerY)
+            stepCar(g, a, i, dt, blockerX, blockerY)
         }
         val pr = radius * .7f
         for (p in peds) {
@@ -333,7 +344,7 @@ class Traffic(private val rnd: Random = Random(7)) {
 
     // ------------------------------------------------------------------ cars
 
-    private fun stepCar(g: RoadGraph, a: Agent, dt: Float, bx: Float, by: Float) {
+    private fun stepCar(g: RoadGraph, a: Agent, index: Int, dt: Float, bx: Float, by: Float) {
         if (a.edge < 0) return
         val e = g.edges[a.edge]
         val toNode = g.nodes[e.other(a.from)]
@@ -367,19 +378,32 @@ class Traffic(private val rnd: Random = Random(7)) {
                     else if (!toNode.signal && junctionBusy(a, toNode.id)) stop = a.blocked < 3f
                     if (stop) target = min(target, (toEnd - 1.2f).coerceAtLeast(0f) * .9f)
                 }
+            } else if (toNode.degree <= 1 && toEnd < 14f && turningAt(a, toNode.id)) {
+                // a dead end: one car turns round at a time
+                target = min(target, (toEnd - 1.2f).coerceAtLeast(0f) * .9f)
             }
+            // a car from another approach still turning into the lane we're about to take comes out first, and
+            // nobody turns into a lane that's backed up to the junction
+            if (toEnd < 12f && mustWaitAt(g, a, e, toNode.id, sEnd)) target = min(target, (toEnd - 1.2f).coerceAtLeast(0f) * .9f)
         }
         // keep distance to whatever is ahead; if two cars hold each other up in a junction for a while, the
         // waiting one creeps through so nothing locks up
         var heldByCross = false
-        for (o in cars) {
+        for (j in cars.indices) {
+            val o = cars[j]
             if (o === a || !o.placed) continue
             val dx = o.x - a.x; val dy = o.y - a.y
             if (abs(dx) > 18f || abs(dy) > 18f) continue
-            val ahead = dx * fwdX + dy * fwdY
+            var ahead = dx * fwdX + dy * fwdY
             val side = abs(-dx * fwdY + dy * fwdX)
-            if (ahead <= 0 || ahead >= 15f || side >= 1.7f + (o.width - 1.8f) * .5f + (a.width - 1.8f) * .5f) continue
             val align = fwdX * sin(o.heading) - fwdY * cos(o.heading)
+            // two cars come out of a junction (a U-turn, a merge) on the same spot: the first in the list drives
+            // on, the other waits for it, so they don't carry on as one
+            if (abs(ahead) < 1.5f && side < 1.2f && align > .6f) {
+                if (j > index) continue
+                ahead = .01f
+            }
+            if (ahead <= 0 || ahead >= 15f || side >= 1.7f + (o.width - 1.8f) * .5f + (a.width - 1.8f) * .5f) continue
             if (align < .6f) {
                 if (a.blocked > 2.5f) continue
                 heldByCross = true
@@ -419,6 +443,39 @@ class Traffic(private val rnd: Random = Random(7)) {
     /** True when another car is crossing the junction now (unsignalled junctions are first come, first served). */
     private fun junctionBusy(a: Agent, node: Int): Boolean {
         for (o in cars) if (o !== a && o.inJunction && o.jNode == node && o.edge != a.edge) return true
+        return false
+    }
+
+    /** True when another car is in the middle of turning at [node]. */
+    private fun turningAt(a: Agent, node: Int): Boolean {
+        for (i in cars.indices) { val o = cars[i]; if (o !== a && o.inJunction && o.jNode == node) return true }
+        return false
+    }
+
+    /**
+     * True when [a] should hold at the line before turning at [node]: a car from another approach is still turning
+     * into the lane it's heading for, or that lane is backed up right to the junction (don't block the box).
+     */
+    private fun mustWaitAt(g: RoadGraph, a: Agent, e: RoadEdge, node: Int, sEnd: Float): Boolean {
+        if (a.next < 0) return false
+        val ne = g.edges[a.next]
+        val lane = a.nextLane.coerceIn(0, ne.cls.lanes - 1)
+        val room = clearAt(ne, node) + a.length * .5f + 1f
+        var mine = false
+        for (i in cars.indices) {
+            val o = cars[i]
+            if (o === a || o.edge != a.next || o.lane != lane) continue
+            if (!o.inJunction) {
+                if (o.from == node && o.s < room + o.length * .5f && o.speed < 2f) return true
+                continue
+            }
+            if (o.jNode != node) continue
+            // one that's been stuck a while is likely waiting for us
+            if (o.speed < .3f && o.blocked > 2f) continue
+            // where our own curve would start: a car that started there is just ahead of us in the queue
+            if (!mine) { at(e, a.from, sEnd, laneOffset(e, a.lane), tmp2); mine = true }
+            if (abs(o.jx0 - tmp2[0]) > 1f || abs(o.jy0 - tmp2[1]) > 1f) return true
+        }
         return false
     }
 
@@ -627,6 +684,14 @@ class Traffic(private val rnd: Random = Random(7)) {
         a.speed = speed
         a.phase += dt * speed * 3f
         return false
+    }
+
+    companion object {
+        /** The original city's car colors. */
+        val DEFAULT_PALETTE = intArrayOf(
+            c(0xFFC0392B), c(0xFFE0E0E0), c(0xFF2C3E50), c(0xFF7F8C8D), c(0xFF1F3A93), c(0xFFF2F2F2), c(0xFF8E2442),
+            c(0xFF212121), c(0xFFB0B7BF), c(0xFFF2C94C), c(0xFF27AE60), c(0xFF6D4C41),
+        )
     }
 
     /** Pushes a circle out of NPC cars. Returns true on contact. */

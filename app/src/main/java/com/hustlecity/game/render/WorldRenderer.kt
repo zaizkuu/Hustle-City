@@ -73,6 +73,7 @@ class WorldRenderer(private val e: GameEngine) {
     private val people = PersonPainter(scene)
     private val painter = BuildingPainter(this, e)
     private val cars = CarPainter(scene)
+    private val trees = TreePainter(scene)
     private var propsCache: StreetProps? = null
     private val props: StreetProps
         get() = propsCache?.takeIf { it.city === e.city } ?: StreetProps(e.city).also { propsCache = it }
@@ -417,10 +418,12 @@ class WorldRenderer(private val e: GameEngine) {
                 }
                 1 -> drawTree(dIdx[i])
                 2 -> e.traffic.cars.getOrNull(dIdx[i])?.let {
-                    // every sixth sedan is a cab
-                    val taxi = it.style == 0 && dIdx[i] % 6 == 0
-                    drawCar(it.x, it.y, it.heading, it.length, it.width, it.height, if (taxi) CarPainter.TAXI else it.color, it.style, false,
-                        taxi = taxi, braking = it.speed < it.cruise * .45f)
+                    // some of the sedans are cabs, in the city's colors
+                    val map = e.city.map
+                    val taxi = it.style == 0 && dIdx[i] % map.taxiEvery == 0
+                    val color = if (taxi) map.taxiColors[(dIdx[i] / map.taxiEvery) % map.taxiColors.size] else it.color
+                    drawCar(it.x, it.y, it.heading, it.length, it.width, it.height, color, it.style, false,
+                        taxi = taxi, braking = it.speed < it.cruise * .45f, accent = it.accent)
                 }
                 3 -> e.traffic.peds.getOrNull(dIdx[i])?.let { drawPed(it, dIdx[i]) }
                 4 -> drawPlayer()
@@ -687,9 +690,12 @@ class WorldRenderer(private val e: GameEngine) {
             city.forBuildingsIn(bbox[0] - expand, bbox[1] - expand, bbox[2] + expand, bbox[3] + expand) { b ->
                 if (b.height > 0f) shadow(b, shadowColor)
             }
-            if (proj.dist < 250) for (t in city.trees) {
-                if (t.x < bbox[0] - expand || t.x > bbox[2] + expand || t.y < bbox[1] - expand || t.y > bbox[3] + expand) continue
-                scene.disc(t.x + shadowDX * t.h * .8f, t.y + shadowDY * t.h * .8f, .03f, t.r, t.r * .85f, 8, shadowColor)
+            if (proj.dist < 250) {
+                val pr = props
+                for ((i, t) in city.trees.withIndex()) {
+                    if (t.x < bbox[0] - expand || t.x > bbox[2] + expand || t.y < bbox[1] - expand || t.y > bbox[3] + expand || pr.hiddenTree[i]) continue
+                    trees.shadow(t.x, t.y, t.r, t.h, pr.treeKind[i], i, shadowDX, shadowDY, shadowColor)
+                }
             }
         }
         scene.groundPass = false
@@ -1055,73 +1061,15 @@ class WorldRenderer(private val e: GameEngine) {
         val pr = props
         if (pr.hiddenTree[i]) return
         val t = e.city.trees[i]
-        val kind = pr.treeKind[i]
-        val near = keyFor(t.x, t.y) < 70f * 70f
-        scene.sphereDetail = if (near) 2 else 1
-        val month = e.weather.month()
-        val white = scene.lit(0xFFF2F5F8.toInt(), 1f)
-        // street trees grow out of a pit with a low iron guard
-        if (kind == 0 || kind == 3) {
-            scene.groundRect(t.x - .7f, t.y - .7f, t.x + .7f, t.y + .7f, .025f, scene.mix(scene.lit(c(0xFF4A3A2C), 1f), white, scene.snow * .8f))
-            if (near) {
-                val g = c(0xFF2A2D31)
-                scene.box(t.x - .72f, t.y - .72f, 0f, t.x + .72f, t.y - .66f, .35f, g, g)
-                scene.box(t.x - .72f, t.y + .66f, 0f, t.x + .72f, t.y + .72f, .35f, g, g)
-            }
-        }
-        if (kind == 2) {
-            // conifer: stacked cones, green all year
-            scene.material = Mat.FOLIAGE
-            scene.box(t.x - .14f, t.y - .14f, 0f, t.x + .14f, t.y + .14f, t.h * .3f, TRUNK, TRUNK)
-            val g = TREE[2]
-            scene.cone(t.x, t.y, t.r * .95f, t.h * .25f, t.h * .75f, 7, scene.mix(g, c(0xFF2E5E36), .3f), .5f)
-            scene.cone(t.x, t.y, t.r * .72f, t.h * .55f, t.h * 1.05f, 7, g, .6f)
-            scene.cone(t.x, t.y, t.r * .45f, t.h * .85f, t.h * 1.3f, 6, scene.mix(g, c(0xFF7FB069), .2f), .7f)
-            scene.material = Mat.PLAIN
-            return
-        }
-        // deciduous trees follow the seasons: blossom and fresh leaves in spring, deep green in summer,
-        // reds and golds in autumn and bare branches in winter
-        val bare = month == 11 || month == 0 || month == 1 || (month == 2 && i % 3 != 0)
-        scene.box(t.x - .15f, t.y - .15f, 0f, t.x + .15f, t.y + .15f, t.h * .55f, TRUNK, TRUNK)
-        if (near || bare) {
-            // a few branches fork out of the trunk
-            for (k in 0 until 4) {
-                val a = (k * 1.5708f + i * .7f)
-                val bx = t.x + cos(a) * t.r * .6f; val by = t.y + sin(a) * t.r * .6f
-                val z0 = t.h * .45f; val z1 = t.h * (.78f + (k % 2) * .12f)
-                scene.quad(t.x - .06f, t.y, z0, t.x + .06f, t.y, z0, bx + .03f, by, z1, bx - .03f, by, z1, scene.lit(TRUNK, .9f))
-                scene.quad(t.x, t.y - .06f, z0, t.x, t.y + .06f, z0, bx, by + .03f, z1, bx, by - .03f, z1, scene.lit(TRUNK, .8f))
-            }
-        }
-        scene.material = Mat.FOLIAGE
-        if (bare) {
-            // a haze of twigs, dusted with snow
-            scene.blob(t.x, t.y, t.h * .78f, t.r * .9f, scene.withAlpha(scene.mix(scene.lit(c(0xFF6B5444), 1f), white, scene.snow * .5f), .35f), 10)
-            scene.material = Mat.PLAIN
-            return
-        }
-        val base = when {
-            kind == 3 && (month == 3 || month == 2) -> if (i % 2 == 0) c(0xFFF4B6C8) else c(0xFFF7E1E8) // cherry blossom
-            month == 3 || month == 4 -> scene.mix(TREE[t.tone], c(0xFF9CCB5A), .35f)
-            month in 8..10 -> AUTUMN[(i + t.tone) % AUTUMN.size].let { if (month == 8) scene.mix(TREE[t.tone], it, .45f) else it }
-            else -> TREE[t.tone]
-        }
-        val z = t.h * .75f
-        scene.blob(t.x, t.y, z - t.r * .15f, t.r, scene.mix(scene.lit(base, .78f), white, scene.snow * .35f), 12)
-        scene.blob(t.x, t.y, z, t.r * .78f, scene.mix(scene.lit(base, .95f), white, scene.snow * .5f), 11, -.12f, -.2f)
-        if (near) {
-            scene.blob(t.x, t.y, z + t.r * .2f, t.r * .45f, scene.mix(scene.lit(base, 1.12f), white, scene.snow * .7f), 9, -.35f * scene.sunX, -.55f)
-            scene.blob(t.x, t.y, z, t.r * .35f, scene.mix(scene.lit(base, .88f), white, scene.snow * .4f), 8, .55f, -.05f)
-        }
-        scene.material = Mat.PLAIN
+        trees.draw(t.x, t.y, t.r, t.h, t.tone, pr.treeKind[i], e.weather.month(), i, keyFor(t.x, t.y) < 70f * 70f)
     }
 
     private fun drawCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int, owned: Boolean,
-                        taxi: Boolean = false, braking: Boolean = false) {
+                        taxi: Boolean = false, braking: Boolean = false, accent: Int = 0) {
         val lod = when (e.settings.quality) { 0 -> 45f; 1 -> 80f; else -> 120f }
         val near = !mapMode && keyFor(x, y) < lod * lod
-        cars.draw(x, y, heading, len, wid, hgt, color, style, near, taxi, braking)
+        cars.leftHand = e.city.leftHand
+        cars.draw(x, y, heading, len, wid, hgt, color, style, near, taxi, braking, accent)
     }
 
 

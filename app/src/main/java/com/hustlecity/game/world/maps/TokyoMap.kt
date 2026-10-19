@@ -147,4 +147,19 @@ object TokyoMap : PlannedMap("tokyo", "Tokyo", "The palace and its moat, Shinjuk
         rnd.nextFloat() < .55f -> 3
         else -> 0
     }
+
+    // kei cars and minivans, black and green cabs, Toei buses; pearl white, silver and black cars
+    override val trafficMix = intArrayOf(6, 6, 6, 6, 6, 6, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 1, 3, 7, 7)
+    override val trafficPalette = intArrayOf(
+        c(0xFFF5F5F2), c(0xFFF0EEE8), c(0xFFC4C9CE), c(0xFF8F969C), c(0xFF1E1F22), c(0xFF2C3E50), c(0xFF6E2A35), c(0xFFDCD3BE),
+    )
+    /** Kei cars come in pastels, often with a white or contrasting roof. */
+    private val kei = intArrayOf(
+        c(0xFFBFE3D0), c(0xFFF7F7F5), c(0xFFF1E3C0), c(0xFF6D4C41), c(0xFFB8D4EA), c(0xFFF7F7F5), c(0xFFF2C6CF), c(0xFFF7F7F5),
+        c(0xFFF7F7F5), 0, c(0xFFC8CDD2), 0, c(0xFF1E1F22), 0, c(0xFFF2D35B), c(0xFFF7F7F5), c(0xFF8FA36B), c(0xFFF7F7F5),
+    )
+    private val toei = intArrayOf(c(0xFFF4F4F0), c(0xFF2E8B57), c(0xFFF4F4F0), c(0xFF2E8B57), c(0xFFF2EAD3), c(0xFFC0392B))
+    override fun livery(style: Int) = when (style) { 6 -> kei; 7 -> toei; else -> null }
+    override val taxiEvery = 3
+    override val taxiColors = intArrayOf(c(0xFF1C1D20), c(0xFF3E8E4E), c(0xFF1C1D20), c(0xFF27324A))
 }

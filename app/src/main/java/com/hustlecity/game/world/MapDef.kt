@@ -2,6 +2,7 @@ package com.hustlecity.game.world
 
 import com.hustlecity.game.data.Catalog
 import com.hustlecity.game.data.PlaceKind
+import com.hustlecity.game.data.c
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -43,6 +44,20 @@ abstract class MapDef(val id: String, val title: String, val blurb: String) {
     abstract fun hoodAt(x: Float, y: Float): Int
 
     open fun address(number: Int, street: String, hood: String) = "$number $street"
+
+    /**
+     * Street traffic: body styles weighted by repetition (0 sedan, 1 pickup, 2 van, 3 sports car, 4 jeepney,
+     * 5 tricycle, 6 kei car or boxy minivan, 7 city bus) and the colors cars come in.
+     */
+    open val trafficMix: IntArray = intArrayOf(0, 0, 0, 0, 0, 0, 1, 1, 2, 2)
+    open val trafficPalette: IntArray = Traffic.DEFAULT_PALETTE
+
+    /** Liveries for a style that has its own (buses, jeepneys): body and accent color pairs; null takes the palette. */
+    open fun livery(style: Int): IntArray? = null
+
+    /** Every [taxiEvery]th sedan is a cab, painted in one of [taxiColors]. */
+    open val taxiEvery = 6
+    open val taxiColors: IntArray = intArrayOf(c(0xFFF2C230))
 }
 
 object Maps {
