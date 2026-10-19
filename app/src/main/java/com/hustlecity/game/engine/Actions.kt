@@ -104,6 +104,8 @@ fun GameEngine.startBusiness(buildingId: Int, typeId: String, name: String): Bus
     if (type.office) { biz.openHour = 8; biz.closeHour = if (type.id == "travel") 21 else 19 }
     if (type.facility) { biz.tempClosed = false; biz.openHour = 0; biz.closeHour = 0 }
     state.businesses += biz
+    // shops, food and services come with a staff-only back room at the back, if the unit is deep enough
+    BackRoom.resolve(biz, b.gridW, b.gridD)
     ui.bizHubSel = biz.id
     if (state.player.inBuilding == buildingId) interior = InteriorScene(this, b, InteriorMode.BUSINESS)
     message("Uncle Sal", when (type.id) {
@@ -244,6 +246,9 @@ fun GameEngine.unloadInto(buildingId: Int, fromHand: Boolean, v: OwnedVehicle?):
     var moved = 0
     var skipped = 0
     var wrongProduct: String? = null
+    val backBefore = biz?.let { BizCalc.storageBoxesUsed(it) } ?: 0
+    // you're bringing it in yourself: nobody else carries these boxes to the displays
+    if (biz != null) interior?.takeIf { it.business === biz }?.shelf?.playerStocked()
     for (list in sources) {
         val it = list.iterator()
         while (it.hasNext()) {
@@ -254,10 +259,9 @@ fun GameEngine.unloadInto(buildingId: Int, fromHand: Boolean, v: OwnedVehicle?):
                 if (biz == null) { skipped++; continue }
                 val pdef = Catalog.product(item.id) ?: continue
                 if (!BizCalc.sells(biz, item.id)) { skipped++; wrongProduct = pdef.name; continue }
-                val room = BizCalc.roomFor(biz, item.id)
-                if (room <= 0) { skipped++; continue }
-                val qty = min(room, item.qty)
-                economy.addStock(biz, item.id, qty, pdef.cost)
+                // onto the displays, and what doesn't fit into the back room's storage shelves
+                val qty = economy.stockIn(biz, item.id, item.qty, pdef.cost)
+                if (qty <= 0) { skipped++; continue }
                 item.qty -= qty
                 moved++
                 if (item.qty <= 0) it.remove() else skipped++
@@ -270,11 +274,13 @@ fun GameEngine.unloadInto(buildingId: Int, fromHand: Boolean, v: OwnedVehicle?):
             }
         }
     }
+    val toBack = (biz?.let { BizCalc.storageBoxesUsed(it) } ?: 0) - backBefore
+    val backNote = if (toBack > 0) " ($toBack box${if (toBack == 1) "" else "es"} went to the back room)" else ""
     when {
         wrongProduct != null && moved == 0 -> toast("${biz?.name} doesn't sell $wrongProduct")
         moved == 0 && skipped == 0 -> toast(if (v == null) "Nothing to unload (park your vehicle within 45 m)" else "Your vehicle is empty")
-        skipped > 0 -> toast("Unloaded $moved item(s) into ${e(b)}. $skipped didn't fit — place shelves/displays first", ToastKind.INFO)
-        else -> toast("Unloaded $moved item(s) into ${e(b)}" + (if (moved > 0 && state.businessAt(b.id) != null) ": furniture is in storage, place it with the Interior Designer" else ""), ToastKind.GOOD)
+        skipped > 0 -> toast("Unloaded $moved item(s) into ${e(b)}$backNote. $skipped didn't fit: place more displays, or storage shelves in the back room", ToastKind.INFO)
+        else -> toast("Unloaded $moved item(s) into ${e(b)}$backNote" + (if (moved > 0 && state.businessAt(b.id) != null && toBack <= 0) ": furniture is in storage, place it with the Interior Designer" else ""), ToastKind.GOOD)
     }
     bump()
     return moved
@@ -383,7 +389,7 @@ fun GameEngine.storageList(): MutableList<String>? {
 fun GameEngine.commitGhost(): Boolean {
     val sc = interior ?: return false
     val id = sc.ghostId ?: return false
-    if (!sc.ghostValid) { toast("Can't place it there", ToastKind.BAD); return false }
+    if (!sc.ghostValid) { toast(sc.ghostProblem?.takeIf { it != "Blocked" } ?: "Can't place it there", ToastKind.BAD); return false }
     if (sc.movingIndex >= 0) {
         val p = sc.items[sc.movingIndex]
         p.x = sc.ghostX; p.y = sc.ghostY; p.rot = sc.ghostRot
@@ -405,8 +411,8 @@ fun GameEngine.storeItem(index: Int) {
         val biz = sc.business!!
         val def = Catalog.item(p.itemId)
         sc.items.removeAt(index)
-        // stock that no longer fits on displays is lost from the shelves
-        if (def?.fn == ItemFn.DISPLAY) clampStock(biz)
+        // stock that no longer fits on the displays goes to the back room, or is sold off
+        if (def?.fn == ItemFn.DISPLAY || def?.fn == ItemFn.STORAGE) clampStock(biz)
     } else sc.items.removeAt(index)
     storage += p.itemId
     sc.selectedIndex = -1
@@ -433,20 +439,44 @@ fun GameEngine.sellStored(itemId: String) {
     }
 }
 
+/**
+ * After a display or storage shelf is put away or sold: stock that no longer fits on the displays goes into the back
+ * room while it has room, and whatever fits nowhere is sold off at half its cost.
+ */
 private fun GameEngine.clampStock(biz: Business) {
     var lostValue = 0.0
-    // displays are shared by every product with the same tag: trim each tag back to its capacity
-    val byTag = biz.stock.keys.groupBy { Catalog.product(it)?.tag ?: "" }
-    for ((tag, pids) in byTag) {
-        val cap = BizCalc.displayCapacity(biz, tag)
-        var total = pids.sumOf { biz.stock[it] ?: 0 }
-        for (pid in pids.sortedByDescending { biz.stock[it] ?: 0 }) {
-            if (total <= cap) break
-            val have = biz.stock[pid] ?: 0
-            val cut = minOf(have, total - cap)
+    if (BizCalc.isWarehouse(biz)) {
+        // a warehouse keeps boxes of anything on its pallet racks
+        while (BizCalc.warehouseBoxesUsed(biz) > BizCalc.warehouseBoxes(biz)) {
+            val (pid, have) = biz.stock.entries.filter { it.value > 0 }.maxByOrNull { it.value }?.toPair() ?: break
+            val cut = minOf(have, (Catalog.product(pid)?.unitsPerBox ?: 1).coerceAtLeast(1))
             lostValue += cut * (biz.unitCost[pid] ?: 0.0)
             biz.stock[pid] = have - cut
-            total -= cut
+        }
+    } else {
+        // displays are shared by every product with the same tag: trim each tag back to its capacity
+        val byTag = biz.stock.keys.groupBy { Catalog.product(it)?.tag ?: "" }
+        for ((tag, pids) in byTag) {
+            val cap = BizCalc.displayCapacity(biz, tag)
+            var total = pids.sumOf { biz.stock[it] ?: 0 }
+            for (pid in pids.sortedByDescending { biz.stock[it] ?: 0 }) {
+                if (total <= cap) break
+                val have = biz.stock[pid] ?: 0
+                val cut = minOf(have, total - cap)
+                biz.stock[pid] = have - cut
+                total -= cut
+                val boxed = minOf(cut, BizCalc.storageRoomFor(biz, pid))
+                if (boxed > 0) biz.backStock[pid] = (biz.backStock[pid] ?: 0) + boxed
+                lostValue += (cut - boxed) * (biz.unitCost[pid] ?: 0.0)
+            }
+        }
+        // and the back room keeps only what its storage shelves hold
+        while (BizCalc.storageBoxesUsed(biz) > BizCalc.storageBoxes(biz)) {
+            val (pid, have) = biz.backStock.entries.maxByOrNull { BizCalc.boxesOf(it.key, it.value) }?.toPair() ?: break
+            val per = (Catalog.product(pid)?.unitsPerBox ?: 1).coerceAtLeast(1)
+            val cut = minOf(have, if (have % per == 0) per else have % per)
+            lostValue += cut * (biz.unitCost[pid] ?: 0.0)
+            if (have > cut) biz.backStock[pid] = have - cut else biz.backStock.remove(pid)
         }
     }
     if (lostValue > 0) {

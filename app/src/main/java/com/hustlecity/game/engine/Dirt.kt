@@ -35,8 +35,10 @@ class DirtModel(private val e: GameEngine) {
 
     private fun layout(b: Business): Layout {
         val (w, d) = size(b)
-        val key = b.furniture.hashCode() * 31 + w * 7 + d
+        val key = (b.furniture.hashCode() * 31 + w * 7 + d) * 31 + b.backRoom * 7 + b.backDoor
         layouts[b.id]?.let { if (it.key == key) return it }
+        // customers stay out of the back room: only staff walk there
+        val room = BackRoom.of(b, w, d)
         val occ = BooleanArray(w * d)
         val targets = ArrayList<Int>()
         val bins = ArrayList<Int>()
@@ -59,7 +61,7 @@ class DirtModel(private val e: GameEngine) {
                 if ("dance_floor" in def.tags) for (yy in p.y until p.y + fd) for (xx in p.x until p.x + fw) targets += idx(xx, yy)
             }
         }
-        val weight = FloatArray(w * d) { if (occ[it]) 0f else .08f }
+        val weight = FloatArray(w * d) { if (occ[it]) 0f else if (room?.contains(it / w) == true) .02f else .08f }
         val doorX = w / 2
         val door = intArrayOf(idx(doorX, d - 1), idx(doorX - 1, d - 1))
         // breadth-first routes from the door: every tile on the way to a display gets foot traffic
@@ -75,6 +77,7 @@ class DirtModel(private val e: GameEngine) {
                 for ((dx, dy) in arrayOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)) {
                     val ni = idx(cx + dx, cy + dy)
                     if (ni < 0 || occ[ni] || prev[ni] != -1) continue
+                    if (room != null && (room.contains(cy + dy) || room.blocks(cx, cy, cx + dx, cy + dy))) continue
                     prev[ni] = cur; queue[tail++] = ni
                 }
             }

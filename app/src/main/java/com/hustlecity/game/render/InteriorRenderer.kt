@@ -9,6 +9,7 @@ import com.hustlecity.game.engine.carryPose
 import com.hustlecity.game.engine.InteriorScene
 import com.hustlecity.game.engine.SHIRT_COLORS
 import com.hustlecity.game.engine.SKIN_TONES
+import com.hustlecity.game.engine.ShelfStock
 import com.hustlecity.game.engine.itemDims
 import kotlin.math.abs
 import kotlin.math.max
@@ -29,6 +30,7 @@ class InteriorRenderer(private val e: GameEngine) {
     private val order = IntArray(maxDraw)
     private val people = PersonPainter(scene)
     private val parts = PartSorter(scene)
+    private val stock = StockPainter(scene, parts)
     private val cars = CarPainter(scene)
     private val px = FloatArray(10); private val py = FloatArray(10); private val pz = FloatArray(10)
 
@@ -36,6 +38,15 @@ class InteriorRenderer(private val e: GameEngine) {
         val BG = c(0xFF16181D)
         val WALL_TOP = c(0xFF1E2024)
         const val WALL_H = 3f
+        /** Height of the back room's wall: cut away like the walls nearest the camera, so you can see in. */
+        const val PARTITION_H = 1.2f
+        /** Top of the back room's door frame, where the STAFF ONLY sign hangs. */
+        const val BACK_DOOR_H = 2.25f
+        private val BACK_FLOOR = c(0xFFA3A7AD)
+        private val STAFF_RED = c(0xFFC0392B)
+        /** Sorting offsets: everything beyond the back room wall goes first, then the wall, then the near side. */
+        private const val BEYOND = 1e6f
+        private const val WALL_KEY = 5e5f
     }
 
     fun setupCamera(sc: InteriorScene, w: Int, h: Int) {
@@ -74,8 +85,12 @@ class InteriorRenderer(private val e: GameEngine) {
         // floor (checker tiles)
         val fa = sc.floorColor
         val fb = scene.lit(fa, .9f)
+        val room = sc.backRoom
+        val backA = scene.lit(BACK_FLOOR, 1f); val backB = scene.lit(BACK_FLOOR, .93f)
         for (y in 0 until sc.d) for (x in 0 until sc.w) {
-            scene.groundRect(x.toFloat(), y.toFloat(), x + 1f, y + 1f, 0f, if ((x + y) % 2 == 0) scene.lit(fa, 1f) else fb)
+            val even = (x + y) % 2 == 0
+            val col = if (room != null && room.contains(y)) (if (even) backA else backB) else if (even) scene.lit(fa, 1f) else fb
+            scene.groundRect(x.toFloat(), y.toFloat(), x + 1f, y + 1f, 0f, col)
         }
         if (!e.ui.designer) {
             // grout lines between the floor tiles
@@ -86,12 +101,23 @@ class InteriorRenderer(private val e: GameEngine) {
         // entrance mat
         scene.groundRect(sc.doorX - 1f, sc.d - .9f, sc.doorX + 1f, sc.d.toFloat(), .01f, c(0xFF3B3F46))
         scene.groundRect(sc.doorX - .9f, sc.d - .8f, sc.doorX + .9f, sc.d - .1f, .012f, c(0xFF4A505A))
+        if (room != null) {
+            // a metal threshold strip in the back room doorway
+            val dy = room.depth.toFloat()
+            scene.groundRect(room.doorX.toFloat(), dy - .09f, (room.doorX + room.doorW).toFloat(), dy + .09f, .013f, c(0xFF7D838B))
+        }
         sc.business?.let { if (!e.ui.designer) drawDirt(sc, it) }
 
         if (e.ui.designer) {
             val line = scene.withAlpha(0xFFFFFFFF.toInt(), .22f)
             for (x in 0..sc.w) scene.groundRect(x - .02f, 0f, x + .02f, sc.d.toFloat(), .015f, line)
             for (y in 0..sc.d) scene.groundRect(0f, y - .02f, sc.w.toFloat(), y + .02f, .015f, line)
+            if (room != null) {
+                // staff only: shade the back room, and mark the doorway that has to stay clear
+                scene.groundRect(0f, 0f, sc.w.toFloat(), room.depth.toFloat(), .016f, scene.withAlpha(c(0xFFF2994A), .16f))
+                val dy = room.depth.toFloat()
+                scene.groundRect(room.doorX.toFloat(), dy - 1f, (room.doorX + room.doorW).toFloat(), dy + 1f, .017f, scene.withAlpha(c(0xFF27AE60), .3f))
+            }
         }
 
         scene.groundPass = false
@@ -107,8 +133,9 @@ class InteriorRenderer(private val e: GameEngine) {
         if (backS) wallS(sc, wall, tall)
 
         scene.material = Mat.PLAIN
-        // drawables: items, people, cars
+        // drawables: items, people, cars (with a back room, whatever is beyond its wall goes first, then the wall)
         dCount = 0
+        wallY = room?.depth?.toFloat() ?: -1f
         val items = sc.items
         for ((i, p) in items.withIndex()) {
             val def = Catalog.item(p.itemId) ?: continue
@@ -126,6 +153,7 @@ class InteriorRenderer(private val e: GameEngine) {
                 add(5, 0, key(sc.ghostX + fw / 2f, sc.ghostY + fd / 2f) - .01f)
             }
         }
+        if (room != null) add(6, 0, WALL_KEY)
         for (i in 0 until dCount) order[i] = i
         // insertion sort, far first (counts are small)
         for (i in 1 until dCount) {
@@ -145,15 +173,22 @@ class InteriorRenderer(private val e: GameEngine) {
                         val (fw, fd) = itemDims(def, p.rot)
                         scene.groundRect(p.x.toFloat(), p.y.toFloat(), (p.x + fw).toFloat(), (p.y + fd).toFloat(), .02f, scene.withAlpha(c(0xFF2F80ED), .45f))
                     }
-                    drawItem(def, p.x.toFloat(), p.y.toFloat(), p.rot, 1f)
+                    val shelf = sc.shelf
+                    val lay = shelf?.layoutOf(dIdx[i])
+                    if (shelf != null && lay != null) stock.draw(def, p, dIdx[i], shelf, lay, 1f)
+                    else drawItem(def, p.x.toFloat(), p.y.toFloat(), p.rot, 1f)
                 }
-                1 -> sc.visitors.getOrNull(dIdx[i])?.let { person(it, false) }
+                1 -> sc.visitors.getOrNull(dIdx[i])?.let { person(it, false); takes(sc, it) }
                 2 -> sc.staff.getOrNull(dIdx[i])?.let { person(it, true) }
                 3 -> {
                     val p = e.state.player
                     scene.disc(sc.px, sc.py, .02f, .45f, .45f, 12, scene.withAlpha(c(0xFF27AE60), .55f))
+                    // a box fetched from the back room is held in both arms (or rides on the hand truck)
+                    val pose = e.carryPose()
+                    val carry = if (sc.playerBox && pose == 0) 1 else pose
+                    val load = p.hand.size + if (sc.playerBox) 1 else 0
                     people.draw(sc.px, sc.py, 0f, sc.playerHeading, e.realTime * 7f, sc.playerMoving, SHIRT_COLORS[p.shirt % SHIRT_COLORS.size], PersonPainter.PANTS[1],
-                        SKIN_TONES[p.skin % SKIN_TONES.size], PersonPainter.HAIR[p.skin % PersonPainter.HAIR.size], carry = e.carryPose(), load = p.hand.size)
+                        SKIN_TONES[p.skin % SKIN_TONES.size], PersonPainter.HAIR[p.skin % PersonPainter.HAIR.size], carry = carry, load = load)
                 }
                 4 -> {
                     val car = sc.showroom[dIdx[i]]
@@ -169,6 +204,7 @@ class InteriorRenderer(private val e: GameEngine) {
                         scene.withAlpha(if (valid) c(0xFF27AE60) else c(0xFFEB5757), .55f))
                     drawItem(def, sc.ghostX.toFloat(), sc.ghostY.toFloat(), sc.ghostRot, .75f)
                 }
+                6 -> sc.backRoom?.let { backWall(sc, it, wall) }
             }
         }
         scene.material = Mat.PLASTER
@@ -180,6 +216,7 @@ class InteriorRenderer(private val e: GameEngine) {
         if (gpu == null) batch.flush()
         scene.gpu = null
         if (sc.walkIn && !e.ui.designer) priceTags(canvas, sc, density)
+        room?.let { staffSign(canvas, sc, it, density) }
     }
 
     private val rayD = FloatArray(3)
@@ -266,7 +303,15 @@ class InteriorRenderer(private val e: GameEngine) {
         }
     }
 
-    private fun key(x: Float, y: Float): Float { val dx = x - proj.camX; val dy = y - proj.camY; return dx * dx + dy * dy }
+    /** The back room wall's y while drawing (-1 for none). */
+    private var wallY = -1f
+
+    /** Draw order key: distance from the camera, with everything beyond the back room wall pushed to the front of the queue. */
+    private fun key(x: Float, y: Float): Float {
+        val dx = x - proj.camX; val dy = y - proj.camY
+        val dist = dx * dx + dy * dy
+        return if (wallY > 0f && (y < wallY) != (proj.camY < wallY)) dist + BEYOND else dist
+    }
 
     private fun add(type: Int, idx: Int, key: Float) {
         if (dCount >= maxDraw) return
@@ -353,8 +398,107 @@ class InteriorRenderer(private val e: GameEngine) {
     fun drawItem(def: FurnitureDef, x: Float, y: Float, rot: Int, alpha: Float) = parts.draw(def, x, y, rot, alpha)
 
     private fun person(v: com.hustlecity.game.engine.Person, staff: Boolean) {
+        // shoppers hold what they picked (once it has reached their hands), then a paper bag after paying
+        val held = if (!staff && v.heldIn <= 0f && !v.bagged) v.held else 0
         people.draw(v.x, v.y, v.z, v.heading, v.phase, v.moving, v.shirt, PersonPainter.PANTS[v.pants % PersonPainter.PANTS.size], v.skin,
-            PersonPainter.HAIR[v.hair % PersonPainter.HAIR.size], pose = v.pose, apron = if (staff) c(0xFF2C3E50) else 0)
+            PersonPainter.HAIR[v.hair % PersonPainter.HAIR.size], pose = v.pose, apron = if (staff) c(0xFF2C3E50) else 0,
+            carry = v.carry, load = if (v.carry > 0) 1 else 0, held = held, bag = !staff && v.bagged)
+    }
+
+    private val takeFrom = FloatArray(3)
+
+    /** Items on their way from a shelf into this customer's hands: a little arc from the slot to the right hand. */
+    private fun takes(sc: InteriorScene, v: com.hustlecity.game.engine.Person) {
+        val shelf = sc.shelf ?: return
+        val list = shelf.takes
+        for (k in list.indices) {
+            val t = list[k]
+            if (t.person !== v) continue
+            val p = sc.items.getOrNull(t.item) ?: continue
+            val def = Catalog.item(p.itemId) ?: continue
+            val lay = shelf.layoutOf(t.item) ?: continue
+            stock.slotWorld(def, p, lay, t.slot, takeFrom)
+            val u = (t.t / ShelfStock.TAKE_TIME).coerceIn(0f, 1f)
+            // the right hand: a little ahead of and to the right of the body, at hip height
+            val fx = kotlin.math.sin(v.heading); val fy = -kotlin.math.cos(v.heading)
+            val hx = v.x + fx * .12f - fy * .27f; val hy = v.y + fy * .12f + fx * .27f; val hz = v.z + .86f
+            val x = takeFrom[0] + (hx - takeFrom[0]) * u
+            val y = takeFrom[1] + (hy - takeFrom[1]) * u
+            val z = takeFrom[2] + (hz - takeFrom[2]) * u + sin(u * Math.PI.toFloat()) * .18f
+            val col = Catalog.product(t.pid)?.color ?: c(0xFFC8A165)
+            scene.box(x - .05f, y - .05f, z - .06f, x + .05f, y + .05f, z + .06f, scene.mix(col, 0xFFFFFFFF.toInt(), .2f), col)
+        }
+    }
+
+    /**
+     * The back room's wall: cut down so you can see in (like the walls nearest the camera), with baseboards, a door
+     * frame around its doorway and a red STAFF ONLY sign over it. It runs along the tile edge at y = depth.
+     */
+    private fun backWall(sc: InteriorScene, room: com.hustlecity.game.engine.BackRoom, color: Int) {
+        val y = room.depth.toFloat()
+        val t = .07f
+        val h = if (sc.showWalls) PARTITION_H else .35f
+        val trim = trimOf(color)
+        val d0 = room.doorX.toFloat(); val d1 = (room.doorX + room.doorW).toFloat()
+        scene.material = Mat.PLASTER
+        if (d0 > 0f) scene.box(0f, y - t, 0f, d0, y + t, h, WALL_TOP, color)
+        if (d1 < sc.w) scene.box(d1, y - t, 0f, sc.w.toFloat(), y + t, h, WALL_TOP, color)
+        scene.material = Mat.PLAIN
+        for (side in -1..1 step 2) {
+            val a = y + side * t; val b = y + side * (t + .03f)
+            if (d0 > 0f) scene.box(0f, minOf(a, b), 0f, d0, maxOf(a, b), .14f, trim, trim)
+            if (d1 < sc.w) scene.box(d1, minOf(a, b), 0f, sc.w.toFloat(), maxOf(a, b), .14f, trim, trim)
+        }
+        // the door frame, taller than the cut-away wall so the doorway reads as one
+        val fh = if (sc.showWalls) BACK_DOOR_H else h
+        val frame = c(0xFFE9E6DF)
+        scene.box(d0 - .1f, y - t - .03f, 0f, d0, y + t + .03f, fh, frame, frame)
+        scene.box(d1, y - t - .03f, 0f, d1 + .1f, y + t + .03f, fh, frame, frame)
+        if (!sc.showWalls) return
+        scene.box(d0 - .1f, y - t - .03f, fh - .1f, d1 + .1f, y + t + .03f, fh, frame, frame)
+        // STAFF ONLY: a red sign over the doorway (its lettering is drawn on top, see staffSign)
+        val cx = (d0 + d1) / 2
+        val sw = minOf(d1 - d0 + .1f, 1.1f) / 2
+        scene.box(cx - sw, y - .025f, fh, cx + sw, y + .025f, fh + .28f, STAFF_RED, STAFF_RED)
+        scene.box(cx - sw + .04f, y + .025f, fh + .04f, cx + sw - .04f, y + .03f, fh + .24f, c(0xFFD9483B), c(0xFFD9483B))
+    }
+
+    private val signText = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        textAlign = android.graphics.Paint.Align.CENTER
+        color = 0xFFFFFFFF.toInt()
+    }
+    private val signA = FloatArray(3); private val signB = FloatArray(3)
+
+    /** The lettering on the back room's STAFF ONLY sign, and in the designer a label over the room. */
+    private fun staffSign(canvas: Canvas, sc: InteriorScene, room: com.hustlecity.game.engine.BackRoom, density: Float) {
+        val y = room.depth.toFloat()
+        if (e.ui.designer) {
+            if (proj.project(sc.w / 2f, room.depth / 2f, .05f, signA)) {
+                signText.textSize = 12f * density
+                signText.color = 0xCCFFFFFF.toInt()
+                canvas.drawText("BACK ROOM · STAFF ONLY", signA[0], signA[1], signText)
+                signText.color = 0xFFFFFFFF.toInt()
+            }
+        }
+        if (!sc.showWalls) return
+        val cx = room.doorX + room.doorW / 2f
+        val sw = minOf(room.doorW + .1f, 1.1f) / 2 - .06f
+        val side = if (proj.camY > y) .04f else -.04f
+        if (!proj.project(cx - sw, y + side, BACK_DOOR_H + .14f, signA) || !proj.project(cx + sw, y + side, BACK_DOOR_H + .14f, signB)) return
+        // seen from the back room the sign's ends swap sides on screen: read it left to right either way
+        val flip = signB[0] < signA[0]
+        val ax = if (flip) signB[0] else signA[0]; val ay = if (flip) signB[1] else signA[1]
+        val bx = if (flip) signA[0] else signB[0]; val by = if (flip) signA[1] else signB[1]
+        val width = kotlin.math.hypot(bx - ax, by - ay)
+        val size = width / 6.4f
+        if (size < 4.5f) return
+        signText.textSize = size
+        val mx = (ax + bx) / 2; val my = (ay + by) / 2
+        canvas.save()
+        canvas.rotate(Math.toDegrees(kotlin.math.atan2((by - ay).toDouble(), (bx - ax).toDouble())).toFloat(), mx, my)
+        canvas.drawText("STAFF ONLY", mx, my + size * .36f, signText)
+        canvas.restore()
     }
 
     /** Small deterministic hash in [0, 1) so the dirt pattern on a tile stays put from frame to frame. */

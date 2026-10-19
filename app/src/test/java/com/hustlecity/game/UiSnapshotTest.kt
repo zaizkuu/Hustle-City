@@ -196,6 +196,40 @@ class UiSnapshotTest {
         shoot(e, "ui_interior.png")
     }
 
+    /** A gift shop with a back room: its shelves stocked, a storage shelf of spare boxes, and a shelf's stock card open. */
+    private fun giftShop(e: GameEngine): com.hustlecity.game.world.Building {
+        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.placeId == null && it.gridW in 12..15 && it.gridD in 8..10 }
+        e.state.rentals += Rental(b.id, b.baseRent, 1)
+        val biz = e.startBusiness(b.id, "giftshop", "Gift Corner")!!
+        val y = biz.backRoom + 1
+        biz.furniture += listOf(PlacedItem("storage_shelf", 0, 0, 0), PlacedItem("cleaning_station", 3, 0, 0), PlacedItem("shelf", 1, y, 0),
+            PlacedItem("shelf", 4, y, 0), PlacedItem("drinks_fridge", 7, y, 0), PlacedItem("cash_register", b.gridW - 5, b.gridD - 3, 0))
+        biz.stock["gift_cheap"] = 120; biz.stock["umbrella"] = 40; biz.stock["gift_exp"] = 30; biz.stock["energy_drink"] = 60
+        biz.backStock["gift_cheap"] = 90; biz.backStock["umbrella"] = 40
+        biz.tempClosed = false
+        e.state.player.x = b.doorX; e.state.player.y = b.doorY
+        e.enterBuilding(b)
+        e.ui.tip = null
+        return b
+    }
+
+    @Test
+    fun storeStockCard() {
+        val e = game()
+        giftShop(e)
+        shoot(e, "ui_store_stock_card.png") { e.interior!!.inspect = e.interior!!.items.indexOfFirst { it.itemId == "shelf" } }
+    }
+
+    @Test
+    fun storeDesignerBackRoom() {
+        val e = game()
+        giftShop(e)
+        e.ui.designer = true
+        e.interior!!.startPlacing("shelf")
+        e.interior!!.ghostX = 5; e.interior!!.ghostY = 0
+        shoot(e, "ui_store_designer_back_room.png")
+    }
+
     @Test
     fun startBusiness() {
         val e = game()

@@ -346,6 +346,8 @@ private fun InventoryTab(e: GameEngine, biz: Business) {
                             val shared = biz.type.products.count { (other, _) -> Catalog.product(other)?.tag == p.tag } > 1
                             val free = BizCalc.roomFor(biz, pid)
                             Text("Stock $stock · ${free} free" + if (shared) " (shared)" else " / $cap", style = HT.small, color = if (stock == 0) HC.Red else HC.Ink)
+                            val back = biz.backStock[pid] ?: 0
+                            if (back > 0) Text("+$back in the back room", style = HT.small, color = HC.InkSoft)
                             Bar(stock / cap.toFloat(), if (stock < cap * .2f) HC.Orange else HC.Green, Modifier.fillMaxWidth().padding(end = 10.dp), track = HC.Line, height = 7.dp)
                         }
                         Text("Sold today: ${biz.soldToday[pid] ?: 0}", style = HT.small, color = HC.InkSoft)

@@ -6,6 +6,9 @@ fun c(hex: Long): Int = hex.toInt()
 /** Boxes of stock one pallet rack holds in a warehouse. */
 const val WAREHOUSE_BOXES_PER_RACK = 24
 
+/** Boxes one storage shelf holds in a store's back room. */
+const val STORAGE_BOXES_PER_SHELF = 16
+
 enum class StaffRole(val label: String, val baseWage: Double) {
     CUSTOMER_SERVICE("Customer Service", 15.0),
     CLEANER("Cleaner", 13.0),
@@ -27,7 +30,14 @@ enum class StaffRole(val label: String, val baseWage: Double) {
     val atHeadquarters get() = this == HR_MANAGER || this == PURCHASING_AGENT
 }
 
-enum class ItemFn { CASH_REGISTER, DISPLAY, EQUIPMENT, LOCKER, SHOWER, BOARD, DECOR, SPEAKER, SEATING, CLEANING, BED, HOME_FRIDGE, TV, SOFA, OFFICE }
+enum class ItemFn {
+    CASH_REGISTER, DISPLAY, EQUIPMENT, LOCKER, SHOWER, BOARD, DECOR, SPEAKER, SEATING, CLEANING, BED, HOME_FRIDGE, TV, SOFA, OFFICE,
+    /** Back-room shelving for boxes of stock (not for customers). */
+    STORAGE;
+
+    /** Furniture customers walk up to and use: it has to stand out front, never in the back room. */
+    val customerFacing get() = this == CASH_REGISTER || this == DISPLAY || this == EQUIPMENT || this == LOCKER || this == SHOWER || this == SEATING
+}
 
 /** One box of a furniture model, in tile units of the item footprint (x across, y depth, z up in meters). */
 data class Part(val x0: Float, val y0: Float, val z0: Float, val x1: Float, val y1: Float, val z1: Float, val color: Int)
@@ -399,10 +409,19 @@ object Catalog {
             description = "Big sound for big rooms.",
             parts = listOf(box(.15f, .15f, 0f, .85f, .85f, 1.5f, DARK), box(.3f, .85f, .7f, .7f, .87f, 1.3f, c(0xFF555555)))),
         FurnitureDef("cleaning_station", "Cleaning Station", 350.0, 1, 1, ItemFn.CLEANING,
-            description = "Cleaners work 50% faster when a station is nearby.",
+            description = "Cleaners work 50% faster with a station. It belongs in the back room, where cleaners wait between jobs.",
             parts = listOf(
                 box(.2f, .2f, 0f, .8f, .8f, 1.0f, c(0xFFE0E0E0)),
                 box(.25f, .25f, 1.0f, .5f, .5f, 1.3f, c(0xFF2F80ED)),
+            )),
+        FurnitureDef("storage_shelf", "Storage Shelf", 400.0, 2, 1, ItemFn.STORAGE, setOf("storage"), displayUnits = STORAGE_BOXES_PER_SHELF,
+            description = "Steel shelving for the back room. Holds $STORAGE_BOXES_PER_SHELF boxes of stock that don't fit on your displays; staff restock the displays from it.",
+            parts = listOf(
+                box(0f, .1f, 0f, .07f, .9f, 1.95f, c(0xFF5B6770)), box(1.93f, .1f, 0f, 2f, .9f, 1.95f, c(0xFF5B6770)),
+                box(.07f, .12f, .06f, 1.93f, .88f, .1f, c(0xFF9AA3AD)), box(.07f, .12f, .52f, 1.93f, .88f, .56f, c(0xFF9AA3AD)),
+                box(.07f, .12f, .98f, 1.93f, .88f, 1.02f, c(0xFF9AA3AD)), box(.07f, .12f, 1.44f, 1.93f, .88f, 1.48f, c(0xFF9AA3AD)),
+                box(.15f, .2f, .1f, .95f, .82f, .44f, c(0xFFC8A165)), box(1.05f, .2f, .1f, 1.85f, .82f, .4f, c(0xFFB38A55)),
+                box(.15f, .2f, .56f, .9f, .82f, .88f, c(0xFFB38A55)), box(.2f, .2f, 1.02f, .95f, .82f, 1.34f, c(0xFFC8A165)),
             )),
         FurnitureDef("wall_lamp", "Wall Lamp", 40.0, 1, 1, ItemFn.DECOR, decor = 1,
             description = "Warm wall light.",
@@ -866,7 +885,7 @@ object Catalog {
         PlaceDef("essentials", "Essentials Appliances", PlaceKind.FURNITURE_STORE, "If you need it, we've got it.", c(0xFF2F80ED), "place_furniture",
             listOf("cash_register", "shelf", "drinks_fridge", "fresh_fridge", "freezer", "treadmill", "workout_bench", "weight_rack", "boxing_bag",
                 "gym_locker", "shower", "fitness_board", "bookshelf", "bench", "barstool", "neon_cactus", "neon_circle", "speaker_small",
-                "speaker_medium", "speaker_large", "cleaning_station", "wall_lamp", "pallet_rack", "dance_floor", "dj_booth", "cinema_screen", "cinema_seats", "stage",
+                "speaker_medium", "speaker_large", "cleaning_station", "storage_shelf", "wall_lamp", "pallet_rack", "dance_floor", "dj_booth", "cinema_screen", "cinema_seats", "stage",
                 "checkout_counter", "shopping_baskets", "security_camera", "security_gate", "trash_can", "exercise_bike", "rowing_machine", "coat_check", "stage_lights", "hand_truck")),
         PlaceDef("primekitchen", "Prime Kitchen Supply", PlaceKind.FURNITURE_STORE, "Pro gear for food & beauty.", c(0xFFF2994A), "place_kitchen",
             listOf("coffee_machine", "pastry_case", "grill", "fryer", "pizza_oven", "ice_cream_freezer", "digital_scale", "hair_chair", "hair_wash", "cash_register", "checkout_counter",
@@ -886,7 +905,7 @@ object Catalog {
         PlaceDef("fuel", "Fuel Up", PlaceKind.GAS_STATION, "Fill her up.", c(0xFFF2C94C), "place_gas"),
         PlaceDef("officeplus", "OfficePlus Supply", PlaceKind.FURNITURE_STORE, "Racks, desks and everything in between.", c(0xFF1F5FAD), "place_office",
             listOf("pallet_rack", "office_desk", "graphic_tablet", "desk_globe", "desk_calendar", "copier", "meeting_table", "whiteboard", "filing_cabinet", "water_cooler",
-                "plant_large", "painting", "speaker_small", "wall_lamp", "cleaning_station", "trash_can", "security_camera", "bench", "hand_truck")),
+                "plant_large", "painting", "speaker_small", "wall_lamp", "cleaning_station", "storage_shelf", "trash_can", "security_camera", "bench", "hand_truck")),
     )
     fun place(id: String) = places.first { it.id == id }
 

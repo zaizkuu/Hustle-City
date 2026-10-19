@@ -3,9 +3,11 @@ package com.hustlecity.game.engine
 import com.hustlecity.game.audio.Audio
 import com.hustlecity.game.audio.Sfx
 import com.hustlecity.game.data.Catalog
+import com.hustlecity.game.data.ItemFn
 import com.hustlecity.game.model.CargoItem
 import com.hustlecity.game.model.OwnedVehicle
 import com.hustlecity.game.world.dist
+import kotlin.math.min
 
 /*
  * Walk-in shopping and carrying boxes, the way Big Ambitions does it: bare hands hold one box,
@@ -298,6 +300,126 @@ fun GameEngine.carryIn(buildingId: Int, v: OwnedVehicle): Int {
 fun GameEngine.carryMinutes(boxes: Int): Int {
     val per = if (state.player.carrier == Carrier.HANDS) 1 else carryCap()
     return (boxes + per - 1) / per * CARRY_TRIP_MINUTES
+}
+
+// ---------------------------------------------------------------------- stocking your own store
+
+/**
+ * Boxes you carry that can go onto item [index] of the store you're in: products it sells, onto a display of
+ * their kind with room left, or onto a storage shelf in the back room.
+ */
+fun GameEngine.boxesFor(index: Int): List<CargoItem> {
+    val sc = interior ?: return emptyList()
+    val biz = sc.business ?: return emptyList()
+    val def = sc.items.getOrNull(index)?.let { Catalog.item(it.itemId) } ?: return emptyList()
+    return state.player.hand.filter { item ->
+        if (!item.isProduct || item.unpaid || item.qty <= 0 || !BizCalc.sells(biz, item.id)) return@filter false
+        val p = Catalog.product(item.id) ?: return@filter false
+        when {
+            def.fn == ItemFn.STORAGE -> BizCalc.storageRoomFor(biz, item.id) > 0
+            def.fn == ItemFn.DISPLAY && p.tag in def.tags -> BizCalc.roomFor(biz, item.id) > 0
+            else -> false
+        }
+    }
+}
+
+/**
+ * Unpacks the boxes you carry onto display [index] of your store (it fills in item by item), or puts them on a storage
+ * shelf. As much as fits goes on; the rest stays in the box. Returns the units stocked.
+ */
+fun GameEngine.stockFromHands(index: Int): Int {
+    val sc = interior ?: return 0
+    val biz = sc.business ?: return 0
+    val def = sc.items.getOrNull(index)?.let { Catalog.item(it.itemId) } ?: return 0
+    val boxes = boxesFor(index)
+    if (boxes.isEmpty()) return 0
+    sc.shelf?.focusOn(index)
+    var moved = 0
+    for (item in boxes) {
+        val p = Catalog.product(item.id) ?: continue
+        val qty = if (def.fn == ItemFn.STORAGE) economy.stockBack(biz, item.id, item.qty, p.cost)
+        else min(item.qty, BizCalc.roomFor(biz, item.id)).also { economy.addStock(biz, item.id, it, p.cost) }
+        item.qty -= qty
+        moved += qty
+    }
+    val emptied = state.player.hand.count { it.isProduct && it.qty <= 0 }
+    state.player.hand.removeAll { it.isProduct && it.qty <= 0 }
+    if (moved > 0) {
+        Audio.play(Sfx.TAP)
+        toast(if (def.fn == ItemFn.STORAGE) "Put $emptied box(es) on the storage shelf" else "Stocked $moved on the ${def.name}" +
+            if (emptied < boxes.size) " (it's full: the rest stays in the box)" else "", ToastKind.GOOD, "cargo_boxes")
+    }
+    bump()
+    return moved
+}
+
+/**
+ * Walks to the nearest display (then storage shelf) that takes a box you carry and stocks it, and keeps going
+ * until the boxes are unpacked or nothing has room. Returns false when no display takes what you carry.
+ */
+fun GameEngine.stockShelves(): Boolean {
+    val sc = interior ?: return false
+    if (sc.business == null) return false
+    val target = sc.items.indices.filter { boxesFor(it).isNotEmpty() }.minByOrNull { i ->
+        val p = sc.items[i]
+        val storage = Catalog.item(p.itemId)?.fn == ItemFn.STORAGE
+        (if (storage) 1000f else 0f) + kotlin.math.abs(p.x + .5f - sc.px) + kotlin.math.abs(p.y + .5f - sc.py)
+    } ?: return false
+    sc.inspect = target
+    sc.walkToItem(target) { if (stockFromHands(target) > 0) stockShelves() }
+    return true
+}
+
+/** Why you can't restock display [index] of your store by hand right now, or null when you can. */
+fun GameEngine.restockProblem(index: Int): String? {
+    val sc = interior ?: return "You're not in your store"
+    val biz = sc.business ?: return "You're not in your store"
+    val def = sc.items.getOrNull(index)?.let { Catalog.item(it.itemId) } ?: return "Nothing to restock"
+    if (boxesFor(index).isNotEmpty()) return null
+    val tag = BizCalc.displayTag(biz, def) ?: return "This isn't a display for your products"
+    val pids = biz.type.products.map { it.first }.filter { Catalog.product(it)?.tag == tag }
+    if (pids.all { BizCalc.roomFor(biz, it) <= 0 }) return "The ${def.name} is full"
+    if (BizCalc.backStockFor(biz, tag) <= 0) return if (BizCalc.storageBoxes(biz) == 0) "No stock in the back room: put storage shelves there, or bring boxes in"
+        else "No boxes for the ${def.name} in the back room"
+    if (sc.storageShelfFor() < 0) return "No storage shelf to take a box from"
+    return null
+}
+
+/**
+ * Restocks display [index] of your store by hand: unpacks the boxes you carry onto it, or walks to the back room,
+ * takes as many boxes of its kind off a storage shelf as you can carry, brings them over and unpacks them (the items
+ * fill in as you do). Returns false (with the reason in a toast) when there's nothing to restock it with.
+ */
+fun GameEngine.restockDisplay(index: Int): Boolean {
+    val sc = interior ?: return false
+    val biz = sc.business ?: return false
+    val def = sc.items.getOrNull(index)?.let { Catalog.item(it.itemId) } ?: return false
+    restockProblem(index)?.let { toast(it); return false }
+    sc.inspect = index
+    if (boxesFor(index).isNotEmpty()) {
+        if (sc.playerNear(index)) stockFromHands(index) else sc.walkToItem(index) { stockFromHands(index) }
+        return true
+    }
+    val tag = BizCalc.displayTag(biz, def) ?: return false
+    val shelfIdx = sc.storageShelfFor()
+    sc.walkToItem(shelfIdx) {
+        if (BizCalc.backStockFor(biz, tag) <= 0) { toast("Someone already took those boxes out"); return@walkToItem }
+        sc.playerBox = true
+        Audio.play(Sfx.TAP)
+        sc.walkToItem(index) {
+            sc.shelf?.focusOn(index)
+            sc.shelf?.playerStocked()
+            val moved = economy.restockKind(biz, tag, if (state.player.carrier == Carrier.HANDS) 1 else carryCap())
+            sc.playerBox = false
+            if (moved > 0) {
+                Audio.play(Sfx.TAP)
+                toast("Restocked $moved on the ${def.name}", ToastKind.GOOD, "cargo_boxes")
+            } else toast("The ${def.name} is already full")
+            bump()
+        }
+    }
+    bump()
+    return true
 }
 
 /** How the player model holds things, for [com.hustlecity.game.render.PersonPainter]: 0 nothing, 1 a box, 2 hand truck, 3 cart. */

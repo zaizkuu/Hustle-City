@@ -32,6 +32,8 @@ class PersonPainter(private val scene: Scene3D) {
         private val STEEL = c(0xFF9AA3AD)
         private val TRUCK_RED = c(0xFFD0392B)
         private val CART_BLUE = c(0xFF2F80ED)
+        private val BAG = c(0xFFD9B98A)
+        private val BAG_DARK = c(0xFFB38A55)
     }
 
     // parts: forward offset, right offset, z0, z1, length (forward), width (right), color, draw-last flag
@@ -56,11 +58,13 @@ class PersonPainter(private val scene: Scene3D) {
      * @param umbrella umbrella color, or 0 for none
      * @param carry 0 nothing, 1 a box in both arms, 2 pushing a hand truck, 3 pushing a flatbed cart
      * @param load boxes on the hand truck or cart
+     * @param held color of a product held in the right hand (a shopper's pick), or 0 for none
+     * @param bag true to carry a paper shopping bag instead (paid for)
      */
     fun draw(
         x: Float, y: Float, z: Float, heading: Float, phase: Float, moving: Float,
         shirt: Int, pants: Int, skin: Int, hair: Int, scale: Float = 1f, pose: Int = Pose.STAND,
-        apron: Int = 0, umbrella: Int = 0, alpha: Float = 1f, carry: Int = 0, load: Int = 0,
+        apron: Int = 0, umbrella: Int = 0, alpha: Float = 1f, carry: Int = 0, load: Int = 0, held: Int = 0, bag: Boolean = false,
     ) {
         n = 0
         val s = scale
@@ -93,6 +97,7 @@ class PersonPainter(private val scene: Scene3D) {
                 val holding = carry >= 2 || (carry == 1 && load > 0)
                 upperBody(0f, z + .82f * s + bob, s, shirt, skin, hair, apron, swing, phase, false, lod, reach = holding)
                 if (holding) carried(z, z + .82f * s + bob, s, carry, load)
+                else if (!lod && (held != 0 || bag)) inHand(z + .82f * s + bob, s, swing, held, bag)
             }
         }
         if (umbrella != 0 && pose == Pose.STAND) {
@@ -140,6 +145,15 @@ class PersonPainter(private val scene: Scene3D) {
                 }
             }
         }
+    }
+
+    /** A product picked off a shelf, or the paper bag it went into at the register, swinging in the right hand. */
+    private fun inHand(hip: Float, s: Float, swing: Float, held: Int, bag: Boolean) {
+        val f = swing * .16f * s
+        if (bag) {
+            part(f, .31f * s, hip - .3f * s, hip + .01f * s, .24f * s, .11f * s, BAG, BAG_DARK)
+            part(f, .31f * s, hip + .01f * s, hip + .05f * s, .2f * s, .02f * s, BAG_DARK)
+        } else part(f + .03f * s, .27f * s, hip - .12f * s, hip + .06f * s, .11f * s, .08f * s, held)
     }
 
     private fun legs(z: Float, s: Float, pants: Int, swing: Float) {
