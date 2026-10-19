@@ -156,6 +156,34 @@ class RivalAI(private val e: GameEngine) {
         return Day(customers * spend, customers * cogs, wages + rent + t.dailyFee + marketingCost(mkt), customers.toInt(), lost.toInt())
     }
 
+    /** Something about the rival stores changed outside the nightly turn (a buyout, a takeover). */
+    fun touch() { version++ }
+
+    /**
+     * A day of trading for the rival stores you have bought: run by their managers as before, with prices back to
+     * normal and advertising while they're profitable. Returns their combined profit, paid to you.
+     */
+    fun subsidiariesDaily(): Double {
+        var total = 0.0
+        for (rb in e.state.rivalBusinesses) {
+            if (rb.rivalId != SUBSIDIARY) continue
+            val day = projectStore(rb) ?: continue
+            val noise = .85 + rnd.nextDouble() * .3
+            val p = day.revenue * noise - day.cogs * noise - day.costs
+            rb.revenue = day.revenue * noise
+            rb.customers = (day.customers * noise).toInt()
+            rb.profit = rb.profit * .7 + p * .3
+            rb.losingDays = if (p < 0) rb.losingDays + 1 else 0
+            val busy = if (day.customers + day.lost > 0) day.customers.toDouble() / (day.customers + day.lost) else 1.0
+            val target = (.4 + .1 * rb.level + busy * .12 + rnd.nextDouble() * .06).coerceIn(.2, .95)
+            rb.reputation += (target - rb.reputation) * .1
+            rb.marketing = if (rb.profit > 300) .1 else 0.0
+            total += p
+        }
+        if (total != 0.0) version++
+        return total
+    }
+
     private fun projectStore(rb: RivalBusiness): Day? {
         val bld = e.city.building(rb.buildingId) ?: return null
         val t = Catalog.type(rb.typeId)

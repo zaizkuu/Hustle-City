@@ -132,6 +132,8 @@ fun PhoneAppScreen(e: GameEngine, app: AppId) {
                 AppId.BIZHUB -> BizHubApp(e)
                 AppId.FINANCE -> FinanceApp(e)
                 AppId.REALTY -> RealtyApp(e)
+                AppId.FLEET -> FleetApp(e)
+                AppId.MARKETS -> MarketsApp(e)
                 AppId.MAPS -> {}
             }
         }
@@ -192,7 +194,7 @@ fun PersonaApp(e: GameEngine) {
                 if (home != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         GIcon("home", 16.dp, Modifier.padding(end = 6.dp), tint = HC.Ink)
-                        Text("${home.address}, ${home.hood.name} · ${home.area} m²", style = HT.body, color = HC.Ink, modifier = Modifier.weight(1f))
+                        Text("${GameEngine.HOME_TIERS[e.homeTier(home)]} · ${home.address}, ${home.hood.name} · ${home.area} m²", style = HT.body, color = HC.Ink, modifier = Modifier.weight(1f))
                         HButton("Pin", small = true) { e.setWaypoint(home.id) }
                     }
                 }
@@ -269,6 +271,10 @@ fun RivalsApp(e: GameEngine) {
                     else "${leader.name} leads with ${e.moneyShort(leader.netWorth)} and earns about ${e.moneyShort(leader.trend)} a day. Overtake every rival and reach ${e.moneyShort(5_000_000.0)} to win.",
                     style = HT.small, color = HC.InkSoft,
                 )
+                val subs = e.ops.subsidiaryStores()
+                if (subs.isNotEmpty()) {
+                    Text("Your subsidiaries: ${subs.size} store${if (subs.size > 1) "s" else ""}, about ${e.moneyShort(subs.sumOf { it.profit })} profit a day", style = HT.small, color = HC.Green, modifier = Modifier.padding(top = 3.dp))
+                }
                 val wars = s.rivalBusinesses.filter { rb -> rb.targetBiz >= 0 && s.businesses.any { it.id == rb.targetBiz } }
                 for (rb in wars.take(3)) {
                     val mine = s.businesses.first { it.id == rb.targetBiz }
@@ -306,6 +312,13 @@ fun RivalsApp(e: GameEngine) {
                             KeyValue("Buildings owned", "${list.count { it.owned }}")
                             KeyValue("Advertising", "${list.count { it.marketing > 0 }} stores")
                             KeyValue("Aggression", when { rival.aggression >= .7 -> "High"; rival.aggression >= .5 -> "Medium"; else -> "Low" })
+                            KeyValue("Your stake", "${(e.ops.stake(rival) * 100).roundToInt()}% of its shares")
+                            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                HButton("Headhunt ${e.moneyShort(com.hustlecity.game.engine.Operations.HEADHUNT_FEE)}", small = true, color = HC.Purple) {
+                                    e.ui.confirm = Confirm("Headhunt a manager from ${rival.name}?", "Apex Recruitment finds one of their store managers for ${e.money(com.hustlecity.game.engine.Operations.HEADHUNT_FEE)}.", "Headhunt") { e.ops.headhunt(rival) }
+                                }
+                                HButton("Shares", small = true) { e.ui.app = AppId.MARKETS }
+                            }
                         }
                         Column(Modifier.weight(1.3f)) {
                             Text("Net worth, last ${rival.worthHistory.size} days", style = HT.small, color = HC.InkSoft)
@@ -333,6 +346,10 @@ fun RivalsApp(e: GameEngine) {
                             Text("${b.address} · ${b.hood.name}", style = HT.small, color = HC.InkSoft, modifier = Modifier.weight(1f))
                             Text(if (rb.targetBiz >= 0) "price war" else "${(rb.reputation * 100).roundToInt()}% rep", style = HT.small,
                                 color = if (rb.targetBiz >= 0) HC.Red else HC.InkSoft, modifier = Modifier.width(70.dp))
+                            val ask = e.ops.askingPrice(rb)
+                            HButton("Buy ${e.moneyShort(ask)}", small = true, color = HC.Purple, enabled = s.player.money >= ask) {
+                                e.ui.confirm = Confirm("Buy ${rb.name} for ${e.money(ask)}?", "It keeps trading under its manager and its profit is paid to you every night.", "Buy") { e.ops.buyRivalStore(rb) }
+                            }
                             Icon(Icons.Filled.Place, null, tint = HC.Blue, modifier = Modifier.size(20.dp).clickable { e.setWaypoint(b.id); e.toast("Waypoint set") })
                         }
                     }
@@ -406,20 +423,26 @@ fun StaffApp(e: GameEngine) {
                                 val biz = s.business(emp.businessId)
                                 Text(if (biz != null) "${biz.name} · ${shiftText(emp)} (${emp.weeklyHours}h/week)" else "Unassigned — assign in BizHub → Schedule", style = HT.small,
                                     color = if (biz != null) HC.Ink else HC.Red)
+                                if (emp.offerFrom >= 0) Text("${s.rivals.firstOrNull { it.id == emp.offerFrom }?.name ?: "A rival"} offered ${e.money(emp.offerWage)}/h — answer by day ${emp.offerDay}",
+                                    style = HT.small, color = HC.Orange)
                             }
                             Column(Modifier.width(150.dp)) {
                                 Text("Skill", style = HT.small, color = HC.InkSoft)
                                 Bar(emp.skill.toFloat(), HC.Blue, Modifier.fillMaxWidth(), track = HC.Line, height = 7.dp)
                                 Text("Satisfaction", style = HT.small, color = HC.InkSoft)
                                 Bar(emp.satisfaction.toFloat(), if (emp.satisfaction < .35) HC.Red else HC.Green, Modifier.fillMaxWidth(), track = HC.Line, height = 7.dp)
+                                Text(if (emp.training(s.minute)) "On a course" else "Fatigue", style = HT.small, color = if (emp.training(s.minute)) HC.Purple else HC.InkSoft)
+                                Bar((emp.fatigue / 100).toFloat(), if (emp.fatigue > 70) HC.Red else if (emp.fatigue > 45) HC.Orange else HC.GreenLight, Modifier.fillMaxWidth(), track = HC.Line, height = 7.dp)
                             }
                             Column(Modifier.width(90.dp).padding(start = 10.dp)) {
                                 Text("${e.money(emp.wage)}/h", style = HT.bodyBold, color = HC.Ink)
                                 Text("wants ${e.money(emp.demand)}", style = HT.small, color = HC.InkSoft)
                             }
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (emp.offerFrom >= 0) HButton("Match ${e.money(emp.offerWage)}", small = true, color = HC.Orange) { e.ops.counterOffer(emp) }
                                 HButton("Raise", small = true, color = HC.Green) { e.raise(emp) }
                                 HButton("Train", small = true) { e.train(emp) }
+                                HButton("Course ${e.moneyShort(e.ops.courseCost(emp))}", small = true, color = HC.Purple, enabled = !emp.training(s.minute)) { e.ops.trainCourse(emp) }
                                 HButton("Fire", small = true, color = HC.Red) {
                                     e.ui.confirm = Confirm("Fire ${emp.name}?", "They receive a severance of 8 hours of wages.", "Fire") { e.fire(emp) }
                                 }
@@ -563,6 +586,7 @@ fun RealtyApp(e: GameEngine) {
     var kind by remember { mutableStateOf(BKind.RETAIL) }
     var hood by remember { mutableIntStateOf(-1) }
     var sort by remember { mutableIntStateOf(0) }
+    var tier by remember { mutableIntStateOf(-1) }
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp)) {
         FlowRow {
             Chip("For rent", tab == 0) { tab = 0 }
@@ -584,8 +608,12 @@ fun RealtyApp(e: GameEngine) {
                 Chip("All areas", hood == -1, HC.Purple) { hood = -1 }
                 for (n in e.city.neighborhoods) Chip(n.name, hood == n.id, n.color.toColor()) { hood = n.id }
             }
-            val list = remember(s.rentals.size, s.rivalBusinesses.size, kind, hood, sort) {
-                e.city.buildings.filter { it.kind == kind && e.isVacant(it.id) && (hood == -1 || it.neighborhood == hood) }.let { l ->
+            if (kind == BKind.RESIDENTIAL) FlowRow {
+                Chip("Any home", tier == -1, HC.Teal) { tier = -1 }
+                for ((i, t) in GameEngine.HOME_TIERS.withIndex()) Chip(t, tier == i, HC.Teal) { tier = i }
+            }
+            val list = remember(s.rentals.size, s.rivalBusinesses.size, kind, hood, sort, tier) {
+                e.city.buildings.filter { it.kind == kind && e.isVacant(it.id) && (hood == -1 || it.neighborhood == hood) && (kind != BKind.RESIDENTIAL || tier == -1 || e.homeTier(it) == tier) }.let { l ->
                     when (sort) { 0 -> l.sortedBy { it.baseRent }; 1 -> l.sortedByDescending { it.traffic }; else -> l.sortedByDescending { it.area } }
                 }.take(80)
             }
@@ -604,7 +632,12 @@ fun RealtyApp(e: GameEngine) {
                             Column(Modifier.weight(1f)) {
                                 Text("${b.area} m² (${b.sizeClass})", style = HT.small, color = HC.Ink)
                                 when (kind) {
-                                    BKind.RETAIL -> Text("Traffic ${(b.traffic * 100).roundToInt()}% · ${b.customerLimit} cust/h", style = HT.small, color = HC.InkSoft)
+                                    BKind.RETAIL -> {
+                                        Text("Traffic ${(b.traffic * 100).roundToInt()}% · ${b.customerLimit} cust/h", style = HT.small, color = HC.InkSoft)
+                                        val peak = com.hustlecity.game.engine.Operations.peakHours(b.hood.look)
+                                        Text("Busiest %02d–%02d h".format(peak, peak + 2), style = HT.small, color = HC.InkSoft)
+                                    }
+                                    BKind.RESIDENTIAL -> Text("${GameEngine.HOME_TIERS[e.homeTier(b)]} · ${b.parking} parking", style = HT.small, color = HC.InkSoft)
                                     BKind.WAREHOUSE -> Text("Room for ~${(b.gridW * b.gridD) / 4} pallet racks", style = HT.small, color = HC.InkSoft)
                                     BKind.OFFICE -> Text("Room for ~${(b.gridW * b.gridD) / 5} desks", style = HT.small, color = HC.InkSoft)
                                     else -> Text("${b.parking} parking spots", style = HT.small, color = HC.InkSoft)
@@ -645,7 +678,10 @@ fun RealtyApp(e: GameEngine) {
                                     }, style = HT.small, color = HC.Ink,
                                 )
                             }
-                            Text(if (r.owned) "OWNED" else "${e.money(r.rentPerMonth)}/mo", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.padding(horizontal = 10.dp))
+                            Column(Modifier.padding(horizontal = 10.dp), horizontalAlignment = Alignment.End) {
+                                Text(if (r.owned) "OWNED" else "${e.money(r.rentPerMonth)}/mo", style = HT.bodyBold, color = HC.Ink)
+                                if (!r.owned && r.leaseEnd > 0) Text("renews day ${r.leaseEnd} (~+${(e.ops.raiseFor(r) * 100).roundToInt()}%)", style = HT.small, color = HC.InkSoft)
+                            }
                             Icon(Icons.Filled.Place, null, tint = HC.Blue, modifier = Modifier.size(26.dp).clickable { e.setWaypoint(b.id); e.toast("Waypoint set") })
                             Spacer(Modifier.width(6.dp))
                             if (Catalog.COURSE_REAL_ESTATE in s.player.courses && !r.owned) {

@@ -122,8 +122,10 @@ object BizCalc {
     fun workers(e: GameEngine, b: Business, hour: Int, weekday: Int): List<Double> {
         val out = ArrayList<Double>()
         if (e.state.player.workingAt == b.id) out += 0.55
+        val bonus = if ("bonus" in b.perks) 1.05 else 1.0
         for (emp in e.state.employees) {
-            if (emp.businessId == b.id && emp.role == b.type.staffRole && emp.worksAt(hour, weekday)) out += emp.skill
+            if (emp.businessId == b.id && emp.role == b.type.staffRole && emp.worksAt(hour, weekday) && !emp.training(e.state.minute))
+                out += (emp.skill * e.ops.fatigueFactor(emp) * bonus).coerceAtMost(1.0)
         }
         return out
     }
@@ -179,7 +181,8 @@ object BizCalc {
         val wealth = if (type.wealthSensitive) hood.wealth.toDouble().pow(1.6) else 1.0
         val comp = 1.0 / (1.0 + .15 * e.economy.rivals.competitionFor(b))
         val rep = .55 + .9 * b.reputation
-        return type.baseDemand * (.25 + 1.6 * promo) * type.curve[hour] * wealth * comp * rep * e.weather.demandFactor(type) * e.state.player.rules.demand
+        val district = Operations.districtFactor(hood.look, hour, e.state.weekday)
+        return type.baseDemand * (.25 + 1.6 * promo) * type.curve[hour] * wealth * comp * rep * district * e.weather.demandFactor(type) * e.state.player.rules.demand
     }
 
     /** Customers per hour the business can serve with the given workers. */
@@ -320,6 +323,7 @@ class Economy(private val e: GameEngine) {
         var bought = false
         val products = b.type.products
         if (products.isEmpty()) return
+        val billingErr = e.ops.billingErrorChance(b, e.state.hour, e.state.weekday)
         // what people want depends on the weather: umbrellas in the rain, ice cream in the heat
         val picks = products.filter { rnd.nextDouble() < (it.second * e.weather.productFactor(it.first)).coerceAtMost(.95) }.ifEmpty { listOf(products.first()) }
         for ((pid, _) in picks) {
@@ -334,7 +338,9 @@ class Economy(private val e: GameEngine) {
             priceScore += prob; priceSamples++
             if (rnd.nextDouble() < prob) {
                 bought = true
-                b.revenueToday += price
+                // a tired cashier rings it up wrong now and then
+                if (billingErr > 0 && rnd.nextDouble() < billingErr) { b.billingErrorsToday += price * .5; b.revenueToday += price * .5 }
+                else b.revenueToday += price
                 b.soldToday[pid] = (b.soldToday[pid] ?: 0) + 1
                 if (!p.service) {
                     b.stock[pid] = (b.stock[pid] ?: 1) - 1
@@ -392,16 +398,17 @@ class Economy(private val e: GameEngine) {
         if (hour == 6) purchasingRun()
         e.weather.hourly()
         // scheduled deliveries
-        if (Catalog.COURSE_LOGISTICS in s.player.courses) {
-            for (b in s.businesses) {
-                val c = b.delivery ?: continue
-                if (c.enabled && c.hour == hour) runContract(b)
-            }
+        val logistics = Catalog.COURSE_LOGISTICS in s.player.courses
+        for (b in s.businesses) {
+            val c = b.delivery ?: continue
+            if (c.enabled && c.hour == hour && (logistics || c.byManager)) runDelivery(b)
         }
+        e.ops.hourly(hour, weekday)
         e.happinessHourly()
     }
 
-    private fun runContract(b: Business) {
+    /** Runs [b]'s delivery contract now: tops everything up to its targets (an [auto] reorder says so in the toast). */
+    fun runDelivery(b: Business, auto: Boolean = false) {
         val c = b.delivery ?: return
         var cost = 0.0
         var units = 0
@@ -416,7 +423,7 @@ class Economy(private val e: GameEngine) {
         }
         if (units > 0) {
             e.spend(60.0, "Delivery", allowDebt = true, silent = true)
-            e.toast("${b.name}: delivery of $units units (${e.money(cost + 60)})", ToastKind.INFO)
+            e.toast("${b.name}: ${if (auto) "low stock, reordered" else "delivery of"} $units units (${e.money(cost + 60)})", ToastKind.INFO)
         }
     }
 
@@ -523,10 +530,20 @@ class Economy(private val e: GameEngine) {
         return n
     }
 
+    /** Hour in which a tired crew isn't keeping up with the restocking, per business. */
+    private val slackHour = HashMap<Int, Long>()
+
     private fun restockTick(b: Business, hour: Int, weekday: Int) {
         if (b.type.facility) return
         val crew = crew(b, hour, weekday)
-        if (crew > 0) restockFromBack(b, crew)
+        if (crew <= 0) return
+        val now = e.state.minute / 60
+        if (e.state.minuteOfHour == 0 && e.rnd.nextDouble() < e.ops.missedRestockChance(b, hour, weekday)) {
+            slackHour[b.id] = now
+            b.missedRestocksToday++
+        }
+        if (slackHour[b.id] == now) return
+        restockFromBack(b, crew)
     }
 
     /**
@@ -675,6 +692,7 @@ class Economy(private val e: GameEngine) {
         }
         employeesDaily()
         rivalsDaily()
+        e.ops.midnight()
         s.candidates.removeAll { it.expiresDay < s.day }
         // ledger -> day record
         val expenses = s.ledgerToday.filterKeys { !it.startsWith("in:") }
@@ -708,6 +726,10 @@ class Economy(private val e: GameEngine) {
             if (emp.businessId < 0) target -= .15
             if (leadership) target += .15
             if (hrCovers) target += .1
+            val at = s.business(emp.businessId)
+            if (at != null && "health" in at.perks) target += .08
+            if (at != null && "bonus" in at.perks) target += .1
+            if (emp.fatigue > 70) target -= .15
             target = target.coerceIn(0.0, 1.0)
             emp.satisfaction = (emp.satisfaction * .7 + target * .3).coerceIn(0.0, 1.0)
             if (emp.hoursToday > 0) emp.skill = (emp.skill + (if (leadership) .006 else .004)).coerceAtMost(1.0)
@@ -735,7 +757,8 @@ class Economy(private val e: GameEngine) {
     private fun rivalsDaily() = rivals.daily()
 
     companion object {
-        val NON_OPERATING = setOf("in:Loans", "Loan repayment", "Vehicles", "Real estate", "Furniture", "in:Sold assets", "in:Refunds")
+        val NON_OPERATING = setOf("in:Loans", "Loan repayment", "Vehicles", "Real estate", "Furniture", "in:Sold assets", "in:Refunds",
+            "Securities", "in:Securities", "Bonds", "in:Bonds", "Acquisitions", "in:Acquired cash")
 
         fun minutesUntil(currentMinute: Long, hour: Int): Long {
             val dayStart = (currentMinute / MINUTES_PER_DAY) * MINUTES_PER_DAY

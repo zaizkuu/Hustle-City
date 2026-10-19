@@ -438,6 +438,8 @@ private fun Recruiter(e: GameEngine, place: PlaceDef) {
                                     StaffRole.GRAPHIC_DESIGNER -> "Designs logos and posters at a Graphic Designer studio. Needs an Office Desk."
                                     StaffRole.TRAVEL_AGENT -> "Books trips for clients at a Travel Agency. Needs an Office Desk."
                                     StaffRole.EVENT_PLANNER -> "Organizes parties and conferences at an Event Planning Agency. Needs an Office Desk."
+                                    StaffRole.STORE_MANAGER -> "Runs one store for you: hires staff to cover its hours, keeps wages fair and reorders stock before it runs out."
+                                    StaffRole.DRIVER -> "Drives one of your vans on a daily delivery route (Fleet app), from a wholesaler or your warehouse to your stores."
                                 } + " Typical wage ~${e.money(role.baseWage)}/h.", style = HT.small, color = HC.InkSoft,
                             )
                         }
@@ -540,8 +542,23 @@ private fun RivalShop(e: GameEngine, buildingId: Int) {
     val rb = e.state.rivalBusinessAt(buildingId) ?: return
     val type = Catalog.type(rb.typeId)
     val owner = e.state.rivals.firstOrNull { it.id == rb.rivalId }
+    val mineNow = rb.rivalId == com.hustlecity.game.engine.SUBSIDIARY
     Modal(rb.name, { close(e) }, maxWidth = 640.dp) {
-        Text("${type.name} · owned by ${owner?.name}", style = HT.body, color = HC.InkSoft)
+        Text(if (mineNow) "${type.name} · your subsidiary, run by its manager" else "${type.name} · owned by ${owner?.name}", style = HT.body, color = HC.InkSoft)
+        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (mineNow) {
+                Text("Yesterday: ${e.money(rb.revenue)} sales, ${e.money(rb.profit)} profit (paid to you nightly)", style = HT.small, color = HC.Ink, modifier = Modifier.weight(1f))
+                HButton("Sell", small = true, color = HC.Red) {
+                    e.ui.confirm = Confirm("Sell ${rb.name}?", "You get its fit-out back at 80% of book value; the shop goes up for rent.", "Sell") { e.ops.sellSubsidiary(rb); close(e) }
+                }
+            } else if (owner != null) {
+                val ask = e.ops.askingPrice(rb)
+                Text("${owner.name} would sell it for ${e.money(ask)} (its fit-out, a few months' profit and a premium). It keeps trading for you.", style = HT.small, color = HC.Ink, modifier = Modifier.weight(1f))
+                HButton("Buy out", small = true, color = HC.Purple, enabled = e.state.player.money >= ask) {
+                    e.ui.confirm = Confirm("Buy ${rb.name} for ${e.money(ask)}?", "Its profit is paid to you every night.", "Buy") { if (e.ops.buyRivalStore(rb)) close(e) }
+                }
+            }
+        }
         val mine = e.state.businesses.filter { it.typeId == rb.typeId && e.city.building(it.buildingId)?.neighborhood == e.city.building(buildingId)?.neighborhood }
         if (mine.isNotEmpty()) Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             GIcon("swords", 16.dp, Modifier.padding(end = 6.dp), tint = HC.Red)

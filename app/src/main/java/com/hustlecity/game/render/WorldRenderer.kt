@@ -1205,7 +1205,7 @@ class WorldRenderer(private val e: GameEngine) {
         // them with the span or landmark they're on, so they sort with it)
         features.collect(bbox, proj.camX, proj.camY, stat, mode == DYNAMIC, mapMode, addFeature)
         if (mode == DYNAMIC && !mapMode) features.forCars(e.realTime, bbox, addTrainCar)
-        if (dyn) for (v in e.state.vehicles) if (v.x in bbox[0] - 5..bbox[2] + 5 && v.y in bbox[1] - 5..bbox[3] + 5) add(5, v.id, keyFor(v.x, v.y))
+        if (dyn) for (v in e.state.vehicles) if (!e.ops.away(v) && v.x in bbox[0] - 5..bbox[2] + 5 && v.y in bbox[1] - 5..bbox[3] + 5) add(5, v.id, keyFor(v.x, v.y))
         if (dyn && e.hasGame && p.driving < 0 && p.inBuilding < 0 && !mapMode) add(4, 0, playerKey)
     }
 
@@ -1513,7 +1513,7 @@ class WorldRenderer(private val e: GameEngine) {
         // own vehicle pins
         if (!mapMode && s.player.inBuilding < 0) {
             for (v in s.vehicles) {
-                if (v.id == s.player.driving) continue
+                if (v.id == s.player.driving || e.ops.away(v)) continue
                 val d = dist(v.x, v.y, s.player.x, s.player.y)
                 if (d < 400f && proj.project(v.x, v.y, v.def.height + 2.5f, tmp)) {
                     // loaded cars show what's in the trunk

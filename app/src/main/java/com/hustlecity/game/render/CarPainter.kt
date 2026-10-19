@@ -81,6 +81,8 @@ class CarPainter(private val scene: Scene3D) {
             5 -> tricycle(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
             6 -> kei(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
             7 -> bus(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
+            8 -> { bike(0f, hl, body, if (accent != 0) accent else CHROME, night, braking, camF, nearSide, fine); shift(0f) }
+            10 -> boxTruck(hl, hw, len, hgt, body, accent, night, braking, camF, nearSide)
             else -> classic(hl, hw, len, wid, hgt, body, style, taxi, night, braking, camF, nearSide)
         }
         tiltF = 0f; tiltL = 0f
@@ -129,6 +131,16 @@ class CarPainter(private val scene: Scene3D) {
                 val c0 = -hl + len * .2f; val c1 = hl - len * .38f
                 P(0, c0, hgt * .56f); P(1, c1, hgt * .56f); P(2, c1 - .9f, hgt); P(3, c0 + .7f, hgt)
                 prism(4, -hw * .86f, hw * .86f, GLASS, body, roofIdx = 2)
+            }
+            9 -> { // SUV: high, square body, a tall cabin and roof rails
+                P(0, -hl, .42f); P(1, hl, .42f); P(2, hl, hgt * .52f); P(3, hl - .55f, hgt * .6f); P(4, -hl, hgt * .62f)
+                prism(5, -hw, hw, body, body)
+                val c0 = -hl + .2f; val c1 = hl - len * .3f
+                P(0, c0, hgt * .6f); P(1, c1, hgt * .6f); P(2, c1 - .5f, hgt); P(3, c0, hgt)
+                prism(4, -hw * .92f, hw * .92f, GLASS, body, roofIdx = 2)
+                sideRect(-hl + .1f, hl - .1f, .42f, .58f, hw, scene.mix(body, 0xFF000000.toInt(), .45f))
+                slab(c0 + .2f, c1 - .7f, -hw * .82f, -hw * .74f, hgt, hgt + .08f, CHROME)
+                slab(c0 + .2f, c1 - .7f, hw * .74f, hw * .82f, hgt, hgt + .08f, CHROME)
             }
             else -> { // sedan
                 P(0, -hl, .3f); P(1, hl, .3f); P(2, hl, hgt * .45f); P(3, hl - .35f, hgt * .55f); P(4, -hl + .25f, hgt * .58f); P(5, -hl, hgt * .5f)
@@ -541,6 +553,15 @@ class CarPainter(private val scene: Scene3D) {
                 slab(-hl, hl, -hw, hw, 1.15f, 2.6f, GLASS, GLASS)
                 slab(-hl, hl, -hw, hw, 2.6f, hgt, color, BUS_ROOF)
             }
+            8 -> slab(-hl * .8f, hl * .8f, -.2f, .2f, .25f, 1.3f, color)
+            9 -> {
+                slab(-hl, hl, -hw, hw, .4f, hgt * .6f, color)
+                slab(-hl + .2f, hl - len * .3f, -hw * .9f, hw * .9f, hgt * .6f, hgt, GLASS, color)
+            }
+            10 -> {
+                slab(-hl, hl - 1.95f, -hw, hw, .62f, hgt, c(0xFFF1F2F0))
+                slab(hl - 1.9f, hl, -hw * .96f, hw * .96f, .45f, 2.4f, color, color)
+            }
             else -> {
                 slab(-hl, hl, -hw, hw, .25f, hgt * .55f, color)
                 slab(-len * .29f, len * .19f, -hw * .84f, hw * .84f, hgt * .55f, hgt, GLASS, color)
@@ -652,8 +673,26 @@ class CarPainter(private val scene: Scene3D) {
         scene.poly(4, wx, wy, wz, color)
     }
 
+    /** A box truck: a cab up front and a tall cargo box with a roll-up door and the company stripe. */
+    private fun boxTruck(hl: Float, hw: Float, len: Float, hgt: Float, body: Int, accent: Int, night: Boolean, braking: Boolean, camF: Float, nearSide: Int) {
+        val cab = hl - 1.9f
+        val box = c(0xFFF1F2F0)
+        val stripe = if (accent != 0) accent else body
+        wheelPair(hl - 1.05f, -hl + 1.35f, .46f, hw - .32f, hw + .02f, -nearSide)
+        if (camF > 0f) rearParts(hl, hw, 1.4f, 10, night, braking, body) else frontParts(hl, hw, 2.4f, night, lampZ = .85f)
+        // the cargo box, raised on its chassis, and the cab
+        slab(-hl, cab - .08f, -hw, hw, .62f, hgt, box, box)
+        sideRect(-hl + .2f, cab - .3f, hgt * .55f, hgt * .7f, hw, stripe)
+        frontRect(-hl - .005f, -hw + .15f, hw - .15f, .75f, hgt - .15f, c(0xFFD6D9DD), rear = true)
+        P(0, cab, .45f); P(1, hl, .45f); P(2, hl, 1.45f); P(3, hl - .45f, 2.35f); P(4, cab, 2.45f)
+        prism(5, -hw * .96f, hw * .96f, body, body, glassIdx = 2)
+        sideRect(cab + .25f, hl - .7f, 1.5f, 2.15f, hw * .96f, GLASS)
+        if (camF > 0f) frontParts(hl, hw, 2.4f, night, lampZ = .85f) else rearParts(hl, hw, 1.4f, 10, night, braking, body)
+        wheelPair(hl - 1.05f, -hl + 1.35f, .46f, hw - .32f, hw + .02f, nearSide)
+    }
+
     private fun wheels(len: Float, wid: Float, style: Int, only: Int) {
-        val r = if (style == 2) .4f else if (style == 3) .34f else .36f
+        val r = if (style == 2 || style == 9) .4f else if (style == 3) .34f else .36f
         val axle = len / 2 - (if (style == 2) .8f else .75f)
         val hw = wid / 2
         wheelPair(axle, -axle, r, hw - .22f, hw + .03f, only)

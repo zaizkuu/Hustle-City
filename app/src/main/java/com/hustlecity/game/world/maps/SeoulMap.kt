@@ -146,7 +146,7 @@ object SeoulMap : PlannedMap("seoul", "Seoul", "The Han River and its bridges, G
     }
 
     // boxy city cars and minivans, orange and silver cabs, and a lot of buses; white, gray and black cars
-    override val trafficMix = intArrayOf(0, 0, 0, 0, 0, 0, 0, 0, 6, 6, 6, 6, 2, 2, 2, 1, 3, 7, 7, 7)
+    override val trafficMix = intArrayOf(0, 0, 0, 0, 0, 0, 0, 0, 6, 6, 6, 6, 2, 2, 2, 1, 3, 7, 7, 7, 8, 8, 9, 9, 10)
     override val trafficPalette = intArrayOf(
         c(0xFFF5F5F5), c(0xFFF0F0F0), c(0xFFC0C6CC), c(0xFF7F878E), c(0xFF1C1C1E), c(0xFF26323F), c(0xFF5A6570), c(0xFF8E2442),
     )

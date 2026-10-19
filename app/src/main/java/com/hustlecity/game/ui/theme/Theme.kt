@@ -45,6 +45,8 @@ object HC {
         "BIZHUB" to (Color(0xFFF07070) to Color(0xFFD94848)),
         "FINANCE" to (Color(0xFF5AA8F5) to Color(0xFF2F80ED)),
         "REALTY" to (Color(0xFFFFB264) to Color(0xFFF2853A)),
+        "FLEET" to (Color(0xFF7FA4C8) to Color(0xFF4F7499)),
+        "MARKETS" to (Color(0xFF3DD6A3) to Color(0xFF15A37A)),
         "MAPS" to (Color(0xFFFFDC5C) to Color(0xFFF2B630)),
     )
 }

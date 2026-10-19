@@ -272,9 +272,9 @@ class Traffic(private val rnd: Random = Random(7)) {
             a.color = livery[k]; a.accent = livery[k + 1]
         } else a.accent = 0
         // jeepney, tricycle, kei car and bus at their real sizes (CarPainter builds them to fit)
-        a.length = when (a.style) { 0 -> 4.2f + rnd.nextFloat() * .6f; 1 -> 5.2f; 2 -> 5.8f; 4 -> 6.2f; 5 -> 2.5f; 6 -> 3.4f; 7 -> 11f; else -> 4.6f }
-        a.width = when (a.style) { 2 -> 2.1f; 4 -> 2.05f; 5 -> 1.5f; 6 -> 1.48f; 7 -> 2.5f; else -> 1.85f }
-        a.height = when (a.style) { 0, 3 -> 1.45f; 1 -> 1.8f; 2 -> 2.5f; 4 -> 2.3f; 5 -> 1.75f; 6 -> 1.7f; 7 -> 3.1f; else -> 1.5f }
+        a.length = when (a.style) { 0 -> 4.2f + rnd.nextFloat() * .6f; 1 -> 5.2f; 2 -> 5.8f; 4 -> 6.2f; 5 -> 2.5f; 6 -> 3.4f; 7 -> 11f; 8 -> 1.9f; 9 -> 4.8f; 10 -> 7.2f; else -> 4.6f }
+        a.width = when (a.style) { 2 -> 2.1f; 4 -> 2.05f; 5 -> 1.5f; 6 -> 1.48f; 7 -> 2.5f; 8 -> .78f; 9 -> 2.0f; 10 -> 2.4f; else -> 1.85f }
+        a.height = when (a.style) { 0, 3 -> 1.45f; 1 -> 1.8f; 2 -> 2.5f; 4 -> 2.3f; 5 -> 1.75f; 6 -> 1.7f; 7 -> 3.1f; 8 -> 1.3f; 9 -> 1.85f; 10 -> 3.3f; else -> 1.5f }
         val e = g.edges[a.edge.coerceAtLeast(0)]
         // city speeds: a bit under the road's limit, slower on small streets
         a.cruise = e.cls.speed * (.68f + rnd.nextFloat() * .2f) * (if (a.style == 5 || a.style == 7) .8f else 1f)

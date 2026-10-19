@@ -34,7 +34,7 @@ fun GameEngine.rentBuilding(buildingId: Int): Boolean {
     val rent = rentOf(b)
     val deposit = rent / 2
     if (!spend(deposit, "Rent")) return false
-    state.rentals += Rental(buildingId, rent, state.day)
+    state.rentals += Rental(buildingId, rent, state.day, leaseEnd = state.day + com.hustlecity.game.model.LEASE_DAYS)
     if (b.kind == BKind.RESIDENTIAL) {
         val oldHome = state.player.home
         // furniture moves with you; anything that doesn't fit goes to storage

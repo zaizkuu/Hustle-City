@@ -248,6 +248,52 @@ class UiSnapshotTest {
         shoot(e, "ui_maps.png")
     }
 
+    /** A van on a route to the store, a driver, and the reorder switches. */
+    @Test
+    fun fleetApp() {
+        val e = game()
+        val bid = withBusiness(e)
+        e.state.player.courses += com.hustlecity.game.data.Catalog.COURSE_LOGISTICS
+        val van = com.hustlecity.game.model.OwnedVehicle(e.state.newId(), "freighter", e.state.player.x + 6f, e.state.player.y, 0f)
+        e.state.vehicles += van
+        val driver = com.hustlecity.game.model.Employee(e.state.newId(), "Dana Reyes", com.hustlecity.game.data.StaffRole.DRIVER, .6, 20.0, 20.0, 34)
+        e.state.employees += driver
+        val r = e.ops.newRoute(van)
+        r.stops += e.state.businessAt(bid)!!.id
+        e.ops.assignDriver(r, driver)
+        r.lastRun = "Day 1 06:00: 12 boxes for 1 stop, \$1,240.00 of stock, \$2.10 fuel. Back at 07:12."
+        e.ui.app = AppId.FLEET
+        shoot(e, "ui_fleet.png")
+    }
+
+    /** The stock exchange after a few days of trading, with a holding and a bond. */
+    @Test
+    fun marketsApp() {
+        val e = game()
+        e.state.player.money = 250_000.0
+        e.ops.ensureMarket()
+        repeat(4 * 1440) { e.simulateMinute() }
+        e.ops.buyShares(e.state.market.first { it.id == "HCI" }, 100)
+        e.ops.buyShares(e.state.market.first { it.id.startsWith("R") }, 1000)
+        e.ops.buyBond(10_000.0, 90)
+        e.ui.summary = null
+        e.ui.app = AppId.MARKETS
+        shoot(e, "ui_markets.png")
+    }
+
+    /** Shift presets, fatigue and perks in the schedule. */
+    @Test
+    fun bizHubSchedule() {
+        val e = game()
+        val bid = withBusiness(e)
+        val biz = e.state.businessAt(bid)!!
+        e.state.employees += com.hustlecity.game.model.Employee(e.state.newId(), "Sam Cruz", com.hustlecity.game.data.StaffRole.CUSTOMER_SERVICE, .6, 15.0, 15.0, 25,
+            businessId = biz.id, shiftStart = 6, shiftEnd = 14, fatigue = 62.0)
+        biz.perks += "coffee"
+        e.ui.app = AppId.BIZHUB; e.ui.bizHubSel = biz.id; e.ui.bizHubTab = 3
+        shoot(e, "ui_bizhub_schedule.png")
+    }
+
     @Test
     fun realty() {
         val e = game()

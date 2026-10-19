@@ -24,10 +24,17 @@ enum class StaffRole(val label: String, val baseWage: Double) {
     GRAPHIC_DESIGNER("Graphic Designer", 30.0),
     TRAVEL_AGENT("Travel Agent", 21.0),
     EVENT_PLANNER("Event Planner", 26.0),
+    /** Runs one store: hires to cover its hours, keeps wages fair and keeps the shelves stocked. */
+    STORE_MANAGER("Store Manager", 32.0),
+    /** Drives one of your vans on its delivery route. */
+    DRIVER("Delivery Driver", 20.0),
     ;
 
     /** Managers work from your Headquarters. */
     val atHeadquarters get() = this == HR_MANAGER || this == PURCHASING_AGENT
+
+    /** Roles that work anywhere (a store manager in their store, a driver on the road), not on the shop floor. */
+    val anyStore get() = this == STORE_MANAGER || this == DRIVER
 }
 
 enum class ItemFn {
@@ -126,7 +133,7 @@ data class VehicleDef(
     val height: Float,
     val color: Int,
     val happiness: Int,
-    val style: Int, // 0 car, 1 pickup, 2 van, 3 sports
+    val style: Int, // 0 car, 1 pickup, 2 van, 3 sports, 8 scooter, 9 SUV, 10 box truck
 )
 
 data class CampaignDef(val id: String, val name: String, val pricePerDay: Double, val boost: Double, val needsCourse: Boolean, val description: String)
@@ -984,6 +991,10 @@ object Catalog {
         VehicleDef("bulldog", "Bulldog Pickup", 24000.0, 14, 14.5f, 4.3f, 5.3f, 2.0f, 1.8f, c(0xFFE0E0E0), 4, 1),
         VehicleDef("freighter", "Freighter Van", 31000.0, 24, 12.5f, 3.5f, 5.6f, 2.1f, 2.4f, c(0xFFF5F5F5), 2, 2),
         VehicleDef("stellar", "Stellar GT", 78000.0, 2, 21f, 7.5f, 4.5f, 1.95f, 1.2f, c(0xFFF2C94C), 15, 3),
+        VehicleDef("zippy", "Zippy 125 Scooter", 2600.0, 1, 12f, 5.5f, 1.9f, .78f, 1.3f, c(0xFF2F80ED), 1, 8),
+        VehicleDef("ranger", "Ranger SUV", 41000.0, 10, 17f, 5.2f, 4.8f, 2.0f, 1.85f, c(0xFF2E4A3A), 8, 9),
+        VehicleDef("hauler", "Hauler Box Truck", 56000.0, 40, 11f, 2.6f, 7.2f, 2.4f, 3.3f, c(0xFF1F4FA0), 0, 10),
+        VehicleDef("vortex", "Vortex Hypercar", 265000.0, 1, 27f, 11f, 4.6f, 2.02f, 1.12f, c(0xFFE53935), 28, 3),
     )
     fun vehicle(id: String) = vehicles.first { it.id == id }
 

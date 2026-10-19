@@ -67,6 +67,7 @@ class GameEngine(context: Context?) {
     lateinit var city: City
     val traffic = Traffic()
     val economy = Economy(this)
+    val ops = Operations(this)
     val weather = WeatherSystem(this)
     val gps = Gps(this)
     val camera = CameraRig()
@@ -322,7 +323,35 @@ class GameEngine(context: Context?) {
         for (b in s.businesses) nw += BizCalc.furnitureValue(b) * .5 + BizCalc.stockValue(b) + b.revenueToday
         nw += s.rentals.filter { it.owned }.sumOf { city.building(it.buildingId)?.value ?: 0.0 }
         nw -= s.loans.sumOf { it.remaining }
+        // shares, bonds and the rival stores you bought
+        nw += ops.portfolioValue() + ops.bondsValue()
+        for (rb in s.rivalBusinesses) if (rb.rivalId == SUBSIDIARY) {
+            nw += RivalAI.storeValue(Catalog.type(rb.typeId), rb.level)
+            if (rb.owned) nw += city.building(rb.buildingId)?.value ?: 0.0
+        }
         return nw
+    }
+
+    private var tierCity: City? = null
+    private var tierCuts = DoubleArray(3)
+
+    /**
+     * What kind of home a residential building is, from its rent against the rest of the city: 0 studio,
+     * 1 apartment, 2 condo, 3 mansion (the top few percent).
+     */
+    fun homeTier(b: Building?): Int {
+        if (b == null || b.kind != BKind.RESIDENTIAL) return 0
+        if (tierCity !== city) {
+            val rents = city.buildings.filter { it.kind == BKind.RESIDENTIAL }.map { it.baseRent }.sorted()
+            if (rents.isNotEmpty()) tierCuts = doubleArrayOf(rents[(rents.size * .35).toInt()], rents[(rents.size * .72).toInt()], rents[(rents.size * .93).toInt().coerceAtMost(rents.size - 1)])
+            tierCity = city
+        }
+        return when {
+            b.baseRent >= tierCuts[2] -> 3
+            b.baseRent >= tierCuts[1] -> 2
+            b.baseRent >= tierCuts[0] -> 1
+            else -> 0
+        }
     }
 
     /** Player's rank among rivals by net worth (1 = richest). */
@@ -338,12 +367,12 @@ class GameEngine(context: Context?) {
     fun crowdAt(x: Float, y: Float): Float {
         val hood = city.neighborhoodAt(x, y)
         var f = .7f + .7f * hood.traffic
+        if (hasGame) f *= Operations.districtFactor(hood.look, state.hour, state.weekday).toFloat().coerceIn(.5f, 1.5f)
         for (l in city.landmarks) if (l.kind == com.hustlecity.game.world.Landmark.BILLBOARDS && dist(l.x, l.y, x, y) < 140f) f *= 1.5f
         val h = if (hasGame) state.hour else 12
         f *= when (h) {
-            in 1..5 -> .3f
-            0, 6, 23 -> .6f
-            7, 8, 12, 17, 18, 19 -> 1.2f
+            in 1..5 -> .45f
+            0, 6, 23 -> .75f
             else -> 1f
         }
         return f.coerceIn(.25f, 1.6f)
@@ -543,7 +572,7 @@ class GameEngine(context: Context?) {
             atGasStation = v != null && city.buildings.any { it.kind == BKind.GAS && it.contains(v.x, v.y) }
         } else {
             nearDoor = city.nearestDoor(p.x, p.y, 7f)
-            nearVehicle = state.vehicles.firstOrNull { dist(it.x, it.y, p.x, p.y) < 6f }
+            nearVehicle = state.vehicles.firstOrNull { !ops.away(it) && dist(it.x, it.y, p.x, p.y) < 6f }
             atGasStation = false
         }
     }
@@ -553,6 +582,7 @@ class GameEngine(context: Context?) {
         s.minute++
         needsMinute()
         economy.minute()
+        ops.minute()
         if (s.minute % MINUTES_PER_DAY == 0L) {
             economy.midnight()
             checkEndings()
@@ -569,7 +599,9 @@ class GameEngine(context: Context?) {
         val sleeping = skip?.kind == SkipKind.SLEEP || skip?.kind == SkipKind.HOSPITAL
         val working = p.workingAt >= 0 || skip?.kind == SkipKind.SIDE_JOB || skip?.kind == SkipKind.WORK
         if (sleeping) {
-            p.energy = (p.energy + 100.0 / (7.5 * 60)).coerceAtMost(100.0)
+            // a better home means better sleep: a mansion's bed rests you in under six hours
+            val rest = if (skip?.kind == SkipKind.SLEEP) HOME_REST[homeTier(city.building(p.home))] else 1.0
+            p.energy = (p.energy + 100.0 / (7.5 * 60) * rest).coerceAtMost(100.0)
             p.hunger = (p.hunger - 100.0 / (28 * 60)).coerceAtLeast(0.0)
         } else {
             var drain = 100.0 / (18 * 60) * p.rules.needs
@@ -619,7 +651,7 @@ class GameEngine(context: Context?) {
         val p = state.player
         var target = 48.0
         val home = city.building(p.home)
-        if (home != null) target += (home.area / 8.0).coerceAtMost(12.0) + home.hood.wealth * 4
+        if (home != null) target += (home.area / 8.0).coerceAtMost(12.0) + home.hood.wealth * 4 + homeTier(home) * 3
         target += state.vehicles.maxOfOrNull { it.def.happiness }?.toDouble() ?: -4.0
         target += state.homeFurniture.sumOf { Catalog.item(it.itemId)?.decor ?: 0 } * 1.5
         if (p.hunger < 20) target -= 20
@@ -916,6 +948,7 @@ class GameEngine(context: Context?) {
     fun enterVehicle(v: OwnedVehicle) {
         val p = state.player
         if (p.inBuilding >= 0) return
+        if (ops.away(v)) { toast("${v.def.name} is out on its delivery route"); return }
         // what you carry goes into the trunk first (or you can't get in)
         if (!loadForDriving(v)) return
         resetInput()
@@ -972,7 +1005,7 @@ class GameEngine(context: Context?) {
     fun nearbyVehicle(x: Float, y: Float, radius: Float): OwnedVehicle? {
         val p = state.player
         if (p.driving >= 0) return state.vehicle(p.driving)
-        return state.vehicles.filter { dist(it.x, it.y, x, y) < radius }.minByOrNull { dist(it.x, it.y, x, y) }
+        return state.vehicles.filter { !ops.away(it) && dist(it.x, it.y, x, y) < radius }.minByOrNull { dist(it.x, it.y, x, y) }
     }
 
     // ------------------------------------------------------------------ buildings
@@ -1162,5 +1195,11 @@ class GameEngine(context: Context?) {
         val p = state.player
         val list = ArrayList<CargoItem>(p.hand)
         return list
+    }
+
+    companion object {
+        val HOME_TIERS = listOf("Studio", "Apartment", "Condo", "Mansion")
+        /** How fast you recover energy asleep in each kind of home. */
+        val HOME_REST = doubleArrayOf(1.0, 1.1, 1.22, 1.35)
     }
 }

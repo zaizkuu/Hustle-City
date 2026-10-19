@@ -1180,10 +1180,14 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 put("desk", w - 4, 1)
                 put("plant_large", w - 1, 0)
                 put("plant_large", 0, 0)
+                // as many as the floor holds, scooters to trucks
                 val defs = Catalog.vehicles
+                val cols = ((w - 1) / 5).coerceIn(1, 4)
                 for ((i, v) in defs.withIndex()) {
-                    val col = i % 3; val row = i / 3
-                    showroom += Triple(v.id, 2.5f + col * 5f, 3f + row * 5f)
+                    val col = i % cols; val row = i / cols
+                    val y = 3f + row * 5f
+                    if (y + v.length * .4f > d - 2.5f) break
+                    showroom += Triple(v.id, 2.5f + col * 5f, y)
                 }
             }
             else -> {

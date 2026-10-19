@@ -185,6 +185,12 @@ private fun OverviewTab(e: GameEngine, biz: Business) {
             KeyValue("Customer limit", "${b.customerLimit} per hour")
             KeyValue("Parking spots", "${b.parking}")
             KeyValue(if (rental?.owned == true) "Ownership" else "Rent", if (rental?.owned == true) "Owned" else "${e.money(rental?.rentPerMonth ?: 0.0)}/month")
+            if (rental != null && !rental.owned && rental.leaseEnd > 0)
+                KeyValue("Lease renews", "day ${rental.leaseEnd} (~+${(e.ops.raiseFor(rental) * 100).roundToInt()}%)", bold = false)
+            val peak = com.hustlecity.game.engine.Operations.peakHours(b.hood.look)
+            KeyValue("Busiest hours", "%02d:00–%02d:00".format(peak, peak + 2), bold = false)
+            Text(com.hustlecity.game.engine.Operations.districtNote(b.hood.look), style = HT.small, color = HC.InkSoft)
+            e.ops.managerOf(biz)?.let { m -> KeyValue("Store manager", m.name) }
             KeyValue("Competitors in area", "${BizCalc.competitors(e, biz)}")
             HButton("Set waypoint", small = true, modifier = Modifier.padding(top = 6.dp)) { e.setWaypoint(b.id) }
         }
@@ -414,6 +420,7 @@ private fun ScheduleTab(e: GameEngine, biz: Business) {
                     Column(Modifier.padding(vertical = 6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("${emp.name} · ${emp.role.label}", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
+                            Text("fatigue ${emp.fatigue.roundToInt()}%  ", style = HT.small, color = if (emp.fatigue > 70) HC.Red else if (emp.fatigue > 45) HC.Orange else HC.InkSoft)
                             Text("${emp.weeklyHours}h/week", style = HT.small, color = if (emp.weeklyHours > 50) HC.Red else HC.InkSoft)
                             Spacer(Modifier.width(8.dp))
                             HButton("Unassign", small = true, color = HC.Red) { emp.businessId = -1; e.bump() }
@@ -432,8 +439,27 @@ private fun ScheduleTab(e: GameEngine, biz: Business) {
                                 ) { Text(listOf("M", "T", "W", "T", "F", "S", "S")[d], color = if (on) Color.White else HC.Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
                             }
                         }
+                        Row(Modifier.padding(top = 4.dp)) {
+                            val cur = com.hustlecity.game.engine.Shift.of(emp)
+                            for (sh in com.hustlecity.game.engine.Shift.entries)
+                                Chip("${sh.label} %02d–%02d".format(sh.start, sh.end), cur == sh, if (sh == com.hustlecity.game.engine.Shift.GRAVEYARD) HC.Purple else HC.Teal) { e.ops.setShift(emp, sh) }
+                        }
                     }
                 }
+            }
+            if (!biz.type.facility) WhiteCard(Modifier.fillMaxWidth()) {
+                CardTitle("Staff perks")
+                for (perk in com.hustlecity.game.engine.Operations.PERKS) {
+                    Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("${perk.name} · ${e.money(perk.cost)} per employee a day", style = HT.bodyBold, color = HC.Ink)
+                            Text(perk.description, style = HT.small, color = HC.InkSoft)
+                        }
+                        Switch(perk.id in biz.perks, { e.ops.togglePerk(biz, perk.id) }, colors = SwitchDefaults.colors(checkedTrackColor = HC.Green))
+                    }
+                }
+                Text("Now ${e.money(e.ops.perkCost(biz))} a day. Long shifts and graveyard hours tire staff: tired staff serve slower, ring up sales wrong and forget to restock.",
+                    style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(top = 4.dp))
             }
         }
         WhiteCard(Modifier.weight(1f)) {
@@ -442,7 +468,7 @@ private fun ScheduleTab(e: GameEngine, biz: Business) {
                 it.businessId != biz.id && when {
                     BizCalc.isHq(biz) -> it.role.atHeadquarters || it.role == StaffRole.CLEANER
                     biz.type.facility -> it.role == StaffRole.CLEANER
-                    else -> it.role == biz.type.staffRole || it.role == biz.type.performer || it.role == StaffRole.CLEANER
+                    else -> it.role == biz.type.staffRole || it.role == biz.type.performer || it.role == StaffRole.CLEANER || it.role == StaffRole.STORE_MANAGER
                 }
             }
             if (free.isEmpty()) {
@@ -470,7 +496,7 @@ private fun ScheduleTab(e: GameEngine, biz: Business) {
 
 @Composable
 private fun DeliveriesTab(e: GameEngine, biz: Business) {
-    val hasCourse = Catalog.COURSE_LOGISTICS in e.state.player.courses
+    val hasCourse = Catalog.COURSE_LOGISTICS in e.state.player.courses || biz.delivery?.byManager == true
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (!hasCourse) {
             WhiteCard(Modifier.fillMaxWidth()) {
@@ -495,7 +521,11 @@ private fun DeliveriesTab(e: GameEngine, biz: Business) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Delivery time", style = HT.body, color = HC.Ink, modifier = Modifier.width(110.dp))
                     Stepper("%02d:00".format(contract.hour), { contract.hour = (contract.hour + 23) % 24; e.bump() }, { contract.hour = (contract.hour + 1) % 24; e.bump() })
+                    Spacer(Modifier.width(16.dp))
+                    Text("Reorder when low", style = HT.body, color = HC.Ink)
+                    Switch(contract.auto, { on -> contract.auto = on; e.ops.defaultMinLevels(contract); e.bump() }, colors = SwitchDefaults.colors(checkedTrackColor = HC.Green))
                 }
+                if (contract.byManager) Text("Your store manager runs this contract.", style = HT.small, color = HC.Green)
                 var est = 0.0
                 for ((pid, target) in contract.targets) {
                     val p = Catalog.product(pid) ?: continue
@@ -505,10 +535,17 @@ private fun DeliveriesTab(e: GameEngine, biz: Business) {
                         ProductThumb(p, 30.dp)
                         Text(" ${p.name}", style = HT.bodyBold, color = HC.Ink, modifier = Modifier.weight(1f))
                         Text("stock ${biz.stock[pid] ?: 0} / cap $cap   restock to ", style = HT.small, color = HC.InkSoft)
-                        Stepper("$target", { contract.targets[pid] = (target - 10).coerceAtLeast(0); e.bump() }, { contract.targets[pid] = (target + 10).coerceAtMost(max(cap, 10)); e.bump() })
+                        Stepper("$target", { contract.targets[pid] = (target - 10).coerceAtLeast(0); e.bump() }, { contract.targets[pid] = (target + 10).coerceAtMost(max(cap + BizCalc.storageRoomFor(biz, pid), 10)); e.bump() })
+                        if (contract.auto) {
+                            val min = contract.minLevels[pid] ?: (target / 3)
+                            Text("  below ", style = HT.small, color = HC.InkSoft)
+                            Stepper("$min", { contract.minLevels[pid] = (min - 5).coerceAtLeast(0); e.bump() }, { contract.minLevels[pid] = (min + 5).coerceAtMost(target); e.bump() })
+                        }
                     }
                 }
-                Text("Estimated cost right now: ${e.money(est)} + \$60 delivery fee. Wholesale price +12%.", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
+                Text("Estimated cost right now: ${e.money(est)} + \$60 delivery fee. Wholesale price +12%." +
+                    (if (contract.auto) " With reorder on, an extra delivery goes out when anything drops below its threshold (at most every 3 hours)." else ""),
+                    style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
             } else Text("Turn on to set up daily deliveries.", style = HT.small, color = HC.InkSoft)
         }
     }

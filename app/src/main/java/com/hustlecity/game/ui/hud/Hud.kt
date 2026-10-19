@@ -344,10 +344,10 @@ fun PhonePanel(e: GameEngine, modifier: Modifier = Modifier, reserveTop: Int = 0
             RadioWidget(e)
             val apps = AppId.entries
             Column(Modifier.padding(vertical = 2.dp).verticalScroll(rememberScrollState())) {
-                for (row in 0 until 4) {
+                for (row in 0 until (apps.size + 1) / 2) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                         for (col in 0 until 2) {
-                            val id = apps[row * 2 + col]
+                            val id = apps.getOrNull(row * 2 + col) ?: continue
                             val badge = when (id) { AppId.CONTACTS -> unread; AppId.STAFF -> candidates; else -> 0 }
                             AppIconTile(id, 30.dp, badge = badge) { openApp(e, id) }
                         }
@@ -539,11 +539,18 @@ fun BuildingCard(e: GameEngine, modifier: Modifier = Modifier, avoidPhone: Boole
             if (nameLine != null) Text(nameLine.uppercase(), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
             Text("NEIGHBORHOOD: ${b.hood.name.uppercase()}", color = Color.White.copy(alpha = .8f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
             Text("TRAFFIC INDEX: ${(b.traffic * 100).roundToInt()}%", color = Color.White.copy(alpha = .8f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            if (b.kind == com.hustlecity.game.world.BKind.RESIDENTIAL)
+                Text("HOME: ${com.hustlecity.game.engine.GameEngine.HOME_TIERS[e.homeTier(b)].uppercase()}", color = Color.White.copy(alpha = .8f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            else if (b.kind == com.hustlecity.game.world.BKind.RETAIL) {
+                val peak = com.hustlecity.game.engine.Operations.peakHours(b.hood.look)
+                Text("BUSIEST: %02d:00–%02d:00".format(peak, peak + 2), color = Color.White.copy(alpha = .8f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
             val status: Pair<String, Color>? = when {
                 b.id == s.player.home -> "YOUR HOME" to HC.Orange
                 rental?.owned == true -> "OWNED BY YOU" to HC.Orange
                 rental != null -> "RENTED BY YOU" to HC.Orange
                 biz != null -> null
+                rival != null && rival.rivalId == com.hustlecity.game.engine.SUBSIDIARY -> "YOUR SUBSIDIARY" to HC.Orange
                 rival != null -> "OWNED BY ${s.rivals.firstOrNull { it.id == rival.rivalId }?.name?.uppercase()}" to Color(0xFFBFC7D1)
                 e.isVacant(b.id) -> "FOR RENT · ${e.money(e.rentOf(b))}/MONTH" to HC.GreenLight
                 b.solid && place == null -> "BUILDING OWNED BY ${b.landlord.uppercase()}" to Color(0xFFBFC7D1)

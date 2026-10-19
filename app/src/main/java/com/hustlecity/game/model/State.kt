@@ -90,7 +90,56 @@ data class DeliveryContract(
     var enabled: Boolean = true,
     var hour: Int = 7,
     val targets: MutableMap<String, Int> = mutableMapOf(),
+    /** Reorder as soon as stock falls below its threshold, besides the daily delivery. */
+    var auto: Boolean = false,
+    /** Threshold per product: an order goes out when what's on hand drops below it. */
+    val minLevels: MutableMap<String, Int> = mutableMapOf(),
+    /** When the last automatic order went out (one every few hours at most). */
+    var lastAuto: Long = -1,
+    /** Set up and run by the store's manager: needs no Logistics course. */
+    var byManager: Boolean = false,
 )
+
+/**
+ * A van's standing delivery route: at [hour] on [days] its driver loads up at [source] (a wholesaler, or "wh:<id>"
+ * for one of your warehouses) and drops stock at each of [stops] in turn, topping them up to their targets.
+ */
+@Serializable
+data class FleetRoute(
+    val id: Int,
+    var vehicleId: Int,
+    var driverId: Int = -1,
+    var source: String = "metro",
+    val stops: MutableList<Int> = mutableListOf(),
+    var hour: Int = 6,
+    var days: Int = 0b1111111,
+    var enabled: Boolean = true,
+    /** Summary of the last run, for the Fleet app. */
+    var lastRun: String = "",
+    var lastDay: Int = -1,
+)
+
+/** Stock on a van, due at a store at [minute]. */
+@Serializable
+data class FleetDrop(val minute: Long, val bizId: Int, val pid: String, val qty: Int, val unitCost: Double, val routeId: Int)
+
+/** A listed company: a rival (id "R<rivalId>") or one of the city's other firms. */
+@Serializable
+data class Ticker(
+    val id: String,
+    val name: String,
+    var price: Double,
+    /** Daily drift and volatility of a firm's shares. */
+    val drift: Double = .0004,
+    val vol: Double = .02,
+    val shares: Int = 50_000,
+    /** Closing prices, oldest first (last 60 days). */
+    val history: MutableList<Double> = mutableListOf(),
+)
+
+/** A city bond: [principal] paid back with interest at [rate] a year on [matures]. */
+@Serializable
+data class Bond(val id: Int, val principal: Double, val rate: Double, val bought: Int, val matures: Int)
 
 @Serializable
 data class BizDay(
@@ -170,6 +219,11 @@ data class Business(
     var backRoom: Int = -1,
     /** First tile (x) of the doorway in the back room's wall. */
     var backDoor: Int = -1,
+    /** Staff perks paid for daily: "coffee", "health", "bonus". */
+    val perks: MutableSet<String> = mutableSetOf(),
+    /** Sales lost to tired staff ringing things up wrong, and restocks they missed, today. */
+    var billingErrorsToday: Double = 0.0,
+    var missedRestocksToday: Int = 0,
 ) {
     val type get() = Catalog.type(typeId)
 }
@@ -193,7 +247,18 @@ data class Employee(
     var unhappyDays: Int = 0,
     var hiredDay: Int = 0,
     var expiresDay: Int = 0,
+    /** 0..100: grows with long and night shifts, wears off between them. Tired staff work slower and make mistakes. */
+    var fatigue: Double = 0.0,
+    /** Away on a training course until this minute. */
+    var trainingUntil: Long = -1,
+    /** A rival's job offer: who from, the wage, and the last day to answer it. */
+    var offerFrom: Int = -1,
+    var offerWage: Double = 0.0,
+    var offerDay: Int = 0,
 ) {
+    /** On a training course right now. */
+    fun training(minute: Long) = trainingUntil > minute
+
     fun worksAt(hour: Int, weekday: Int): Boolean {
         if (shiftStart <= shiftEnd) return (days shr weekday) and 1 == 1 && hour in shiftStart until shiftEnd
         // overnight shift: the hours after midnight belong to the shift that started the day before
@@ -219,7 +284,18 @@ enum class Sky(val label: String, val icon: String) {
 data class WeatherSpan(val start: Long, val end: Long, val sky: Sky)
 
 @Serializable
-data class Rental(val buildingId: Int, var rentPerMonth: Double, val startDay: Int, val owned: Boolean = false)
+data class Rental(
+    val buildingId: Int,
+    var rentPerMonth: Double,
+    val startDay: Int,
+    val owned: Boolean = false,
+    /** Day the lease is up for renewal, when the landlord may raise the rent (0: not set yet, older saves). */
+    var leaseEnd: Int = 0,
+    var renewals: Int = 0,
+)
+
+/** Leases run for this many days before they renew. */
+const val LEASE_DAYS = 60
 
 @Serializable
 data class OwnedVehicle(
@@ -232,6 +308,8 @@ data class OwnedVehicle(
     var condition: Double = 1.0,
     val cargo: MutableList<CargoItem> = mutableListOf(),
     var color: Int = 0,
+    /** Out on a delivery route until this minute (it's not parked anywhere meanwhile). */
+    var awayUntil: Long = -1,
 ) {
     val def get() = Catalog.vehicle(defId)
 }
@@ -265,7 +343,8 @@ data class Rival(
 @Serializable
 data class RivalBusiness(
     val id: Int,
-    val rivalId: Int,
+    /** The company running it; [SUBSIDIARY] once you have bought it. */
+    var rivalId: Int,
     val buildingId: Int,
     val typeId: String,
     val name: String,
@@ -359,6 +438,14 @@ data class GameState(
     var snowCover: Double = 0.0,
     /** Which map the city was generated from (older saves are all the classic grid). */
     val mapId: String = "classic",
+    /** Delivery routes for your vans, and the stock they are carrying right now. */
+    val fleet: MutableList<FleetRoute> = mutableListOf(),
+    val fleetDrops: MutableList<FleetDrop> = mutableListOf(),
+    /** The stock exchange: listed firms, your shares in each (by ticker id), what you paid, and your city bonds. */
+    val market: MutableList<Ticker> = mutableListOf(),
+    val holdings: MutableMap<String, Int> = mutableMapOf(),
+    val costBasis: MutableMap<String, Double> = mutableMapOf(),
+    val bonds: MutableList<Bond> = mutableListOf(),
 ) {
     val day: Int get() = (minute / MINUTES_PER_DAY).toInt() + 1
     val hour: Int get() = ((minute % MINUTES_PER_DAY) / 60).toInt()

@@ -12,7 +12,7 @@ enum class Screen { MENU, NEW_GAME, GAME }
 
 enum class AppId(val title: String) {
     PERSONA("Persona"), CONTACTS("Contacts"), RIVALS("Rivals"), STAFF("Staff"),
-    BIZHUB("BizHub"), FINANCE("Finance"), REALTY("Realty"), MAPS("Maps"),
+    BIZHUB("BizHub"), FINANCE("Finance"), REALTY("Realty"), FLEET("Fleet"), MARKETS("Markets"), MAPS("Maps"),
 }
 
 sealed class Panel {

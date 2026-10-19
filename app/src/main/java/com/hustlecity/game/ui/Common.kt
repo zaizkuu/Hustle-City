@@ -64,6 +64,8 @@ fun appGlyph(id: AppId): String = when (id) {
     AppId.BIZHUB -> "app_bizhub"
     AppId.FINANCE -> "app_finance"
     AppId.REALTY -> "app_realty"
+    AppId.FLEET -> "app_fleet"
+    AppId.MARKETS -> "app_markets"
     AppId.MAPS -> "app_maps"
 }
 
