@@ -181,6 +181,12 @@ class CinematicUiTest {
         val biz = cafe(e)
         biz.perks += listOf("coffee", "health")
         e.state.employees += Employee(e.state.newId(), "Ava Stone", StaffRole.STORE_MANAGER, .84, 32.0, 32.0, 41, businessId = biz.id, shiftStart = 8, shiftEnd = 16)
+        // a morning and an evening shift that overlap at lunch, and two hires still to place
+        val role = biz.type.staffRole
+        e.state.employees += Employee(e.state.newId(), "Mika Tan", role, .72, 18.0, 18.0, 24, businessId = biz.id, shiftStart = 7, shiftEnd = 15)
+        e.state.employees += Employee(e.state.newId(), "Leo Park", role, .65, 17.0, 17.0, 29, businessId = biz.id, shiftStart = 12, shiftEnd = 21)
+        e.state.employees += Employee(e.state.newId(), "Rosa Cruz", role, .81, 21.0, 21.0, 36)
+        e.state.employees += Employee(e.state.newId(), "Sam Okafor", role, .58, 16.0, 16.0, 22)
         e.ui.app = AppId.BIZHUB; e.ui.bizHubSel = biz.id; e.ui.bizHubTab = 3
         still(e, "app_schedule")
     }

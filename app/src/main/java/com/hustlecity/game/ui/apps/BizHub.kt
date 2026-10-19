@@ -1,19 +1,20 @@
 package com.hustlecity.game.ui.apps
 
-import com.hustlecity.game.ui.icons.GIcon
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,11 +38,13 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +52,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -79,6 +84,7 @@ import com.hustlecity.game.ui.LabeledBar
 import com.hustlecity.game.ui.ProductThumb
 import com.hustlecity.game.ui.Stepper
 import com.hustlecity.game.ui.WhiteCard
+import com.hustlecity.game.ui.icons.GIcon
 import com.hustlecity.game.ui.theme.HC
 import com.hustlecity.game.ui.theme.HT
 import com.hustlecity.game.ui.toColor
@@ -142,10 +148,18 @@ fun BizHubApp(e: GameEngine) {
             val tabs = if (biz.type.facility) listOf(building.address, if (BizCalc.isWarehouse(biz)) "Storage" else "Team", "Schedule", "Settings")
             else listOf(building.address, "Insight", "Inventory & Pricing", "Schedule", "Deliveries", "Marketing", "Settings")
             if (e.ui.bizHubTab >= tabs.size) e.ui.bizHubTab = 0
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            // keep the open tab in view on narrow screens, where the tab strip scrolls
+            val tabScroll = rememberScrollState()
+            val tabX = remember(tabs.size) { IntArray(tabs.size) }
+            LaunchedEffect(e.ui.bizHubTab, tabs.size) {
+                withFrameNanos { }
+                tabScroll.animateScrollTo((tabX[e.ui.bizHubTab] - 24).coerceAtLeast(0))
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(tabScroll)) {
                 for ((i, t) in tabs.withIndex()) {
                     val sel = e.ui.bizHubTab == i
-                    Column(Modifier.clickable { e.ui.bizHubTab = i }.padding(horizontal = 12.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(Modifier.onGloballyPositioned { tabX[i] = it.positionInParent().x.toInt() }.clickable { e.ui.bizHubTab = i }
+                        .padding(horizontal = 12.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(t, color = if (sel) Color.White else Color.White.copy(alpha = .6f), fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         Box(Modifier.padding(top = 3.dp).height(2.dp).width(40.dp).background(if (sel) Color.White else Color.Transparent))
                     }
@@ -373,6 +387,7 @@ private fun InventoryTab(e: GameEngine, biz: Business) {
 
 private fun priceStep(price: Double) = when { price < 5 -> .1; price < 20 -> .5; price < 100 -> 1.0; else -> 10.0 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ScheduleTab(e: GameEngine, biz: Business) {
     val s = e.state
@@ -380,12 +395,16 @@ private fun ScheduleTab(e: GameEngine, biz: Business) {
         Column(Modifier.weight(1.3f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (!biz.type.facility) WhiteCard(Modifier.fillMaxWidth()) {
                 CardTitle("Opening hours (every day)")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Opens", style = HT.body, color = HC.Ink, modifier = Modifier.width(60.dp))
-                    Stepper("%02d:00".format(biz.openHour), { biz.openHour = (biz.openHour + 23) % 24; e.bump() }, { biz.openHour = (biz.openHour + 1) % 24; e.bump() })
-                    Spacer(Modifier.width(20.dp))
-                    Text("Closes", style = HT.body, color = HC.Ink, modifier = Modifier.width(60.dp))
-                    Stepper("%02d:00".format(biz.closeHour), { biz.closeHour = (biz.closeHour + 23) % 24; e.bump() }, { biz.closeHour = (biz.closeHour + 1) % 24; e.bump() })
+                // opening and closing side by side when there's room, one above the other on a narrow card
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Opens", style = HT.body, color = HC.Ink, modifier = Modifier.width(60.dp))
+                        Stepper("%02d:00".format(biz.openHour), { biz.openHour = (biz.openHour + 23) % 24; e.bump() }, { biz.openHour = (biz.openHour + 1) % 24; e.bump() })
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Closes", style = HT.body, color = HC.Ink, modifier = Modifier.width(60.dp))
+                        Stepper("%02d:00".format(biz.closeHour), { biz.closeHour = (biz.closeHour + 23) % 24; e.bump() }, { biz.closeHour = (biz.closeHour + 1) % 24; e.bump() })
+                    }
                 }
                 Text("Staff coverage today (${biz.type.staffRole.label})", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
                 Row(Modifier.fillMaxWidth()) {
@@ -393,11 +412,12 @@ private fun ScheduleTab(e: GameEngine, biz: Business) {
                         val open = BizCalc.isWithinHours(biz, h)
                         val n = s.employees.count { it.businessId == biz.id && it.role == biz.type.staffRole && it.worksAt(h, s.weekday) }
                         val col = when { !open -> Color(0xFFE3E7EC); n == 0 -> HC.Red; n == 1 -> HC.GreenLight; else -> HC.Green }
-                        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(Modifier.padding(horizontal = 1.dp).fillMaxWidth().height(18.dp).background(col))
-                            if (h % 3 == 0) Text("$h", fontSize = 8.sp, color = HC.InkSoft)
-                        }
+                        Box(Modifier.weight(1f).padding(horizontal = 1.dp).height(18.dp).background(col))
                     }
+                }
+                // hour marks every three hours, each spanning its three columns so two-digit hours never wrap
+                Row(Modifier.fillMaxWidth()) {
+                    for (h in 0 until 24 step 3) Text("$h", fontSize = 8.sp, color = HC.InkSoft, maxLines = 1, modifier = Modifier.weight(3f).padding(start = 1.dp))
                 }
                 biz.type.performer?.let { perf ->
                     Text("${perf.label} coverage (required to serve customers)", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
