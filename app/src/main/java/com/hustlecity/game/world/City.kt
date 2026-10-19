@@ -183,20 +183,66 @@ class Park(val name: String, val poly: FloatArray, val kind: Int = GREEN, val ro
 /** An elevated railway (or monorail) running over the streets on pillars. */
 class Rail(val name: String, val pts: FloatArray, val color: Int, val loop: Boolean)
 
-/** A one-off structure drawn by the renderer (towers, gates, billboards…). */
-class Landmark(val kind: Int, val x: Float, val y: Float, val angle: Float = 0f, val size: Float = 1f, val name: String = "") {
+/**
+ * A one-off structure drawn by the renderer (towers, gates, billboards…). It has a local frame like a building: x runs
+ * along its face, y from front (-y) to back (+y), turned by [angle]; [size] scales it. [style] picks a variant.
+ */
+class Landmark(val kind: Int, val x: Float, val y: Float, val angle: Float = 0f, val size: Float = 1f, val name: String = "", val style: Int = 0) {
+    val cs = cos(angle)
+    val sn = sin(angle)
+    fun wx(lx: Float, ly: Float) = x + lx * cs - ly * sn
+    fun wy(lx: Float, ly: Float) = y + lx * sn + ly * cs
+
+    /** Ground it stands on in local meters (x0, y0, x1, y1, before [size]); null when it only dresses the buildings around. */
+    val extent: FloatArray? get() = when (kind) {
+        TOWER -> if (style == LATTICE) floatArrayOf(-24f, -24f, 24f, 24f) else floatArrayOf(-34f, -34f, 34f, 34f)
+        TORII -> floatArrayOf(-10f, -5f, 10f, 46f)
+        MONUMENT -> floatArrayOf(-12f, -12f, 12f, 12f)
+        PALACE_GATE -> floatArrayOf(-46f, -10f, 46f, 10f)
+        CHURCH -> floatArrayOf(-14.5f, -34f, 14.5f, 27f)
+        WHEEL -> floatArrayOf(-33f, -11f, 33f, 11f)
+        else -> null
+    }
+
+    /** [extent] as a world polygon: no buildings, trees or street furniture inside. */
+    val footprint: FloatArray? by lazy {
+        val ex = extent ?: return@lazy null
+        val k = size
+        floatArrayOf(wx(ex[0] * k, ex[1] * k), wy(ex[0] * k, ex[1] * k), wx(ex[2] * k, ex[1] * k), wy(ex[2] * k, ex[1] * k),
+            wx(ex[2] * k, ex[3] * k), wy(ex[2] * k, ex[3] * k), wx(ex[0] * k, ex[3] * k), wy(ex[0] * k, ex[3] * k))
+    }
+
+    /** Roads are cleared out of the footprint (a church square, the ground under a tower or a wheel). */
+    val clearsRoads get() = kind == TOWER || kind == CHURCH || kind == WHEEL || kind == PALACE_GATE
+
     companion object {
+        /** [TOWER] styles: a concrete tower on a wooded hill, or a steel lattice. */
+        const val CONCRETE = 0
+        const val LATTICE = 1
+        /** [CHURCH] styles: dome with a campanile beside the front, dome with a tower on the front, octagonal pagoda tower. */
+        const val CATHEDRAL = 0
+        const val BASILICA = 1
+        const val PAGODA_TOWER = 2
+        /** [PALACE_GATE] styles: a Korean gate pavilion on an arched stone platform, or a white Japanese yagura gate. */
+        const val HANOK_GATE = 0
+        const val YAGURA_GATE = 1
+        /** [BILLBOARDS] styles: screens on every face, a scramble crossing, a lit arch over the lane, blade signs. */
+        const val SCREENS = 0
+        const val SCRAMBLE = 1
+        const val ARCADE = 2
+        const val SIGNS = 3
+
         /** A slender broadcast tower on a hill (N Seoul Tower). */
         const val TOWER = 0
-        /** A shrine gate. */
+        /** A shrine gate; the approach runs on to +y. */
         const val TORII = 1
         /** A square of giant lit billboards (Times Square, Shibuya crossing). */
         const val BILLBOARDS = 2
         /** A stone monument or obelisk. */
         const val MONUMENT = 3
-        /** A tiled palace gate. */
+        /** A tiled palace gate in the grounds' wall; local +y points into the grounds. */
         const val PALACE_GATE = 4
-        /** A cathedral with a dome and bell tower. */
+        /** A cathedral with a dome and bell tower, its front and square toward -y. */
         const val CHURCH = 5
         /** A Ferris wheel. */
         const val WHEEL = 6
@@ -347,6 +393,13 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
 
     fun neighborhoodAt(x: Float, y: Float): Neighborhood = neighborhoods[map.hoodAt(x, y)]
 
+    /** Inside a landmark's grounds or on the old city walls: street furniture stays out. */
+    fun reserved(x: Float, y: Float): Boolean {
+        for (l in landmarks) { val f = l.footprint ?: continue; if (Geo.inside(x, y, f)) return true }
+        for (w in walls) for (i in 0 until w.size / 2 - 1) if (Geo.distToSeg(x, y, w[i * 2], w[i * 2 + 1], w[i * 2 + 2], w[i * 2 + 3]) < WALL_BAND) return true
+        return false
+    }
+
     private val hit = RoadHit()
 
     /** Human readable location for the bottom HUD label: the nearest road and a house number. */
@@ -445,6 +498,8 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
     }
 
     companion object {
+        /** City walls are 6 m thick on their centre line; trees and street furniture keep this far from it. */
+        const val WALL_BAND = 6f
         private val ROOFS = intArrayOf(c(0xFF6E7378), c(0xFF5F6368), c(0xFF7D8085), c(0xFF8A8D91), c(0xFF55595E))
         fun roofColor(i: Int) = ROOFS[abs(i) % ROOFS.size]
     }

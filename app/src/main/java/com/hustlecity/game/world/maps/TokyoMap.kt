@@ -70,7 +70,7 @@ object TokyoMap : PlannedMap("tokyo", "Tokyo", "The palace and its moat, Shinjuk
         parks += Park("Imperial Palace", grounds, Park.GROUNDS)
         val moat = Geo.band(rotRect(800f, 470f, 318f, 348f, .05f).let { it + floatArrayOf(it[0], it[1]) }, 8f)
         water += moat
-        landmarks += Landmark(Landmark.PALACE_GATE, 960f, 470f, .05f + Math.PI.toFloat() / 2, 1f, "Otemon")
+        landmarks += Landmark(Landmark.PALACE_GATE, 942f, 470f, .05f + Math.PI.toFloat() / 2, 1f, "Otemon", Landmark.YAGURA_GATE)
 
         // avenues
         curve(floatArrayOf(-60f, 330f, 200f, 320f, 400f, 300f, 640f, 250f, 900f, 230f, 1300f, 175f), RoadClass.BOULEVARD, "Yasukuni-dori")
@@ -93,7 +93,7 @@ object TokyoMap : PlannedMap("tokyo", "Tokyo", "The palace and its moat, Shinjuk
         skyline += westShinjuku to 2.0f
         // Kabukicho and East Shinjuku: neon lanes
         organic(floatArrayOf(360f, 200f, 600f, 210f, 610f, 520f, 370f, 540f), 36f, 9f, .02f, .12f, RoadClass.LANE, lanes, ring = null)
-        landmarks += Landmark(Landmark.BILLBOARDS, 470f, 330f, 0f, .8f, "Kabukicho")
+        landmarks += Landmark(Landmark.BILLBOARDS, 470f, 330f, 0f, .8f, "Kabukicho", Landmark.ARCADE)
         // Shibuya: streets fanning out from the scramble
         val sx = 300f; val sy = 960f
         val spokes = floatArrayOf(0f, 50f, 105f, 165f, 220f, 280f, 330f)
@@ -102,7 +102,7 @@ object TokyoMap : PlannedMap("tokyo", "Tokyo", "The palace and its moat, Shinjuk
             roads.add(sx, sy, sx + cos(r) * 320f, sy + sin(r) * 320f, if (i % 2 == 0) RoadClass.STREET else RoadClass.LANE, lanes[(i + 6) % lanes.size])
         }
         for (rad in floatArrayOf(80f, 160f, 240f)) roads.polyline(Geo.ellipse(sx, sy, rad, rad * .92f, 28).let { it + floatArrayOf(it[0], it[1]) }, RoadClass.LANE, lanes[(rad / 80f).toInt() + 7])
-        landmarks += Landmark(Landmark.BILLBOARDS, sx, sy, 0f, 1.2f, "Shibuya Crossing")
+        landmarks += Landmark(Landmark.BILLBOARDS, sx, sy, 0f, 1.2f, "Shibuya Crossing", Landmark.SCRAMBLE)
         // Meiji Shrine's forest and Yoyogi Park
         parks += Park("Meiji Jingu", floatArrayOf(40f, 640f, 250f, 650f, 262f, 830f, 40f, 820f), Park.GROUNDS)
         landmarks += Landmark(Landmark.TORII, 256f, 760f, Math.PI.toFloat() / 2, 1.1f, "Meiji Jingu")
@@ -113,7 +113,7 @@ object TokyoMap : PlannedMap("tokyo", "Tokyo", "The palace and its moat, Shinjuk
         organic(floatArrayOf(400f, -60f, 720f, -60f, 640f, 200f, 620f, 540f, 400f, 540f), 52f, 13f, .3f, .18f, RoadClass.LANE, lanes, ring = null)
         // Akihabara and Kanda
         organic(floatArrayOf(700f, -60f, 1160f, -60f, 1160f, 240f, 700f, 230f), 40f, 10f, -.05f, .12f, RoadClass.LANE, akiba, ring = null)
-        landmarks += Landmark(Landmark.BILLBOARDS, 1010f, 120f, 0f, .9f, "Akihabara")
+        landmarks += Landmark(Landmark.BILLBOARDS, 1010f, 120f, 0f, .9f, "Akihabara", Landmark.SIGNS)
         // Marunouchi and Otemachi: business towers east of the palace
         val marunouchiArea = floatArrayOf(985f, 250f, 1150f, 250f, 1140f, 700f, 985f, 700f)
         grid(marunouchiArea, 1060f, 470f, .05f, 112f, 100f, { RoadClass.AVENUE }, { RoadClass.STREET },
@@ -126,7 +126,7 @@ object TokyoMap : PlannedMap("tokyo", "Tokyo", "The palace and its moat, Shinjuk
         organic(floatArrayOf(930f, 1060f, 1170f, 1060f, 1185f, 1360f, 930f, 1360f), 46f, 11f, .62f, .14f, RoadClass.LANE, ginza, ring = null)
         // Roppongi and Azabu: up and down hill streets, Tokyo Tower above them
         organic(floatArrayOf(470f, 760f, 920f, 720f, 940f, 1200f, 600f, 1250f, 470f, 1180f), 50f, 14f, -.25f, .15f, RoadClass.STREET, roppongi, ring = null)
-        landmarks += Landmark(Landmark.TOWER, 820f, 1150f, 0f, 1f, "Tokyo Tower")
+        landmarks += Landmark(Landmark.TOWER, 820f, 1150f, 0f, 1f, "Tokyo Tower", Landmark.LATTICE)
         // the east bank of the Sumida
         grid(floatArrayOf(1255f, -60f, 1360f, -60f, 1360f, 1360f, 1255f, 1360f), 1300f, 600f, 0f, 90f, 70f,
             { RoadClass.STREET }, { RoadClass.STREET }, { "Sumida ${it}-chome" }, { "Kuramae-bashi-dori" })

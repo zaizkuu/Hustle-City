@@ -106,7 +106,7 @@ class StreetProps(val city: City) {
                 if (s1 - s0 < 6f) continue
                 fun at(s: Float, off: Float, k: Int) {
                     val px = e.ax + e.ux * s + nx * off; val py = e.ay + e.uy * s + ny * off
-                    if (city.shore.anyWater(px, py) || city.parks.any { Geo.inside(px, py, it.poly) }) return
+                    if (city.shore.anyWater(px, py) || city.parks.any { Geo.inside(px, py, it.poly) } || city.reserved(px, py)) return
                     add(px, py, k, -nx, -ny)
                 }
                 val hood = city.neighborhoodAt(e.ax + e.ux * (s0 + s1) * .5f + nx * 12f, e.ay + e.uy * (s0 + s1) * .5f + ny * 12f)
@@ -181,7 +181,7 @@ class StreetProps(val city: City) {
     private fun park(p: Park) {
         if (Geo.area(p.poly) < 2500f) return
         val (cx, cy) = p.centre
-        if (Geo.inside(cx, cy, p.poly) && !city.shore.anyWater(cx, cy)) {
+        if (Geo.inside(cx, cy, p.poly) && !city.shore.anyWater(cx, cy) && !city.reserved(cx, cy)) {
             add(cx, cy, FOUNTAIN, 0f, 1f)
             for ((i, t) in city.trees.withIndex()) if (abs(t.x - cx) < 8f && abs(t.y - cy) < 8f) hiddenTree[i] = true
         }
@@ -195,7 +195,7 @@ class StreetProps(val city: City) {
             var s = 6f; var k = 0
             while (s < len - 4f) {
                 val px = ax + ux * s; val py = ay + uy * s
-                if (dist(px, py, cx, cy) > 9f && !city.shore.anyWater(px, py)) {
+                if (dist(px, py, cx, cy) > 9f && !city.shore.anyWater(px, py) && !city.reserved(px, py)) {
                     val side = if (k % 2 == 0) 1f else -1f
                     add(px - uy * 2.4f * side, py + ux * 2.4f * side, PARK_LAMP, uy * side, -ux * side)
                     if (k % 3 != 2) add(px + ux * 5f + uy * 2.6f * side, py + uy * 5f - ux * 2.6f * side, BENCH, -uy * side, ux * side)

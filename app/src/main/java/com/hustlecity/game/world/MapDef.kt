@@ -90,7 +90,7 @@ abstract class PlannedMap(id: String, title: String, blurb: String) : MapDef(id,
         val walls = ArrayList<FloatArray>()
         /** Areas where buildings are taller (downtown cores): polygon and multiplier. */
         override val skyline = ArrayList<Pair<FloatArray, Float>>()
-        override val blockers: List<FloatArray> get() = canals + parks.map { it.poly } + open
+        override val blockers: List<FloatArray> get() = canals + parks.map { it.poly } + open + landmarks.mapNotNull { it.footprint }
         private var shoreCache: Shore? = null
         override val shore: Shore get() = shoreCache ?: Shore(water, land, islands, canals).also { shoreCache = it }
     }
@@ -113,9 +113,11 @@ abstract class PlannedMap(id: String, title: String, blurb: String) : MapDef(id,
     override fun generate(seed: Long): CityLayout {
         val p = Plan(Random(seed))
         plan(p)
+        // landmark grounds are cut out of the side streets exactly at their outline
+        val cleared = p.landmarks.filter { it.clearsRoads }.mapNotNull { it.footprint }
         val blockedRoads = p.parks.filter { !it.roads }.map { it.poly }
         val shore = p.shore
-        val graph = p.roads.build({ x, y -> shore.wet(x, y) }, blockedRoads)
+        val graph = p.roads.build({ x, y -> shore.wet(x, y) }, blockedRoads, cut = cleared)
         numberRoads(graph)
         val hoodList = hoods.map { it.hood }
         val buildings = Lots(this, graph, p, hoodList).place()
@@ -123,7 +125,16 @@ abstract class PlannedMap(id: String, title: String, blurb: String) : MapDef(id,
         val trees = ArrayList(p.trees)
         streetTrees(graph, buildings, p, trees)
         parkTrees(p, trees)
+        trees.removeAll { t -> clearOfTrees(p, t.x, t.y) }
         return CityLayout(graph, buildings, trees, shore, p.parks, p.rails, hoodList, extent, p.landmarks, p.walls)
+    }
+
+    /** Landmark grounds, the corridor under elevated railways and the old city walls have no trees. */
+    private fun clearOfTrees(p: Plan, x: Float, y: Float): Boolean {
+        for (l in p.landmarks) { val f = l.footprint ?: continue; if (Geo.inside(x, y, f)) return true }
+        for (r in p.rails) { val q = r.pts; for (i in 0 until q.size / 2 - 1) if (Geo.distToSeg(x, y, q[i * 2], q[i * 2 + 1], q[i * 2 + 2], q[i * 2 + 3]) < 6.5f) return true }
+        for (w in p.walls) for (i in 0 until w.size / 2 - 1) if (Geo.distToSeg(x, y, w[i * 2], w[i * 2 + 1], w[i * 2 + 2], w[i * 2 + 3]) < City.WALL_BAND) return true
+        return false
     }
 
     private fun assignPlaces(buildings: List<Building>, rnd: Random) {
@@ -318,6 +329,11 @@ abstract class PlannedMap(id: String, title: String, blurb: String) : MapDef(id,
  * water, parks and open ground.
  */
 class Lots(private val map: PlannedMap, private val g: RoadGraph, private val plan: PlannedMapPlanAccess, private val hoods: List<Neighborhood>) {
+    companion object {
+        /** Lots keep this far from an elevated railway's centre line. */
+        const val RAIL_CLEAR = 7f
+    }
+
     private val placed = ArrayList<OBB>()
     private val cell = 40f
     private val buckets = HashMap<Long, MutableList<Int>>()
@@ -337,8 +353,8 @@ class Lots(private val map: PlannedMap, private val g: RoadGraph, private val pl
                 // n points from the road to the lots on this side
                 val nx = e.uy * side; val ny = -e.ux * side
                 val setback = e.cls.outer + .2f
-                var s = e.clearA + 1.5f
-                val end = e.len - e.clearB - 1.5f
+                var s = e.clearA + endPad(e.a)
+                val end = e.len - e.clearB - endPad(e.b)
                 while (s < end - 5f) {
                     val mx = e.ax + e.ux * s; val my = e.ay + e.uy * s
                     val hood = hoods[map.hoodAt(mx + nx * 15f, my + ny * 15f)]
@@ -376,6 +392,18 @@ class Lots(private val map: PlannedMap, private val g: RoadGraph, private val pl
         return out
     }
 
+    /**
+     * How far past a junction's setback the first lot starts: the strip stops where the crossing road's sidewalk is
+     * half done, and a lot must clear all of it, or every corner lot of a short block would be turned down.
+     */
+    private fun endPad(node: Int): Float {
+        val n = g.nodes[node]
+        if (n.degree < 3) return 1.5f
+        var walk = 0f
+        for (id in n.edges) walk = max(walk, g.edges[id].cls.sidewalk)
+        return max(1.5f, walk * .5f + .45f)
+    }
+
     private fun add(o: OBB) {
         val id = placed.size
         placed += o
@@ -407,10 +435,10 @@ class Lots(private val map: PlannedMap, private val g: RoadGraph, private val pl
             if (o.distToSeg(e.ax, e.ay, e.bx, e.by) < e.cls.outer - (if (id == edge) .05f else -.3f)) clear = false
         }
         if (!clear) return false
-        // elevated rails need room for their pillars
+        // elevated rails need room for their deck and station platforms (up to 5 m either side of the smoothed line)
         for (rail in p.rails) {
             val pts = rail.pts
-            for (i in 0 until pts.size / 2 - 1) if (o.distToSeg(pts[i * 2], pts[i * 2 + 1], pts[i * 2 + 2], pts[i * 2 + 3]) < 6f) return false
+            for (i in 0 until pts.size / 2 - 1) if (o.distToSeg(pts[i * 2], pts[i * 2 + 1], pts[i * 2 + 2], pts[i * 2 + 3]) < RAIL_CLEAR) return false
         }
         // water, parks and open ground
         for (i in 0 until 4) if (p.shore.wet(corners[i * 2], corners[i * 2 + 1])) return false

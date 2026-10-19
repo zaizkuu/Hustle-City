@@ -213,10 +213,21 @@ class RoadBuilder {
     /**
      * @param wet where roads may only cross as bridges
      * @param blocked polygons no road may enter (parks without paths, palaces)
+     * @param cut polygons lanes and streets are cut out of exactly at the outline (landmark grounds); avenues stay
      */
-    fun build(wet: (Float, Float) -> Boolean, blocked: List<FloatArray> = emptyList(), snap: Float = 2.5f): RoadGraph {
+    fun build(wet: (Float, Float) -> Boolean, blocked: List<FloatArray> = emptyList(), snap: Float = 2.5f, cut: List<FloatArray> = emptyList()): RoadGraph {
         extendDeadEnds(28f)
         split()
+        if (cut.isNotEmpty()) {
+            val hit = FloatArray(2)
+            for (s in segs) if (s.cls.rank <= 1) for (poly in cut) {
+                val n = poly.size / 2
+                for (i in 0 until n) {
+                    val j = (i + 1) % n
+                    if (Geo.segHit(s.ax, s.ay, s.bx, s.by, poly[i * 2], poly[i * 2 + 1], poly[j * 2], poly[j * 2 + 1], hit)) s.cuts += hit[0]
+                }
+            }
+        }
         // pieces
         class Piece(val ax: Float, val ay: Float, val bx: Float, val by: Float, val cls: RoadClass, val name: String, val bridge: Boolean)
         val pieces = ArrayList<Piece>()
@@ -233,6 +244,7 @@ class RoadBuilder {
                 val isWet = wet(mx, my)
                 if (isWet && !s.bridge) continue
                 if (blocked.any { Geo.inside(mx, my, it) }) continue
+                if (s.cls.rank <= 1 && cut.any { Geo.inside(mx, my, it) }) continue
                 pieces += Piece(x0, y0, x1, y1, s.cls, s.name, s.bridge && isWet)
             }
         }
