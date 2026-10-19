@@ -44,6 +44,8 @@ class InteriorRenderer(private val e: GameEngine) {
         const val BACK_DOOR_H = 2.25f
         private val BACK_FLOOR = c(0xFFA3A7AD)
         private val STAFF_RED = c(0xFFC0392B)
+        private val LIGHT_WARM = c(0xFFFFE6B0)
+        private val LIGHT_COOL = c(0xFFE8F2FF)
         /** Sorting offsets: everything beyond the back room wall goes first, then the wall, then the near side. */
         private const val BEYOND = 1e6f
         private const val WALL_KEY = 5e5f
@@ -107,6 +109,7 @@ class InteriorRenderer(private val e: GameEngine) {
             scene.groundRect(room.doorX.toFloat(), dy - .09f, (room.doorX + room.doorW).toFloat(), dy + .09f, .013f, c(0xFF7D838B))
         }
         sc.business?.let { if (!e.ui.designer) drawDirt(sc, it) }
+        if (!e.ui.designer) bakedLight(sc)
 
         if (e.ui.designer) {
             val line = scene.withAlpha(0xFFFFFFFF.toInt(), .22f)
@@ -320,12 +323,87 @@ class InteriorRenderer(private val e: GameEngine) {
 
     private fun trimOf(wall: Int) = scene.mix(wall, 0xFF000000.toInt(), .38f)
 
+    /** The lower part of the walls, below the chair rail: a shade deeper than the paint above. */
+    private fun wainscotOf(wall: Int) = scene.mix(wall, 0xFF000000.toInt(), .16f)
+    private fun railOf(wall: Int) = scene.mix(wall, 0xFFFFFFFF.toInt(), .38f)
+
+    /**
+     * Light that would be baked into the room: soft shade where the floor meets the walls and under the furniture,
+     * and warm pools under the ceiling lights (cooler tubes in the back room).
+     */
+    private fun bakedLight(sc: InteriorScene) {
+        val w = sc.w.toFloat(); val d = sc.d.toFloat()
+        val black = 0xFF000000.toInt()
+        // three overlapping bands darken toward each wall
+        for (k in 0..2) {
+            val r = .18f + k * .22f
+            val a = scene.withAlpha(black, .085f)
+            scene.groundRect(0f, 0f, w, r, .005f, a)
+            scene.groundRect(0f, 0f, r, d, .005f, a)
+            scene.groundRect(w - r, 0f, w, d, .005f, a)
+            scene.groundRect(0f, d - r, sc.doorX - 1f, d, .005f, a)
+            scene.groundRect(sc.doorX + 1f, d - r, w, d, .005f, a)
+            sc.backRoom?.let { room ->
+                val y = room.depth.toFloat()
+                scene.groundRect(0f, y - r * .7f, room.doorX.toFloat(), y + r * .7f, .005f, a)
+                scene.groundRect((room.doorX + room.doorW).toFloat(), y - r * .7f, w, y + r * .7f, .005f, a)
+            }
+        }
+        // contact shadows: a soft dark footprint under every piece of furniture
+        for (p in sc.items) {
+            val def = Catalog.item(p.itemId) ?: continue
+            if (def.id == "rug" || def.id == "dance_floor") continue
+            val (fw, fd) = itemDims(def, p.rot)
+            val x0 = p.x.toFloat(); val y0 = p.y.toFloat(); val x1 = x0 + fw; val y1 = y0 + fd
+            scene.groundRect(x0 - .06f, y0 - .06f, x1 + .06f, y1 + .06f, .006f, scene.withAlpha(black, .1f))
+            scene.groundRect(x0 + .08f, y0 + .08f, x1 - .08f, y1 - .08f, .0065f, scene.withAlpha(black, .12f))
+        }
+        // pools of light under the ceiling fittings
+        scene.glow = true
+        val room = sc.backRoom
+        var y = 2f
+        while (y < d - .5f) {
+            var x = 2f
+            while (x < w - .5f) {
+                val back = room != null && room.contains(y.toInt())
+                val col = if (back) LIGHT_COOL else LIGHT_WARM
+                scene.disc(x, y, .007f, 1.9f, 1.9f, 16, scene.withAlpha(col, .05f))
+                scene.disc(x, y, .0075f, 1.2f, 1.2f, 14, scene.withAlpha(col, .06f))
+                scene.disc(x, y, .008f, .6f, .6f, 12, scene.withAlpha(col, .07f))
+                x += 4f
+            }
+            y += 4f
+        }
+        scene.glow = false
+    }
+
+    /** A wall light: a small brass fitting with a glowing shade and its wash of light up and down the wall. */
+    private fun sconce(x: Float, y: Float, nx: Float, ny: Float) {
+        val ax = -ny; val ay = nx
+        val brass = c(0xFFB08D57)
+        scene.box(min(x, x + nx * .08f) - .05f * abs(ax), min(y, y + ny * .08f) - .05f * abs(ay), 1.95f,
+            max(x, x + nx * .08f) + .05f * abs(ax), max(y, y + ny * .08f) + .05f * abs(ay), 2.15f, brass, brass)
+        scene.glow = true
+        val sx = x + nx * .16f; val sy = y + ny * .16f
+        scene.box(sx - .13f * abs(ax) - .08f * abs(nx), sy - .13f * abs(ay) - .08f * abs(ny), 2.05f,
+            sx + .13f * abs(ax) + .08f * abs(nx), sy + .13f * abs(ay) + .08f * abs(ny), 2.32f, c(0xFFFFF0C8), c(0xFFFFE3A0))
+        val wx = x + nx * .012f; val wy = y + ny * .012f
+        scene.quad(wx - ax * .2f, wy - ay * .2f, 2.32f, wx + ax * .2f, wy + ay * .2f, 2.32f, wx + ax * .65f, wy + ay * .65f, 2.95f, wx - ax * .65f, wy - ay * .65f, 2.95f,
+            scene.withAlpha(LIGHT_WARM, .2f))
+        scene.quad(wx - ax * .2f, wy - ay * .2f, 2.05f, wx + ax * .2f, wy + ay * .2f, 2.05f, wx + ax * .45f, wy + ay * .45f, 1.55f, wx - ax * .45f, wy - ay * .45f, 1.55f,
+            scene.withAlpha(LIGHT_WARM, .14f))
+        scene.glow = false
+    }
+
     private fun wallN(sc: InteriorScene, color: Int, h: Float) {
         scene.box(-.2f, -.2f, 0f, sc.w + .2f, 0f, h, WALL_TOP, color)
         if (h <= 1f) return
         val day = e.daylight()
         val trim = trimOf(color)
-        // baseboard and crown molding
+        // baseboard, wainscoting up to a chair rail, and crown molding
+        val wains = wainscotOf(color); val rail = railOf(color)
+        scene.box(0f, 0f, .14f, sc.w.toFloat(), .025f, .92f, wains, wains)
+        scene.box(0f, 0f, .92f, sc.w.toFloat(), .055f, .98f, rail, rail)
         scene.box(0f, 0f, 0f, sc.w.toFloat(), .05f, .14f, trim, trim)
         scene.box(0f, 0f, h - .12f, sc.w.toFloat(), .04f, h, scene.mix(color, 0xFFFFFFFF.toInt(), .3f), scene.mix(color, 0xFFFFFFFF.toInt(), .3f))
         // framed windows with sills; daylight falls on the floor in front of them
@@ -352,6 +430,9 @@ class InteriorRenderer(private val e: GameEngine) {
             }
             x += 3.5f
         }
+        // wall lights between the windows
+        var lx = 1.5f + 1.4f + 1.05f
+        while (lx < sc.w - 1f) { sconce(lx, 0f, 0f, 1f); lx += 3.5f }
         // light switch and outlets
         scene.box(1.0f, 0f, 1.2f, 1.12f, .03f, 1.38f, c(0xFFF5F5F5), c(0xFFF5F5F5))
         var ox = 3.2f
@@ -381,6 +462,11 @@ class InteriorRenderer(private val e: GameEngine) {
         scene.box(-.2f, -.2f, 0f, 0f, sc.d + .2f, h, WALL_TOP, color)
         if (h <= 1f) return
         val trim = trimOf(color)
+        val wains = wainscotOf(color); val rail = railOf(color)
+        scene.box(0f, 0f, .14f, .025f, sc.d.toFloat(), .92f, wains, wains)
+        scene.box(0f, 0f, .92f, .055f, sc.d.toFloat(), .98f, rail, rail)
+        var ly = 2.5f
+        while (ly < sc.d - 1.5f) { sconce(0f, ly, 1f, 0f); ly += 4f }
         scene.box(0f, 0f, 0f, .05f, sc.d.toFloat(), .14f, trim, trim)
         scene.box(0f, 0f, h - .12f, .04f, sc.d.toFloat(), h, scene.mix(color, 0xFFFFFFFF.toInt(), .3f), scene.mix(color, 0xFFFFFFFF.toInt(), .3f))
     }
@@ -390,6 +476,11 @@ class InteriorRenderer(private val e: GameEngine) {
         if (h <= 1f) return
         val trim = trimOf(color)
         val w = sc.w.toFloat()
+        val wains = wainscotOf(color); val rail = railOf(color)
+        scene.box(w - .025f, 0f, .14f, w, sc.d.toFloat(), .92f, wains, wains)
+        scene.box(w - .055f, 0f, .92f, w, sc.d.toFloat(), .98f, rail, rail)
+        var ly = 2.5f
+        while (ly < sc.d - 1.5f) { sconce(w, ly, -1f, 0f); ly += 4f }
         scene.box(w - .05f, 0f, 0f, w, sc.d.toFloat(), .14f, trim, trim)
         scene.box(w - .04f, 0f, h - .12f, w, sc.d.toFloat(), h, scene.mix(color, 0xFFFFFFFF.toInt(), .3f), scene.mix(color, 0xFFFFFFFF.toInt(), .3f))
     }

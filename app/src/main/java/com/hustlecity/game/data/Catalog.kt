@@ -148,7 +148,128 @@ object Catalog {
 
     private fun box(x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float, color: Int) = Part(x0, y0, z0, x1, y1, z1, color)
 
-    val furniture: List<FurnitureDef> = listOf(
+    /**
+     * Finer detail for the models, added after their own parts (displays keep their part numbers for stock): handles,
+     * screens, kick plates, price strips, knobs, feet and the like.
+     */
+    private fun details(id: String): List<Part> {
+        val chrome = c(0xFFD9DEE4); val black = c(0xFF1E2126); val screen = c(0xFF56CCF2); val price = c(0xFFF7F4EC)
+        val rubber = c(0xFF2A2D31); val warm = c(0xFFFFE9B0)
+        return when (id) {
+            "cash_register" -> listOf(
+                box(0f, .93f, 0f, 2f, .97f, .12f, black), box(.2f, .93f, .55f, 1.8f, .96f, .6f, black),
+                box(1.2f, .3f, 1.06f, 1.45f, .55f, 1.12f, black), box(1.25f, .32f, 1.12f, 1.4f, .44f, 1.26f, black),
+                box(1.27f, .44f, 1.14f, 1.38f, .45f, 1.24f, screen), box(1.55f, .25f, 1.06f, 1.9f, .6f, 1.075f, c(0xFF3A4048)),
+                box(.95f, .25f, 1.06f, 1.12f, .4f, 1.16f, c(0xFFE9EDF2)),
+            )
+            "checkout_counter" -> listOf(
+                box(0f, .93f, 0f, 3f, .97f, .12f, black), box(2.3f, .3f, 1.0f, 2.55f, .55f, 1.06f, black),
+                box(2.35f, .32f, 1.06f, 2.5f, .44f, 1.2f, black), box(2.37f, .44f, 1.08f, 2.48f, .45f, 1.18f, screen),
+            )
+            "shelf" -> listOf(
+                box(0f, 0f, 1.9f, 2f, .92f, 1.96f, WOOD), box(.08f, .84f, 0f, 1.92f, .92f, .12f, WOOD),
+                box(.08f, .9f, .4f, 1.92f, .93f, .5f, price), box(.08f, .9f, 1.0f, 1.92f, .93f, 1.1f, price),
+                box(.08f, .2f, 1.84f, 1.92f, .9f, 1.9f, warm),
+            )
+            "drinks_fridge" -> listOf(
+                box(.05f, .86f, 1.86f, .95f, .93f, 2.0f, c(0xFFEB5757)), box(.25f, .93f, 1.9f, .75f, .94f, 1.96f, price),
+                box(.8f, .95f, .7f, .85f, 1.0f, 1.45f, chrome), box(.05f, .86f, 0f, .95f, .9f, .15f, black),
+            )
+            "fresh_fridge" -> listOf(
+                box(0f, .93f, .5f, 2f, .98f, .62f, c(0xFF2F80ED)), box(0f, 0f, 1.75f, 2f, .32f, 1.8f, warm),
+                box(0f, .9f, 0f, 2f, .95f, .12f, black), box(.06f, .25f, 1.2f, 1.94f, .5f, 1.24f, c(0xFFBFC7D0)),
+            )
+            "freezer" -> listOf(
+                box(0f, .93f, 0f, 2f, .97f, .12f, black), box(0f, .94f, .55f, 2f, .97f, .65f, c(0xFF2F80ED)),
+                box(.5f, .95f, .7f, .7f, .99f, .76f, chrome), box(1.3f, .95f, .7f, 1.5f, .99f, .76f, chrome),
+            )
+            "ice_cream_freezer" -> listOf(box(0f, .93f, 0f, 2f, .97f, .12f, black), box(0f, .94f, .5f, 2f, .97f, .62f, c(0xFFFF8AD8)))
+            "coffee_machine" -> listOf(
+                box(0f, .93f, 0f, 2f, .97f, .12f, c(0xFF3E2723)),
+                box(.45f, .78f, 1.18f, .6f, .9f, 1.24f, black), box(.95f, .78f, 1.18f, 1.1f, .9f, 1.24f, black),
+                box(.4f, .82f, 1.05f, .65f, .92f, 1.08f, chrome), box(.9f, .82f, 1.05f, 1.15f, .92f, 1.08f, chrome),
+                box(.4f, .3f, 1.55f, .6f, .5f, 1.65f, WHITE), box(.65f, .3f, 1.55f, .85f, .5f, 1.65f, WHITE),
+                box(1.55f, .35f, 1.35f, 1.8f, .65f, 1.6f, c(0xFF8EC5E8)),
+            )
+            "pastry_case" -> listOf(box(.05f, .93f, 0f, .95f, .97f, .12f, black), box(.3f, .93f, .6f, .7f, .96f, .75f, price))
+            "grill" -> listOf(
+                box(.25f, .93f, .7f, .4f, .99f, .82f, black), box(.75f, .93f, .7f, .9f, .99f, .82f, black),
+                box(1.1f, .93f, .7f, 1.25f, .99f, .82f, black), box(1.6f, .93f, .7f, 1.75f, .99f, .82f, black),
+                box(.1f, .9f, 0f, .2f, 1f, .1f, black), box(1.8f, .9f, 0f, 1.9f, 1f, .1f, black),
+            )
+            "fryer" -> listOf(
+                box(.2f, .5f, 1.0f, .45f, .8f, 1.05f, chrome), box(.55f, .5f, 1.0f, .8f, .8f, 1.05f, chrome),
+                box(.3f, .8f, 1.05f, .34f, .95f, 1.25f, black), box(.65f, .8f, 1.05f, .69f, .95f, 1.25f, black),
+                box(.3f, .93f, .75f, .7f, .98f, .85f, black),
+            )
+            "hair_chair" -> listOf(
+                box(.4f, 1.0f, 0f, .6f, 1.3f, .05f, chrome), box(.15f, .95f, .62f, .23f, 1.5f, .8f, black),
+                box(.77f, .95f, .62f, .85f, 1.5f, .8f, black), box(.3f, .6f, .1f, .7f, .85f, .16f, chrome),
+                box(.12f, .02f, 1.72f, .88f, .1f, 1.9f, warm), box(.15f, .1f, .75f, .85f, .35f, .8f, c(0xFFD5DBE2)),
+            )
+            "hair_wash" -> listOf(box(.45f, .05f, 1.0f, .55f, .15f, 1.25f, chrome), box(.25f, .95f, .55f, .75f, 1.6f, .62f, black))
+            "treadmill" -> listOf(
+                box(.15f, .3f, 1.0f, .2f, 1.1f, 1.05f, chrome), box(.8f, .3f, 1.0f, .85f, 1.1f, 1.05f, chrome),
+                box(.3f, .12f, 1.45f, .7f, .3f, 1.5f, screen), box(.2f, .25f, .28f, .8f, .3f, .3f, c(0xFF27AE60)),
+            )
+            "workout_bench" -> listOf(
+                box(-.05f, .1f, 1.15f, .05f, .35f, 1.55f, black), box(.95f, .1f, 1.15f, 1.05f, .35f, 1.55f, black),
+                box(.3f, .45f, .45f, .7f, 1.0f, .62f, c(0xFFEB5757)), box(.32f, 1.05f, .45f, .68f, 1.75f, .56f, c(0xFFEB5757)),
+            )
+            "weight_rack" -> listOf(
+                box(.15f, .3f, .75f, .35f, .45f, .88f, black), box(.15f, .55f, .75f, .35f, .7f, .88f, black),
+                box(.55f, .3f, .75f, .75f, .45f, .86f, black), box(.55f, .55f, .75f, .75f, .7f, .86f, black),
+                box(.95f, .3f, .75f, 1.15f, .45f, .84f, c(0xFFEB5757)), box(.95f, .55f, .75f, 1.15f, .7f, .84f, c(0xFFEB5757)),
+                box(1.35f, .3f, .75f, 1.55f, .45f, .83f, c(0xFF2F80ED)), box(1.35f, .55f, .75f, 1.55f, .7f, .83f, c(0xFF2F80ED)),
+            )
+            "boxing_bag" -> listOf(box(.25f, .25f, .25f, .75f, .75f, .3f, black), box(.25f, .25f, 1.55f, .75f, .75f, 1.62f, black))
+            "gym_locker" -> listOf(
+                box(.48f, .6f, 0f, .52f, .62f, 1.9f, c(0xFF1B4F8A)), box(1.48f, .6f, 0f, 1.52f, .62f, 1.9f, c(0xFF1B4F8A)),
+                box(0f, .6f, .95f, 2f, .62f, .98f, c(0xFF1B4F8A)),
+                box(.38f, .62f, 1.3f, .42f, .65f, 1.45f, chrome), box(.88f, .62f, 1.3f, .92f, .65f, 1.45f, chrome),
+                box(1.38f, .62f, 1.3f, 1.42f, .65f, 1.45f, chrome), box(1.88f, .62f, 1.3f, 1.92f, .65f, 1.45f, chrome),
+                box(.38f, .62f, .4f, .42f, .65f, .55f, chrome), box(.88f, .62f, .4f, .92f, .65f, .55f, chrome),
+                box(1.38f, .62f, .4f, 1.42f, .65f, .55f, chrome), box(1.88f, .62f, .4f, 1.92f, .65f, .55f, chrome),
+            )
+            "shower" -> listOf(box(.45f, .06f, 1.8f, .55f, .3f, 1.9f, chrome), box(.4f, .25f, 1.85f, .6f, .4f, 1.9f, chrome), box(.45f, .45f, .1f, .55f, .55f, .11f, black))
+            "clothing_rack" -> listOf(box(0f, .3f, 0f, .2f, .7f, .05f, chrome), box(1.8f, .3f, 0f, 2f, .7f, .05f, chrome))
+            "electronics_table" -> listOf(
+                box(0f, .88f, 0f, 2f, .92f, .12f, black), box(.25f, .72f, .9f, .65f, .76f, .98f, price),
+                box(.95f, .62f, .9f, 1.45f, .66f, .98f, price), box(0f, .1f, .86f, 2f, .9f, .9f, c(0xFFC9CED6)),
+            )
+            "table_set" -> listOf(
+                box(.75f, .75f, 0f, 1.25f, 1.25f, .04f, DARK),
+                box(.1f, .75f, .45f, .16f, 1.25f, .9f, DARK), box(1.84f, .75f, .45f, 1.9f, 1.25f, .9f, DARK),
+                box(.85f, .8f, .76f, 1.0f, .95f, .86f, WHITE), box(1.1f, 1.05f, .76f, 1.2f, 1.15f, .8f, c(0xFFF2C94C)),
+            )
+            "barstool" -> listOf(box(.3f, .3f, 0f, .7f, .7f, .04f, DARK), box(.32f, .32f, .3f, .68f, .68f, .34f, chrome))
+            "bench" -> listOf(box(.1f, .25f, .48f, 1.9f, .32f, .5f, WOOD))
+            "plant_large" -> listOf(box(.28f, .28f, .38f, .72f, .72f, .45f, c(0xFFC9C9C9)), box(.2f, .55f, .9f, .5f, .9f, 1.2f, c(0xFF3CB371)), box(.55f, .15f, 1.1f, .85f, .45f, 1.5f, c(0xFF2E8B57)))
+            "plant_small" -> listOf(box(.36f, .36f, .25f, .64f, .64f, .3f, c(0xFFC9C9C9)), box(.35f, .4f, .65f, .55f, .6f, .85f, c(0xFF6CCB8E)))
+            "speaker_small" -> listOf(box(.42f, .7f, .55f, .58f, .72f, .65f, c(0xFF777777)))
+            "speaker_medium" -> listOf(box(.38f, .75f, .92f, .62f, .77f, 1.02f, c(0xFF777777)), box(.25f, .25f, 0f, .75f, .75f, .05f, black))
+            "speaker_large" -> listOf(box(.35f, .85f, 1.32f, .65f, .87f, 1.45f, c(0xFF777777)), box(.15f, .15f, 0f, .85f, .85f, .06f, black))
+            "cleaning_station" -> listOf(
+                box(.55f, .3f, 1.0f, .62f, .37f, 1.7f, c(0xFFB07A52)), box(.5f, .25f, 1.0f, .67f, .42f, 1.08f, c(0xFFF2C94C)),
+                box(.25f, .55f, 1.0f, .45f, .75f, 1.25f, c(0xFF27AE60)), box(.2f, .8f, 0f, .8f, .85f, .2f, c(0xFFF2C94C)),
+            )
+            "bed" -> listOf(box(0f, 0f, .4f, 2f, .08f, 1.0f, WOOD), box(.05f, 1.2f, .55f, 1.95f, 2f, .6f, c(0xFF7B6FE6)), box(.1f, 1.9f, 0f, .2f, 2f, .4f, DARK))
+            "home_fridge" -> listOf(box(.05f, .95f, 1.2f, .95f, .96f, 1.23f, c(0xFFC9CED6)), box(.8f, .95f, 1.4f, .85f, 1f, 1.75f, STEEL))
+            "sofa" -> listOf(box(.15f, .45f, .55f, .55f, .55f, .75f, c(0xFFF2C94C)), box(1.45f, .45f, .55f, 1.85f, .55f, .75f, c(0xFF56CCF2)))
+            "office_desk" -> listOf(box(.2f, .15f, .78f, .3f, .25f, .95f, black), box(.6f, .5f, .75f, 1.0f, .65f, .77f, rubber), box(1.5f, .3f, .75f, 1.8f, .5f, .9f, WHITE))
+            "filing_cabinet" -> listOf(box(.4f, .95f, .4f, .6f, .99f, .45f, chrome), box(.4f, .95f, .9f, .6f, .99f, .95f, chrome), box(.4f, .95f, 1.3f, .6f, .99f, 1.35f, chrome))
+            "water_cooler" -> listOf(box(.35f, .7f, .7f, .45f, .76f, .8f, c(0xFF2F80ED)), box(.55f, .7f, .7f, .65f, .76f, .8f, c(0xFFEB5757)))
+            "storage_shelf" -> listOf(box(0f, .1f, 1.9f, 2f, .9f, 1.95f, c(0xFF5B6770)))
+            "pallet_rack" -> listOf(box(0f, .9f, 0f, .08f, .98f, .3f, c(0xFFF2C94C)), box(1.92f, .9f, 0f, 2f, .98f, .3f, c(0xFFF2C94C)))
+            "trash_can" -> listOf(box(.3f, .3f, .75f, .7f, .7f, .8f, black))
+            "copier" -> listOf(box(.2f, .7f, 1.0f, .5f, .9f, 1.05f, screen), box(.15f, .9f, .55f, .85f, 1.0f, .6f, c(0xFFE9EDF2)))
+            else -> emptyList()
+        }
+    }
+
+    val furniture: List<FurnitureDef> get() = detailed
+
+    private val baseFurniture: List<FurnitureDef> = listOf(
         FurnitureDef("cash_register", "Cash Register", 900.0, 2, 1, ItemFn.CASH_REGISTER, setOf("register"), capacity = 40,
             description = "Compact register. Each staffed register serves about 40 customers per hour.",
             parts = listOf(
@@ -649,6 +770,7 @@ object Catalog {
                 box(.3f, 1.6f, 0f, .7f, 1.95f, .45f, DARK), box(1.3f, 1.6f, 0f, 1.7f, 1.95f, .45f, DARK), box(2.3f, 1.6f, 0f, 2.7f, 1.95f, .45f, DARK))),
     )
 
+    private val detailed: List<FurnitureDef> = baseFurniture.map { d -> details(d.id).let { x -> if (x.isEmpty()) d else d.copy(parts = d.parts + x) } }
     private val furnitureById = furniture.associateBy { it.id }
     fun item(id: String): FurnitureDef? = furnitureById[id]
 
