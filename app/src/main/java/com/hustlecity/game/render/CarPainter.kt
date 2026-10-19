@@ -55,14 +55,17 @@ class CarPainter(private val scene: Scene3D) {
      * is a livery's second color (stripes, a two-tone roof); 0 lets the painter pick one.
      */
     fun draw(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int,
-             near: Boolean, taxi: Boolean = false, braking: Boolean = false, accent: Int = 0) {
+             near: Boolean, taxi: Boolean = false, braking: Boolean = false, accent: Int = 0, pitch: Float = 0f, roll: Float = 0f) {
         val night = scene.daylight < .5f
+        // headlights go on after dark, and in rain or fog
+        val lights = night || scene.rain > .3f
         frame(x, y, heading)
         if (!near) {
             farCar(len, wid, hgt, color, style, accent)
-            if (night) headGlow(x, y, heading, len)
+            if (lights) headGlow(x, y, heading, len)
             return
         }
+        tiltF = pitch; tiltL = roll
         val hl = len / 2; val hw = wid / 2
         // contact shadow
         quadFlat(-hl - .15f, -hw - .1f, hl + .15f, hw + .1f, .03f, scene.withAlpha(0xFF000000.toInt(), .28f))
@@ -80,8 +83,9 @@ class CarPainter(private val scene: Scene3D) {
             7 -> bus(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
             else -> classic(hl, hw, len, wid, hgt, body, style, taxi, night, braking, camF, nearSide)
         }
+        tiltF = 0f; tiltL = 0f
         scene.material = Mat.PLAIN
-        if (night) headGlow(x, y, heading, len)
+        if (lights) headGlow(x, y, heading, len)
         if (braking) {
             val bx = x - fx * (hl + .6f); val by = y - fy * (hl + .6f)
             scene.glow = true
@@ -491,7 +495,7 @@ class CarPainter(private val scene: Scene3D) {
     /** Headlight beams on the road: a soft oval of light ahead of the car, brightest near the bumper. */
     private fun headGlow(x: Float, y: Float, heading: Float, len: Float) {
         val hx = sin(heading); val hy = -cos(heading)
-        val night = (1f - scene.daylight).coerceIn(0f, 1f)
+        val night = max(1f - scene.daylight, scene.rain * .75f).coerceIn(0f, 1f)
         scene.glow = true
         for (k in 0..2) {
             val f = BEAM_SIZE[k]
@@ -549,8 +553,14 @@ class CarPainter(private val scene: Scene3D) {
     /** Sets point [i] of the profile (forward, height). */
     private fun P(i: Int, f: Float, z: Float) { pf[i] = f; pzz[i] = z }
 
+    // the body's lean on its springs (rise per meter forward and to the right); wheels and the ground stay put
+    private var tiltF = 0f
+    private var tiltL = 0f
+    private var onWheels = false
+
     private fun wpt(f: Float, l: Float, z: Float, i: Int) {
-        wx[i] = ox + fx * f + rx * l; wy[i] = oy + fy * f + ry * l; wz[i] = z
+        wx[i] = ox + fx * f + rx * l; wy[i] = oy + fy * f + ry * l
+        wz[i] = if (onWheels || z < .25f) z else z + f * tiltF + l * tiltL
     }
 
     /** Moves the frame [l] meters to the right, so off-centre parts (a sidecar) can be built centred. */
@@ -657,6 +667,11 @@ class CarPainter(private val scene: Scene3D) {
 
     /** One wheel at [af] spanning lateral [la]..[lb], with a hub cap on its [outer] (-1/1) face. */
     private fun wheelAt(af: Float, r: Float, la: Float, lb: Float, outer: Int) {
+        onWheels = true
+        try { wheelAtLevel(af, r, la, lb, outer) } finally { onWheels = false }
+    }
+
+    private fun wheelAtLevel(af: Float, r: Float, la: Float, lb: Float, outer: Int) {
         for (k in 0 until 8) {
             val a = k * 6.2832f / 8 + .3927f
             wheelF[k] = cos(a) * r; wheelZ[k] = sin(a) * r

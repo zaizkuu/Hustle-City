@@ -140,7 +140,8 @@ class RenderBatch(private val maxVerts: Int = 60000) {
 
     fun poly(xs: FloatArray, ys: FloatArray, n: Int, color: Int) {
         if (n < 3) return
-        if (vCount + n >= maxVerts || iCount + (n - 2) * 3 >= idx.size) flush()
+        // indices are 16-bit: flush before they would wrap
+        if (vCount + n >= min(maxVerts, 32000) || iCount + (n - 2) * 3 >= idx.size) flush()
         val base = vCount
         polyStart[polyCount++] = base
         for (i in 0 until n) {
@@ -269,6 +270,8 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
 
     /** Snow lying on top faces (roofs, car roofs, awnings), 0..1. */
     var snow = 0f
+    /** How hard it's raining (0..1): cars put their lights on. */
+    var rain = 0f
     private val SNOW_WHITE = 0xFFF2F5F8.toInt()
 
     fun mix(a: Int, b: Int, t: Float): Int {

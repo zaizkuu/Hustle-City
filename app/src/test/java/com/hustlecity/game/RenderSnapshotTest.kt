@@ -365,6 +365,29 @@ class RenderSnapshotTest {
         }
     }
 
+    /** Rain: puddles in the gutters, glossy roads and headlights on; and a body that leans when it brakes and turns. */
+    @Test
+    fun weatherSurfaces() {
+        val e = GameEngine(null)
+        e.newGame("Tester", 1, 0, 1, mapId = "nyc")
+        e.state.weather.clear(); e.state.weather += com.hustlecity.game.model.WeatherSpan(0L, 1L shl 40, com.hustlecity.game.model.Sky.RAIN)
+        e.weather.ensure()
+        repeat(200) { e.frame(1 / 30f) }
+        val p = e.state.player
+        shoot(e, p.x, p.y, 45f, .7f, 16, "weather_rain_day.png")
+        shoot(e, p.x, p.y, 45f, .7f, 19, "weather_rain_dusk.png")
+        shoot(e, p.x + 20f, p.y, 24f, 1.7f, 15, "weather_rain_close.png")
+        assertTrue("wet roads", e.skyVis.wet > .2f)
+
+        // braking pitches the nose down, a right turn rolls the body left
+        val a = com.hustlecity.game.world.Agent()
+        com.hustlecity.game.world.lean(a, 12f, 0f, 1 / 30f)
+        repeat(20) { com.hustlecity.game.world.lean(a, (12f - it * .25f).coerceAtLeast(0f), 0f, 1 / 30f) }
+        assertTrue("nose dips when braking: ${a.pitch}", a.pitch < -.02f)
+        repeat(20) { com.hustlecity.game.world.lean(a, 8f, it * .02f, 1 / 30f) }
+        assertTrue("leans out of a right turn: ${a.roll}", a.roll > .02f)
+    }
+
     @Test
     fun mapMode() {
         val e = engine()

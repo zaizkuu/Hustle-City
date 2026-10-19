@@ -54,7 +54,31 @@ class Agent {
     var hidden = false
     /** Seconds a car has been held up by cross traffic (used to untangle jams in junctions). */
     var blocked = 0f
+    /** How the body leans on its springs: nose up (+) or down when braking, and rolled toward the outside of a turn. */
+    var pitch = 0f
+    var roll = 0f
+    var lastSpeed = 0f
+    var lastHeading = 0f
 }
+
+/** Eases a car's body [a] toward the lean its braking, accelerating and turning would give it. */
+fun lean(a: Agent, speed: Float, heading: Float, dt: Float) {
+    if (dt <= 0f) return
+    var dh = heading - a.lastHeading
+    while (dh > PI_F) dh -= 2 * PI_F
+    while (dh < -PI_F) dh += 2 * PI_F
+    // a respawn or a jump of the camera: start level
+    if (abs(dh) > 1f || abs(speed - a.lastSpeed) > 8f) { a.lastSpeed = speed; a.lastHeading = heading; a.pitch = 0f; a.roll = 0f; return }
+    val acc = (speed - a.lastSpeed) / dt
+    val lat = speed * dh / dt
+    val tp = (acc * .012f).coerceIn(-.06f, .045f)
+    val tr = (lat * .014f).coerceIn(-.07f, .07f)
+    val k = min(1f, dt * 7f)
+    a.pitch += (tp - a.pitch) * k; a.roll += (tr - a.roll) * k
+    a.lastSpeed = speed; a.lastHeading = heading
+}
+
+private const val PI_F = 3.14159265f
 
 /**
  * Cars and pedestrians around the camera. Cars keep to their lane (right, or left on left-hand maps), plan a
@@ -302,6 +326,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             val a = cars[i]
             if (initial || !a.placed || dist(a.x, a.y, fx, fy) > radius) spawnCar(g, a, fx, fy, radius, initial || !a.placed)
             stepCar(g, a, i, dt, blockerX, blockerY)
+            lean(a, a.speed, a.heading, dt)
         }
         val pr = radius * .7f
         for (p in peds) {

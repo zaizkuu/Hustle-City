@@ -181,6 +181,7 @@ class WorldRenderer(private val e: GameEngine) {
         scene.fogStart = proj.dist * (if (v.fog > .3f) .3f else .7f)
         scene.fogEnd = proj.dist * (if (v.fog > .3f) 1.5f else 3f)
         scene.snow = if (e.hasGame) e.state.snowCover.toFloat() else 0f
+        scene.rain = if (mapMode) 0f else max(v.rain, max(v.storm, v.fog * .8f))
         // sun moves east -> south -> west over the day
         val hour = e.state.hour + e.state.minuteOfHour / 60f
         val t = ((hour - 6f) / 12f).coerceIn(0f, 1f)
@@ -231,6 +232,7 @@ class WorldRenderer(private val e: GameEngine) {
         }
         sortDrawables()
         drawList()
+        leanT = e.realTime
         if (gpu == null) batch.flush()
         scene.gpu = null
         if (!mapMode) drawWeather(canvas, w, h)
@@ -435,15 +437,18 @@ class WorldRenderer(private val e: GameEngine) {
                     val taxi = it.style == 0 && dIdx[i] % map.taxiEvery == 0
                     val color = if (taxi) map.taxiColors[(dIdx[i] / map.taxiEvery) % map.taxiColors.size] else it.color
                     drawCar(it.x, it.y, it.heading, it.length, it.width, it.height, color, it.style, false,
-                        taxi = taxi, braking = it.speed < it.cruise * .45f, accent = it.accent)
+                        taxi = taxi, braking = it.speed < it.cruise * .45f, accent = it.accent, pitch = it.pitch, roll = it.roll)
                 }
                 3 -> e.traffic.peds.getOrNull(dIdx[i])?.let { drawPed(it, dIdx[i]) }
                 4 -> drawPlayer()
                 5 -> e.state.vehicle(dIdx[i])?.let { v ->
                     if (e.state.player.driving != v.id && !mapMode) scene.disc(v.x, v.y, .03f, 2.6f, 2.6f, 14, scene.withAlpha(c(0xFF27AE60), .35f))
                     val driving = e.state.player.driving == v.id
+                    val lean = ownLean.getOrPut(v.id) { com.hustlecity.game.world.Agent() }
+                    if (driving) com.hustlecity.game.world.lean(lean, e.carSpeed, v.heading, (e.realTime - leanT).coerceIn(0f, .1f))
+                    else { lean.pitch = 0f; lean.roll = 0f; lean.lastSpeed = 0f; lean.lastHeading = v.heading }
                     drawCar(v.x, v.y, v.heading, v.def.length, v.def.width, v.def.height, if (v.color != 0) v.color else v.def.color, v.def.style, true,
-                        braking = driving && e.input.brake)
+                        braking = driving && e.input.brake, pitch = lean.pitch, roll = lean.roll)
                 }
                 6 -> drawTrafficLight(dIdx[i])
                 7 -> drawParkedCar(dIdx[i])
@@ -930,6 +935,22 @@ class WorldRenderer(private val e: GameEngine) {
         }
     }
 
+    private val px8 = FloatArray(10); private val py8 = FloatArray(10); private val pz8 = FloatArray(10)
+
+    /** A puddle: a flat, sky-reflecting ellipse [a] long along (ux, uy) and [b] across, a little uneven. */
+    private fun puddle(x: Float, y: Float, ux: Float, uy: Float, a: Float, b: Float, color: Int) {
+        for (i in 0 until 10) {
+            val t = i * 6.2832f / 10
+            val wob = .82f + .3f * hash01((x * 7f).toInt() + i, (y * 3f).toInt())
+            val u = cos(t) * a * wob; val v = sin(t) * b * wob
+            px8[i] = x + ux * u - uy * v; py8[i] = y + uy * u + ux * v; pz8[i] = .033f
+        }
+        val m = scene.material
+        scene.material = Mat.WATER
+        scene.poly(10, px8, py8, pz8, color)
+        scene.material = m
+    }
+
     /** A steady 0..1 value for a pair of numbers, for wear and placement that never flickers. */
     private fun hash01(a: Int, b: Int): Float {
         var h = a * 374761393 + b * 668265263
@@ -993,6 +1014,9 @@ class WorldRenderer(private val e: GameEngine) {
         val patchDark = scene.mix(asphaltLit, scene.lit(c(0xFF202226), 1f), .22f)
         val patchPale = scene.mix(asphaltLit, scene.lit(c(0xFF9A9CA0), 1f), .15f)
         val track = scene.withAlpha(scene.lit(c(0xFF1C1D20), 1f), .16f)
+        val wetNow = if (mapMode) 0f else e.skyVis.wet
+        // puddles mirror the grey sky (and the city's lights after dark)
+        val puddleColor = scene.withAlpha(scene.mix(scene.lit(c(0xFF4A5868), 1f), scene.lit(c(0xFFB8C6D4), 1f), .45f), .9f)
         val g = e.city.roads
         val left = e.city.leftHand
         for (ed in g.edges) {
@@ -1071,6 +1095,20 @@ class WorldRenderer(private val e: GameEngine) {
                     val o0 = if (sign > 0) .4f else -hw + .3f
                     val o1 = if (sign > 0) hw - .3f else -.4f
                     strip(ed, b, b + .4f, o0, o1, .04f, worn(white, salt, 3, fade))
+                }
+            }
+            // after rain, puddles collect in the gutters and the odd dip in the lanes
+            if (wetNow > .2f && !ed.overWater) {
+                val n = 2 + (ed.len / 16f).toInt().coerceAtMost(8)
+                for (k in 0 until n) {
+                    val r = hash01(ed.id * 5 + k, 77)
+                    if (r > .3f + wetNow * .55f) continue
+                    val at = s0 + (s1 - s0) * hash01(k, ed.id * 3 + 1)
+                    val gutter = k % 3 != 2
+                    val sd = if (hash01(ed.id, k + 9) < .5f) -1f else 1f
+                    val o = if (gutter) sd * (hw - .55f) else sd * (hash01(k + 4, ed.id) * (hw - 1.5f).coerceAtLeast(0f))
+                    val size = (.6f + 1.4f * hash01(ed.id + k, 31)) * (.5f + .5f * wetNow)
+                    puddle(ed.ax + ed.ux * at + ed.uy * o, ed.ay + ed.uy * at - ed.ux * o, ed.ux, ed.uy, size * 1.6f, size * (if (gutter) .45f else .8f), puddleColor)
                 }
             }
             // a manhole cover, a utility cover on the sidewalk and storm drains at the curb
@@ -1279,12 +1317,16 @@ class WorldRenderer(private val e: GameEngine) {
     }
 
     private fun drawCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int, owned: Boolean,
-                        taxi: Boolean = false, braking: Boolean = false, accent: Int = 0) {
+                        taxi: Boolean = false, braking: Boolean = false, accent: Int = 0, pitch: Float = 0f, roll: Float = 0f) {
         val lod = when (e.settings.quality) { 0 -> 45f; 1 -> 80f; else -> 120f }
         val near = !mapMode && keyFor(x, y) < lod * lod
         cars.leftHand = e.city.leftHand
-        cars.draw(x, y, heading, len, wid, hgt, color, style, near, taxi, braking, accent)
+        cars.draw(x, y, heading, len, wid, hgt, color, style, near, taxi, braking, accent, pitch, roll)
     }
+
+    /** Body lean of the player's own cars, kept between frames. */
+    private val ownLean = HashMap<Int, com.hustlecity.game.world.Agent>()
+    private var leanT = 0f
 
 
     private fun drawTrafficLight(code: Int) {
