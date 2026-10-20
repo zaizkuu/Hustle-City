@@ -22,6 +22,7 @@ import com.hustlecity.game.render.gpu.GpuFrame
 import com.hustlecity.game.world.BKind
 import com.hustlecity.game.world.Building
 import com.hustlecity.game.world.RoadClass
+import com.hustlecity.game.world.RoadHit
 import com.hustlecity.game.world.Traffic
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -435,8 +436,22 @@ class CinematicTest {
         val l = hypot(nx, ny); val ax = nx / l; val ay = ny / l
         // stand back from the pole, over the road, and look along the line of wires
         val x0 = pr.x[pole] + pr.dirX[pole] * 4f; val y0 = pr.y[pole] + pr.dirY[pole] * 4f
+        // jeepneys coming up the street toward the camera, one pulling away, and a tricycle
+        val traffic = listOf(Triple(15f, true, 4), Triple(34f, true, 4), Triple(52f, true, 5), Triple(4f, false, 4), Triple(26f, false, 4))
         fly(e, "c9_manila", 2.4f, listOf(Key(x0 + ax * 6f, y0 + ay * 6f, 24f, look(ax, ay) + .35f, 12f), Key(x0 + ax * 12f, y0 + ay * 12f, 22f, look(ax, ay) + .2f, 11f)),
-            easing = .2f, warm = 4f) { _, _ -> clearWeather(e) }
+            easing = .2f, warm = 4f) { f, _ ->
+            clearWeather(e)
+            if (f == 0) for ((k, t) in traffic.withIndex()) {
+                val (ahead, toward, style) = t
+                val hit = RoadHit()
+                if (!e.city.roads.nearest(pr.x[pole] + ax * ahead, pr.y[pole] + ay * ahead, 16f, hit)) continue
+                val ed = e.city.roads.edges[hit.edge]
+                // drive toward the camera means against the way it looks
+                val aToB = ed.ux * ax + ed.uy * ay > 0f
+                val from = if (aToB != toward) ed.a else ed.b
+                e.traffic.placeCar(k, ed.id, from, if (from == ed.a) hit.s else ed.len - hit.s, style)
+            }
+        }
     }
 
     /** A Tokyo drinking alley at night under red lanterns. */

@@ -131,6 +131,25 @@ class Traffic(private val rnd: Random = Random(7)) {
         }
     }
 
+    /**
+     * Sets car [index] on road [edge], driving away from node [from] [s] meters along it in [lane], as a vehicle of
+     * [style] in one of its liveries: traffic placed by hand where a camera looks. Any car already there moves elsewhere.
+     */
+    fun placeCar(index: Int, edge: Int, from: Int, s: Float, style: Int, lane: Int = 0) {
+        val g = roads ?: return
+        val a = cars.getOrNull(index) ?: return
+        val e = g.edges.getOrNull(edge) ?: return
+        a.edge = edge; a.from = from; a.s = s.coerceIn(0f, e.len)
+        a.lane = lane.coerceIn(0, e.cls.lanes - 1)
+        a.inJunction = false; a.next = -1
+        at(e, from, a.s, laneOffset(e, a.lane), tmp)
+        a.x = tmp[0]; a.y = tmp[1]
+        a.heading = headingOf(e, from)
+        a.placed = true
+        dress(a, style, e)
+        for (o in cars) if (o !== a && o.placed && abs(o.x - a.x) < 9f && abs(o.y - a.y) < 9f) o.placed = false
+    }
+
     /** Puts [fraction] of the walkers on sidewalks within [radius] of (fx, fy): a busy moment right where you're looking. */
     fun scatter(fx: Float, fy: Float, radius: Float, fraction: Float) {
         val g = roads ?: return
@@ -292,8 +311,13 @@ class Traffic(private val rnd: Random = Random(7)) {
             break
         }
         a.placed = true
+        dress(a, mix[rnd.nextInt(mix.size)], g.edges[a.edge.coerceAtLeast(0)])
+    }
+
+    /** Gives a car its body: [style], a livery or palette color, its real size, and a speed for road [e]. */
+    private fun dress(a: Agent, style: Int, e: RoadEdge) {
         a.color = palette[rnd.nextInt(palette.size)]
-        a.style = mix[rnd.nextInt(mix.size)]
+        a.style = style
         val livery = liveries.getOrNull(a.style)
         if (livery != null) {
             val k = rnd.nextInt(livery.size / 2) * 2
@@ -303,7 +327,6 @@ class Traffic(private val rnd: Random = Random(7)) {
         a.length = when (a.style) { 0 -> 4.2f + rnd.nextFloat() * .6f; 1 -> 5.2f; 2 -> 5.8f; 4 -> 6.2f; 5 -> 2.5f; 6 -> 3.4f; 7 -> 11f; 8 -> 1.9f; 9 -> 4.8f; 10 -> 7.2f; else -> 4.6f }
         a.width = when (a.style) { 2 -> 2.1f; 4 -> 2.05f; 5 -> 1.5f; 6 -> 1.48f; 7 -> 2.5f; 8 -> .78f; 9 -> 2.0f; 10 -> 2.4f; else -> 1.85f }
         a.height = when (a.style) { 0, 3 -> 1.45f; 1 -> 1.8f; 2 -> 2.5f; 4 -> 2.3f; 5 -> 1.75f; 6 -> 1.7f; 7 -> 3.1f; 8 -> 1.3f; 9 -> 1.85f; 10 -> 3.3f; else -> 1.5f }
-        val e = g.edges[a.edge.coerceAtLeast(0)]
         // city speeds: a bit under the road's limit, slower on small streets
         a.cruise = e.cls.speed * (.68f + rnd.nextFloat() * .2f) * (if (a.style == 5 || a.style == 7) .8f else 1f)
         a.speed = a.cruise * .6f
