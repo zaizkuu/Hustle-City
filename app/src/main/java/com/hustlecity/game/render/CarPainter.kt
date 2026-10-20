@@ -84,9 +84,10 @@ class CarPainter(private val scene: Scene3D) {
         scene.material = Mat.PLAIN
         if (lights) headGlow(x, y, heading, len)
         if (braking) {
-            val bx = x - fx * (hl + .6f); val by = y - fy * (hl + .6f)
+            // brake lights wash the road behind red, fading out softly
+            val bx = x - fx * (hl + .7f); val by = y - fy * (hl + .7f)
             scene.glow = true
-            scene.disc(bx, by, .04f, 1.1f, 1.1f, 10, scene.withAlpha(c(0xFFFF3B30), .22f))
+            scene.glowOval(bx, by, .04f, 1.5f, 1.15f, fx, fy, c(0xFFFF3B30), .15f)
             scene.glow = false
         }
     }

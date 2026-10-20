@@ -711,9 +711,13 @@ class Traffic(private val rnd: Random = Random(7)) {
         val off = node.scramble && dist(a.x, a.y, a.tx, a.ty) > 6f
         a.state = if ((a.lane >= 0 || off) && node.signal) 1 else 2
         if (off && a.state == 1) {
-            val back = rnd.nextFloat() * 1.6f; val along = (rnd.nextFloat() * 2f - 1f) * 2.4f
+            // a spot a little back or along, as long as it's still on the pavement
             val wx = a.x - node.x; val wy = a.y - node.y; val wl = max(.01f, kotlin.math.sqrt(wx * wx + wy * wy))
-            a.x += wx / wl * back - wy / wl * along; a.y += wy / wl * back + wx / wl * along
+            for (attempt in 0 until 4) {
+                val back = rnd.nextFloat() * 1.8f; val along = (rnd.nextFloat() * 2f - 1f) * 2.2f
+                val nx = a.x + wx / wl * back - wy / wl * along; val ny = a.y + wy / wl * back + wx / wl * along
+                if (!g.onAsphalt(nx, ny) && !g.nearAsphalt(nx, ny, .4f)) { a.x = nx; a.y = ny; break }
+            }
         }
     }
 
