@@ -45,7 +45,7 @@ class WorldRenderer(private val e: GameEngine) {
     private val bbox = FloatArray(4)
     private val tmp = FloatArray(3)
 
-    private val maxDraw = 6000
+    private val maxDraw = 12000
     private var dCount = 0
     private val dType = IntArray(maxDraw)
     private val dIdx = IntArray(maxDraw)
@@ -1267,6 +1267,11 @@ class WorldRenderer(private val e: GameEngine) {
             }
             add(0, b.id, keyForRect(b))
         }
+        // landmarks, viaducts, bridges and walls are cached; trains and the wheel's rotor move (the Canvas path draws
+        // them with the span or landmark they're on, so they sort with it). Taken before the crowds of small things,
+        // so a view packed with props and people never runs out of room for a landmark.
+        features.collect(bbox, proj.camX, proj.camY, stat, mode == DYNAMIC, mapMode, addFeature)
+        if (mode == DYNAMIC && !mapMode) features.forCars(e.realTime, bbox, addTrainCar)
         val farLod = mapMode || proj.dist > 450
         if (!farLod && stat) {
             for ((i, t) in city.trees.withIndex()) {
@@ -1290,10 +1295,6 @@ class WorldRenderer(private val e: GameEngine) {
                 add(6, (n.id shl 4) or n.edges.indexOf(ed.id).coerceIn(0, 15), keyFor(x, y))
             }
         }
-        // landmarks, viaducts, bridges and walls are cached; trains and the wheel's rotor move (the Canvas path draws
-        // them with the span or landmark they're on, so they sort with it)
-        features.collect(bbox, proj.camX, proj.camY, stat, mode == DYNAMIC, mapMode, addFeature)
-        if (mode == DYNAMIC && !mapMode) features.forCars(e.realTime, bbox, addTrainCar)
         if (dyn) for (v in e.state.vehicles) if (!e.ops.away(v) && v.x in bbox[0] - 5..bbox[2] + 5 && v.y in bbox[1] - 5..bbox[3] + 5) add(5, v.id, keyFor(v.x, v.y))
         if (dyn && e.hasGame && p.driving < 0 && p.inBuilding < 0 && !mapMode && !cinematic) add(4, 0, playerKey)
     }

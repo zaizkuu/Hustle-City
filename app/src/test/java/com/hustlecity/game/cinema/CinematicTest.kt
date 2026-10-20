@@ -16,6 +16,7 @@ import com.hustlecity.game.model.Rental
 import com.hustlecity.game.model.Sky
 import com.hustlecity.game.model.WeatherSpan
 import com.hustlecity.game.render.InteriorRenderer
+import com.hustlecity.game.render.Railways
 import com.hustlecity.game.render.StreetProps
 import com.hustlecity.game.render.WorldRenderer
 import com.hustlecity.game.render.gpu.GpuFrame
@@ -442,16 +443,23 @@ class CinematicTest {
         fly(e, "c9_manila", 2.4f, listOf(Key(x0 + ax * 6f, y0 + ay * 6f, 24f, look(ax, ay) + .35f, 12f), Key(x0 + ax * 12f, y0 + ay * 12f, 22f, look(ax, ay) + .2f, 11f)),
             easing = .2f, warm = 4f) { f, _ ->
             clearWeather(e)
-            if (f == 0) for ((k, t) in traffic.withIndex()) {
-                val (ahead, toward, style) = t
-                val hit = RoadHit()
-                if (!e.city.roads.nearest(pr.x[pole] + ax * ahead, pr.y[pole] + ay * ahead, 16f, hit)) continue
-                val ed = e.city.roads.edges[hit.edge]
-                // drive toward the camera means against the way it looks
-                val aToB = ed.ux * ax + ed.uy * ay > 0f
-                val from = if (aToB != toward) ed.a else ed.b
-                e.traffic.placeCar(k, ed.id, from, if (from == ed.a) hit.s else ed.len - hit.s, style)
-            }
+            if (f == 0) stage(e, pr.x[pole], pr.y[pole], ax, ay, traffic)
+        }
+    }
+
+    /**
+     * Puts [traffic] on the streets ahead of (x, y) along (ax, ay), one vehicle per entry: how many meters ahead, whether
+     * it comes toward the camera (against the way it looks), and its style.
+     */
+    private fun stage(e: GameEngine, x: Float, y: Float, ax: Float, ay: Float, traffic: List<Triple<Float, Boolean, Int>>) {
+        for ((k, t) in traffic.withIndex()) {
+            val (ahead, toward, style) = t
+            val hit = RoadHit()
+            if (!e.city.roads.nearest(x + ax * ahead, y + ay * ahead, 16f, hit)) continue
+            val ed = e.city.roads.edges[hit.edge]
+            val aToB = ed.ux * ax + ed.uy * ay > 0f
+            val from = if (aToB != toward) ed.a else ed.b
+            e.traffic.placeCar(k, ed.id, from, if (from == ed.a) hit.s else ed.len - hit.s, style)
         }
     }
 
@@ -527,6 +535,221 @@ class CinematicTest {
             crowd = 70f) { _, _ ->
             clearWeather(e)
         }
+    }
+
+    // ------------------------------------------------------------------ the Manila trailer (m01 .. m21)
+
+    /** Game time when a train next runs within 6 m of (x, y). */
+    private fun trainPasses(e: GameEngine, x: Float, y: Float): Float {
+        val rails = Railways(e.city)
+        var t = 0f
+        while (t < 600f) {
+            rails.update(t)
+            for (c in 0 until rails.carCount) if (hypot(rails.carX(c) - x, rails.carY(c) - y) < 6f) return t
+            t += .1f
+        }
+        return 0f
+    }
+
+    /** Jeepneys old and new, tricycles and mopeds, most of them coming up the street toward the camera. */
+    private val parade = listOf(Triple(14f, true, 4), Triple(21f, true, 12), Triple(30f, true, 11), Triple(39f, true, 5), Triple(47f, true, 4),
+        Triple(56f, true, 12), Triple(5f, false, 11), Triple(13f, false, 12), Triple(25f, false, 4), Triple(36f, false, 5))
+
+    /** Dawn over Manila Bay, closing on the walls of Intramuros, Rizal Park and the towers beyond. */
+    @Test
+    fun m01() {
+        if (!on("m01")) { assumeTrue(false); return }
+        val e = engine("manila", 6.4f)
+        fly(e, "m01_dawn", 4.6f, listOf(Key(330f, 700f, 300f, -1.38f, 9f), Key(345f, 690f, 235f, -1.25f, 12f)), easing = .2f, haze = .38f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Morning over Intramuros down onto the front of the Manila Cathedral. */
+    @Test
+    fun m02() {
+        if (!on("m02")) { assumeTrue(false); return }
+        val e = engine("manila", 7.3f)
+        val c = landmark(e, "Cathedral")
+        fly(e, "m02_cathedral", 4.6f, listOf(Key(c.x, c.y, 165f, 3.3f, 25f), Key(c.x, c.y, 110f, 2.95f, 17f)), easing = .3f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The Rizal Monument: its guards of honour and the flag over Luneta. */
+    @Test
+    fun m03() {
+        if (!on("m03")) { assumeTrue(false); return }
+        val e = engine("manila", 7.6f)
+        val m = landmark(e, "Rizal")
+        fly(e, "m03_rizal", 2.6f, listOf(Key(m.x + 4f, m.y - 5f, 80f, 3.28f, 11f), Key(m.x + 4f, m.y - 5f, 70f, 3.06f, 12f)), easing = .2f, crowd = 70f) { _, _ -> clearWeather(e) }
+    }
+
+    /** City Hall's clock tower against the sunset, the LRT in front. */
+    @Test
+    fun m04() {
+        if (!on("m04")) { assumeTrue(false); return }
+        val e = engine("manila", 18.2f)
+        fly(e, "m04_cityhall", 2.2f, listOf(Key(452f, 762f, 115f, 2.0f, 7f), Key(452f, 762f, 102f, 1.86f, 10f)), easing = .2f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The title: Binondo's arch at dusk from the foot of Jones Bridge. */
+    @Test
+    fun m05() {
+        if (!on("m05")) { assumeTrue(false); return }
+        val e = engine("manila", 18.7f)
+        val a = landmark(e, "Binondo Arch")
+        fly(e, "m05_arch", 2.6f, listOf(Key(a.x, a.y - 4f, 44f, .04f, 7f), Key(a.x, a.y - 1f, 36f, -.04f, 9f)), easing = .2f, crowd = 60f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Spaghetti wires and fiesta banderitas over a Paco street, the traffic coming on under them. */
+    @Test
+    fun m06() {
+        if (!on("m06")) { assumeTrue(false); return }
+        val e = engine("manila", 10.4f)
+        fly(e, "m06_wires", 2.6f, listOf(Key(1003f, 875f, 20f, -1.57f, 7f), Key(1012f, 875f, 19f, -1.5f, 8f)), easing = .2f, warm = 4f, crowd = 45f) { f, _ ->
+            clearWeather(e)
+            if (f == 0) stage(e, 1003f, 875f, 1f, 0f, parade)
+        }
+    }
+
+    /** Jeepneys old and new, tricycles and mopeds up a Tondo street under the banderitas. */
+    @Test
+    fun m07() {
+        if (!on("m07")) { assumeTrue(false); return }
+        val e = engine("manila", 10.8f)
+        val ax = .17f; val ay = .985f
+        fly(e, "m07_jeepneys", 2.6f, listOf(Key(236f, 268f, 17f, look(ax, ay) + .1f, 6f), Key(237f, 276f, 16f, look(ax, ay) - .05f, 7f)), easing = .2f, warm = 4f,
+            crowd = 45f) { f, _ ->
+            clearWeather(e)
+            if (f == 0) stage(e, 236f, 268f, ax, ay, parade)
+        }
+    }
+
+    /** An LRT-1 train running along its viaduct over Taft Avenue. */
+    @Test
+    fun m08() {
+        if (!on("m08")) { assumeTrue(false); return }
+        val e = engine("manila", 11.0f)
+        // the train passes the middle of the view a second and a half in
+        val warm = 3f
+        e.realTime = trainPasses(e, 528f, 672f) - warm - 1.5f
+        fly(e, "m08_lrt", 2.6f, listOf(Key(527f, 668f, 44f, .32f, 14f), Key(527f, 672f, 40f, .24f, 15f)), easing = .2f, warm = warm) { _, _ -> clearWeather(e) }
+    }
+
+    /** A barangay street in the late afternoon: banderitas, a hoop, people out on the street. */
+    @Test
+    fun m09() {
+        if (!on("m09")) { assumeTrue(false); return }
+        val e = engine("manila", 16.3f)
+        fly(e, "m09_barangay", 2.6f, listOf(Key(236f, 273f, 15f, -3.06f, 6f), Key(237f, 280f, 14f, -2.9f, 7f)), easing = .2f, warm = 4f, crowd = 35f) { f, _ ->
+            clearWeather(e)
+            if (f == 0) stage(e, 236f, 273f, .17f, .985f, listOf(Triple(18f, true, 5), Triple(30f, true, 12), Triple(42f, false, 5)))
+        }
+    }
+
+    /** Binondo's food carts and the crowds round them. */
+    @Test
+    fun m10() {
+        if (!on("m10")) { assumeTrue(false); return }
+        val e = engine("manila", 11.6f)
+        fly(e, "m10_binondo", 2.6f, listOf(Key(292f, 388f, 32f, 2.5f, 13f), Key(292f, 384f, 27f, 2.75f, 12f)), easing = .2f, warm = 4f, crowd = 40f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The crowd in front of Quiapo Church. */
+    @Test
+    fun m11() {
+        if (!on("m11")) { assumeTrue(false); return }
+        val e = engine("manila", 9.4f)
+        val q = landmark(e, "Quiapo")
+        fly(e, "m11_quiapo", 2.6f, listOf(Key(q.x, q.y, 72f, 3.47f, 11f), Key(q.x, q.y, 60f, 3.62f, 12f)), easing = .2f, warm = 4f, crowd = 50f) { _, _ -> clearWeather(e) }
+    }
+
+    /** A jeepney terminal in Tondo at the morning rush. */
+    @Test
+    fun m12() {
+        if (!on("m12")) { assumeTrue(false); return }
+        val e = engine("manila", 8.0f)
+        fly(e, "m12_terminal", 2.6f, listOf(Key(280f, 58f, 38f, 2.3f, 24f), Key(280f, 58f, 32f, 2.55f, 20f)), easing = .2f, warm = 4f, crowd = 45f) { _, _ -> clearWeather(e) }
+    }
+
+    /** EDSA at rush hour: every lane full, the lights coming on. */
+    @Test
+    fun m13() {
+        if (!on("m13")) { assumeTrue(false); return }
+        val e = engine("manila", 18.0f)
+        e.settings.busyRoads = 7f; e.traffic.ensure(e.settings.carCount, e.settings.pedCount)
+        fly(e, "m13_edsa", 2.6f, listOf(Key(1086f, 943f, 120f, 2.44f, 17f), Key(1086f, 943f, 105f, 2.3f, 15f)), easing = .2f, warm = 12f) { _, _ -> clearWeather(e) }
+    }
+
+    /** A monsoon night on the wires street: rain, wet asphalt and headlights. */
+    @Test
+    fun m14() {
+        if (!on("m14")) { assumeTrue(false); return }
+        val e = engine("manila", 20.2f, Sky.RAIN)
+        fun wet() { e.skyVis.rain = .85f; e.skyVis.cloud = .9f; e.skyVis.wet = 1f }
+        fly(e, "m14_rain", 2.6f, listOf(Key(1003f, 875f, 20f, -1.6f, 7f), Key(1010f, 875f, 19f, -1.52f, 8f)), easing = .2f, warm = 4f, weather = true, haze = .35f,
+            crowd = 35f) { f, _ ->
+            wet()
+            if (f == 0) stage(e, 1003f, 875f, 1f, 0f, parade)
+        }
+    }
+
+    /** Binondo's arch at night, its lanterns lit. */
+    @Test
+    fun m15() {
+        if (!on("m15")) { assumeTrue(false); return }
+        val e = engine("manila", 20.4f)
+        val a = landmark(e, "Binondo Arch")
+        fly(e, "m15_arch_night", 2.6f, listOf(Key(a.x + 3f, a.y + 4f, 30f, .25f, 8f), Key(a.x, a.y, 37f, -.08f, 10f)), easing = .2f, crowd = 60f, haze = .25f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The Cathedral floodlit at night. */
+    @Test
+    fun m16() {
+        if (!on("m16")) { assumeTrue(false); return }
+        val e = engine("manila", 20.6f)
+        val c = landmark(e, "Cathedral")
+        fly(e, "m16_cathedral_night", 2.6f, listOf(Key(c.x, c.y, 118f, 3.12f, 17f), Key(c.x, c.y, 102f, 2.95f, 15f)), easing = .2f, haze = .25f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Makati's towers at night down Ayala Avenue. */
+    @Test
+    fun m17() {
+        if (!on("m17")) { assumeTrue(false); return }
+        val e = engine("manila", 21.0f)
+        fly(e, "m17_makati", 4.6f, listOf(Key(1080f, 1120f, 235f, 2.22f, 15f), Key(1080f, 1120f, 190f, 2.46f, 12f)), easing = .3f, haze = .35f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The MOA Eye lit over Manila Bay at night. */
+    @Test
+    fun m18() {
+        if (!on("m18")) { assumeTrue(false); return }
+        val e = engine("manila", 20.8f)
+        fly(e, "m18_bay_night", 2.6f, listOf(Key(190f, 1150f, 140f, 2.62f, 9f), Key(190f, 1160f, 125f, 2.76f, 10f)), easing = .2f, haze = .3f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Jones Bridge at night, its lamps lit, the arch at its far end. */
+    @Test
+    fun m19() {
+        if (!on("m19")) { assumeTrue(false); return }
+        val e = engine("manila", 20.5f)
+        fly(e, "m19_jones_night", 2.6f, listOf(Key(404f, 478f, 70f, 1.5f, 11f), Key(404f, 470f, 62f, 1.3f, 12f)), easing = .2f, haze = .28f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Quiapo Church at night over the lit streets. */
+    @Test
+    fun m20() {
+        if (!on("m20")) { assumeTrue(false); return }
+        val e = engine("manila", 20.9f)
+        val q = landmark(e, "Quiapo")
+        fly(e, "m20_quiapo_night", 2.6f, listOf(Key(q.x, q.y, 100f, 3.4f, 15f), Key(q.x, q.y, 88f, 3.62f, 14f)), easing = .2f, haze = .28f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The finale: the sun going down over Manila Bay, pulling back over the MOA Eye. */
+    @Test
+    fun m21() {
+        if (!on("m21")) { assumeTrue(false); return }
+        val e = engine("manila", 17.95f)
+        // back up along Roxas Boulevard, clear of the towers inland, the bay and the sun on the right
+        fly(e, "m21_finale", 7.6f, listOf(Key(190f, 1150f, 150f, 3.0f, 8f), Key(191f, 1147f, 195f, 3.03f, 10f), Key(192f, 1144f, 245f, 3.06f, 12f)),
+            easing = .5f, haze = .38f) { _, _ -> clearWeather(e) }
     }
 
     @Test
