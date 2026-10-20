@@ -68,7 +68,8 @@ EDL = [
     (36.0, 38.0, 'device', dict(still='app_markets', bg=('a1_nyc', 30))),
     (38.0, 40.0, 'shot', dict(shot='c13_hypercar', f0=6, look='day')),
     (40.0, 42.0, 'shot', dict(shot='c14_snow', f0=33, look='snow')),
-    (42.0, 44.0, 'shot', dict(shot='c15_seoul_night', f0=6, look='night')),
+    (42.0, 43.0, 'shot', dict(shot='c17_times', f0=10, look='night')),
+    (43.0, 44.0, 'shot', dict(shot='c15_seoul_night', f0=20, look='night')),
     (44.0, 46.0, 'shot', dict(shot='c16_scramble', f0=12, look='night')),
 ]
 MONTAGE = [  # (shot, f0, look, word): half a second each from 46.0, at double speed
@@ -77,7 +78,7 @@ MONTAGE = [  # (shot, f0, look, word): half a second each from 46.0, at double s
     ('a1_nyc', 40, 'dusk', 'INVEST'), ('a3_tokyo', 20, 'dusk', 'EXPAND'),
 ]
 STROBE = [('c6_rain', 20, 'rain'), ('c10_yokocho', 24, 'night'), ('c15_seoul_night', 20, 'night'), ('b1_title', 30, 'night'),
-          ('c9_manila', 20, 'day'), ('a4_seoul', 30, 'dusk'), ('c14_snow', 50, 'snow'), ('c13_hypercar', 36, 'day')]
+          ('c9_manila', 20, 'day'), ('c17_times', 30, 'night'), ('c14_snow', 50, 'snow'), ('c13_hypercar', 36, 'day')]
 for i, (s, f0, look, word) in enumerate(MONTAGE):
     EDL.append((46.0 + i * .5, 46.5 + i * .5, 'shot', dict(shot=s, f0=f0, look=look, step=2, word=word)))
 for i, (s, f0, look) in enumerate(STROBE):
@@ -103,7 +104,7 @@ CAPTIONS = [
     (24.1, 25.9, 'headline', (['RAIN OR SHINE'], 'The weather changes who shops, and when')),
     (26.1, 27.9, 'headline', (['RUN A FLEET'], 'Trucks, drivers and delivery routes')),
     (28.1, 29.9, 'side', (['AUTO-', 'RESTOCK'], 'Set the stops once. Your drivers do the rest.')),
-    (30.1, 33.9, 'headline', (['EVERY CITY HAS A SOUL'], "Manila's tangled wires. Tokyo's lantern alleys.")),
+    (30.1, 33.9, 'headline', (['A CITY THAT LIVES'], 'Crowds, traffic and street life on every block')),
     (34.1, 35.9, 'side', (['BUY OUT', 'YOUR RIVALS'], 'Every competitor has a price.')),
     (36.1, 37.9, 'side', (['PLAY THE', 'MARKETS'], 'Stocks, bonds and hostile takeovers.')),
     (38.1, 39.9, 'headline', (['LIVE LARGE'], 'Hypercars, mansions and the good life')),
@@ -114,7 +115,7 @@ CAPTIONS = [
 ]
 
 # white flashes on the hits: (time, strength, decay seconds)
-FLASHES = [(3.0, .35, .25), (6.0, .35, .25), (8.0, .35, .25), (10.0, .3, .25), (12.0, .9, .4), (42.0, .3, .25),
+FLASHES = [(3.0, .35, .25), (6.0, .35, .25), (8.0, .35, .25), (10.0, .3, .25), (12.0, .9, .4), (42.0, .3, .25), (43.0, .2, .15),
            (44.0, .55, .35), (46.0, .6, .3), (53.0, .9, .3)]
 FLASHES += [(46.0 + i * .5, .25, .15) for i in range(1, 8)]
 FLASHES += [(50.0 + i * .25, .2, .1) for i in range(8)]

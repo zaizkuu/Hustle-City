@@ -377,6 +377,42 @@ for a, b, base in ((22.0, 24.0, 44), (26.0, 28.0, 32), (38.0, 40.0, 70)):
     eng = saw(f, d) * .5 + saw(f * 2.01, d) * .25
     eng = sweep(eng, 'lowpass', lambda s: 900 + 1500 * s / d) * np.minimum(1, np.minimum(t / .15, (d - t) / .2))
     place('sfx', eng * .35, a, 1, pan=0)
+# the city's own murmur: voices and traffic under the street shots
+def murmur(d, busy=1.0):
+    t = t_axis(d)
+    out = np.zeros((len(t), 2))
+    for ch in range(2):
+        v = filt(noise(d), 'bandpass', [280, 2600], 2)
+        # many voices: the level wanders a little, syllable by syllable
+        am = 1 + .35 * filt(noise(d), 'lowpass', 6, 1) * 8
+        out[:, ch] = v * np.clip(am, .3, 1.8) * .08 * busy
+    out += np.stack([filt(noise(d), 'lowpass', 400, 2)] * 2, 1) * .05 * busy
+    edge = np.minimum(1, np.minimum(t / .25, (d - t) / .25))[:, None]
+    return out * edge
+
+
+def chirp_signal(d):
+    """A Tokyo walk signal: two quick rising chirps, over and over."""
+    out = np.zeros(int(d * SR))
+    k = 0.0
+    while k < d - .2:
+        for o, (f0, f1) in ((0.0, (2300, 3100)), (.14, (2500, 3300))):
+            c = t_axis(.07)
+            tone = sine(f0 + (f1 - f0) * c / .07, .07) * np.sin(np.pi * c / .07) ** 2
+            i = int((k + o) * SR)
+            out[i:i + len(tone)] += tone[:len(out) - i]
+        k += .5
+    return out * .2
+
+
+place('sfx', murmur(4.1, 1.0), 29.95, 1, send=.1)
+place('sfx', murmur(2.2, 1.3), 41.9, 1, send=.1)
+place('sfx', murmur(2.2, 1.5), 43.9, 1, send=.1)
+place('sfx', chirp_signal(2.0), 44.05, .55, pan=.2, send=.25)
+# a taxi swishing past the camera in Times Square
+d = 1.0; t = t_axis(d)
+place('sfx', np.stack([bandsweep(noise(d), lambda s: 500 + 2500 * np.exp(-((s - .45) / .2) ** 2)) * np.exp(-((t - .45) / .25) ** 2) * .5] * 2, 1), 42.0, .9)
+
 # a whoosh under each headline
 for t0 in (13.85, 17.85, 21.85, 23.85, 25.85, 27.85, 29.85, 33.85, 35.85, 37.85, 39.85):
     place('fx', whoosh(.6), t0, .35, send=.2)

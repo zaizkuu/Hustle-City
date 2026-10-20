@@ -28,6 +28,8 @@ class RoadNode(val id: Int, val x: Float, val y: Float) {
     var signal = false
     /** Light phase offset in seconds, so neighbouring junctions don't switch all at once. */
     var phase = 0f
+    /** A scramble crossing: every car stops together and people cross in all directions, diagonals included. */
+    var scramble = false
     val degree get() = edges.size
 }
 
@@ -42,6 +44,11 @@ class RoadEdge(val id: Int, val a: Int, val b: Int, val cls: RoadClass, val name
     var overWater = false
     /** Group of edges sharing a name, for house numbers measured along the whole road. */
     var numberOrigin = 0f
+    /**
+     * Runs inside a bigger road for its whole length (two plans drew the same street): it keeps its asphalt and its
+     * traffic, but the bigger road's paint, curbs, lights and sidewalks are the ones that show.
+     */
+    var under = false
 
     fun other(node: Int) = if (node == a) b else a
     fun x(t: Float) = ax + (bx - ax) * t
@@ -97,6 +104,30 @@ class RoadGraph(val nodes: List<RoadNode>, val edges: List<RoadEdge>) {
         }
         grid = Array(lists.size) { lists[it].toIntArray() }
         setbacks()
+        markUnder()
+    }
+
+    /** Flags edges that lie along a bigger road's asphalt from end to end (see [RoadEdge.under]). */
+    private fun markUnder() {
+        for (e in edges) {
+            var covered = true
+            for (t in floatArrayOf(.2f, .5f, .8f)) {
+                val x = e.ax + (e.bx - e.ax) * t; val y = e.ay + (e.by - e.ay) * t
+                var hit = false
+                near(x, y, 16f) { id ->
+                    val o = edges[id]
+                    if (hit || o.id == e.id || o.overWater != e.overWater) return@near
+                    if (o.cls.rank < e.cls.rank || (o.cls.rank == e.cls.rank && o.id > e.id)) return@near
+                    if (abs(o.ux * e.ux + o.uy * e.uy) < .96f) return@near
+                    // alongside the middle of the other road, not just touching the end it shares with this one
+                    val along = (x - o.ax) * o.ux + (y - o.ay) * o.uy
+                    if (along < .5f || along > o.len - .5f) return@near
+                    if (abs(-(x - o.ax) * o.uy + (y - o.ay) * o.ux) <= o.cls.halfWidth * .9f) hit = true
+                }
+                if (!hit) { covered = false; break }
+            }
+            e.under = covered
+        }
     }
 
     /** Edge ids whose corridor may come within [r] of (x, y). Calls [f] possibly more than once per edge. */

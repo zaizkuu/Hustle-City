@@ -148,7 +148,7 @@ class StreetProps(val city: City) {
         val tokyo = city.mapId == com.hustlecity.game.world.Maps.TOKYO
         val seoul = city.mapId == com.hustlecity.game.world.Maps.SEOUL
         for (e in g.edges) {
-            if (e.overWater || e.len < 14f) continue
+            if (e.overWater || e.under || e.len < 14f) continue
             val major = e.cls.rank >= 2
             for (side in -1..1 step 2) {
                 // n points from the road to this sidewalk; props face the road (-n)

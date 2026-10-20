@@ -144,11 +144,7 @@ class Landmarks(private val city: City) {
                 if (top > 7f) dress += Dress(li, b.id, f, if (seed % 2 == 0) .7f else len - .7f, 0f, 3.6f, top, true, seed + 3)
             }
         }
-        if (l.style == Landmark.SCRAMBLE) {
-            var best = -1; var bd = 18f
-            for (n in city.roads.nodes) { val d = kotlin.math.hypot(n.x - l.x, n.y - l.y); if (n.degree >= 4 && d < bd) { bd = d; best = n.id } }
-            scrambleNode[li] = best
-        }
+        if (l.style == Landmark.SCRAMBLE) scrambleNode[li] = city.scrambleNode(l)?.id ?: -1
         if (l.style == Landmark.ARCADE) {
             val hit = com.hustlecity.game.world.RoadHit()
             if (city.roads.nearest(l.x, l.y, 60f, hit)) arcadeEdge[li] = hit.edge
@@ -426,26 +422,109 @@ class Landmarks(private val city: City) {
     private fun rect(scene: Scene3D, x0: Float, y0: Float, x1: Float, y1: Float, z: Float, color: Int) =
         scene.quad(x0 * k, y0 * k, z, x1 * k, y0 * k, z, x1 * k, y1 * k, z, x0 * k, y1 * k, z, color)
 
-    /** The diagonal zebra crossings of a scramble crossing. */
+    /**
+     * The diagonal zebra crossings of a scramble crossing: two bands from corner to corner across the junction, picked
+     * to run as straight through the middle as its roads allow. The second band stops at the first, so the centre
+     * reads as one crossing over the other instead of a grid.
+     */
     private fun scramble(scene: Scene3D, n: com.hustlecity.game.world.RoadNode) {
-        val g = city.roads
-        var reach = 0f
-        for (id in n.edges) { val e = g.edges[id]; reach = max(reach, (if (e.a == n.id) e.clearA else e.clearB) + 2f) }
-        reach = reach.coerceIn(10f, 24f)
-        val white = scene.lit(WorldRenderer.WHITE_LINE, .95f)
-        for (ai in 0..1) { val a = PI.toFloat() / 4 + ai * PI.toFloat() / 2
-            val ux = cos(a); val uy = sin(a)
-            // bars across the band, one after another along the way people walk
-            val px = -uy * 2.2f; val py = ux * 2.2f
-            var t = -reach
-            while (t < reach) {
-                if (abs(t) > 1.2f) {
-                    val x0 = n.x + ux * t; val y0 = n.y + uy * t
-                    val x1 = x0 + ux * .6f; val y1 = y0 + uy * .6f
-                    scene.quad(x0 - px, y0 - py, .045f, x1 - px, y1 - py, .045f, x1 + px, y1 + py, .045f, x0 + px, y0 + py, .045f, white)
-                }
-                t += 1.25f
+        val m = scrambleCorners(n)
+        if (m < 4) return
+        // the pair of diagonals that cross nearest the middle and most squarely
+        var best = Float.MAX_VALUE; var bi = -1; var bj = -1; var bk = -1; var bl = -1
+        for (i in 0 until m) for (j in i + 2 until m) {
+            if (i == 0 && j == m - 1) continue
+            for (k in i + 1 until j) for (l in j + 1 until m + i) {
+                val ll = l % m
+                if (ll == i) continue
+                val d1 = straightness(n, i, j); val d2 = straightness(n, k, ll)
+                val ax = cx[j] - cx[i]; val ay = cy[j] - cy[i]; val bx = cx[ll] - cx[k]; val by = cy[ll] - cy[k]
+                val cosA = abs(ax * bx + ay * by) / (kotlin.math.hypot(ax, ay) * kotlin.math.hypot(bx, by)).coerceAtLeast(1e-3f)
+                val score = d1 + d2 + cosA * 1.2f
+                if (score < best) { best = score; bi = i; bj = j; bk = k; bl = ll }
             }
+        }
+        if (bi < 0) return
+        val white = scene.lit(WorldRenderer.WHITE_LINE, .95f)
+        band(scene, n, cx[bi], cy[bi], cx[bj], cy[bj], white, Float.NaN, 0f, 0f, 0f)
+        band(scene, n, cx[bk], cy[bk], cx[bl], cy[bl], white, cx[bi], cy[bi], cx[bj], cy[bj])
+    }
+
+    /** True when (x, y) falls on (or right by) the zebra crossing over one of the roads meeting at [n]. */
+    private fun onCrossing(n: com.hustlecity.game.world.RoadNode, x: Float, y: Float): Boolean {
+        val g = city.roads
+        for (id in n.edges) {
+            val e = g.edges[id]
+            if (e.under) continue
+            val clear = if (e.a == n.id) e.clearA else e.clearB
+            val dx = if (e.a == n.id) e.ux else -e.ux; val dy = if (e.a == n.id) e.uy else -e.uy
+            val along = (x - n.x) * dx + (y - n.y) * dy
+            val side = abs(-(x - n.x) * dy + (y - n.y) * dx)
+            if (along in clear - .6f..clear + 4.2f && side < e.cls.halfWidth + 1.2f) return true
+        }
+        return false
+    }
+
+    private val cx = FloatArray(16); private val cy = FloatArray(16)
+    private val ca = FloatArray(16); private val co = IntArray(16)
+
+    /**
+     * The kerb corners of a junction where people step off, in order round it: between each road and the next, just
+     * out on the asphalt. Returns how many.
+     */
+    private fun scrambleCorners(n: com.hustlecity.game.world.RoadNode): Int {
+        val g = city.roads
+        var m = 0
+        for (id in n.edges) { val e = g.edges[id]; if (!e.under && m < co.size) { co[m] = id; ca[m] = g.angleAway(e, n.id); m++ } }
+        for (i in 1 until m) { val v = co[i]; val a = ca[i]; var j = i - 1; while (j >= 0 && ca[j] > a) { co[j + 1] = co[j]; ca[j + 1] = ca[j]; j-- }; co[j + 1] = v; ca[j + 1] = a }
+        for (q in 0 until m) {
+            val e0 = g.edges[co[q]]; val e1 = g.edges[co[(q + 1) % m]]
+            // the "after" mouth corner of this road and the "before" corner of the next: the kerb runs between them
+            val (x0, y0) = mouthCorner(n, e0, -1f)
+            val (x1, y1) = mouthCorner(n, e1, 1f)
+            var px = (x0 + x1) * .5f; var py = (y0 + y1) * .5f
+            val dx = n.x - px; val dy = n.y - py; val d = kotlin.math.hypot(dx, dy).coerceAtLeast(1e-3f)
+            px += dx / d * 1.6f; py += dy / d * 1.6f
+            cx[q] = px; cy[q] = py
+        }
+        return m
+    }
+
+    private fun mouthCorner(n: com.hustlecity.game.world.RoadNode, e: com.hustlecity.game.world.RoadEdge, side: Float): Pair<Float, Float> {
+        val clear = if (e.a == n.id) e.clearA else e.clearB
+        val dx = if (e.a == n.id) e.ux else -e.ux; val dy = if (e.a == n.id) e.uy else -e.uy
+        val hw = e.cls.halfWidth
+        return (n.x + dx * clear + dy * hw * side) to (n.y + dy * clear - dx * hw * side)
+    }
+
+    /** How far a walk from corner [i] to corner [j] misses the middle of the junction (meters, scaled). */
+    private fun straightness(n: com.hustlecity.game.world.RoadNode, i: Int, j: Int): Float {
+        val ax = cx[i]; val ay = cy[i]; val bx = cx[j]; val by = cy[j]
+        val l = kotlin.math.hypot(bx - ax, by - ay).coerceAtLeast(1e-3f)
+        val miss = abs((bx - ax) * (ay - n.y) - (by - ay) * (ax - n.x)) / l
+        return miss / 4f
+    }
+
+    /**
+     * A zebra band from (x0, y0) to (x1, y1): bars across it one after another along the way people walk. Bars that
+     * would land on the band from (ox0, oy0) to (ox1, oy1), or on the ordinary crossings over each road at [n], are
+     * left out.
+     */
+    private fun band(scene: Scene3D, n: com.hustlecity.game.world.RoadNode, x0: Float, y0: Float, x1: Float, y1: Float, white: Int,
+                     ox0: Float, oy0: Float, ox1: Float, oy1: Float) {
+        val len = kotlin.math.hypot(x1 - x0, y1 - y0)
+        if (len < 4f) return
+        val ux = (x1 - x0) / len; val uy = (y1 - y0) / len
+        val px = -uy * 2.2f; val py = ux * 2.2f
+        var t = .3f
+        while (t < len - .9f) {
+            val bx = x0 + ux * (t + .3f); val by = y0 + uy * (t + .3f)
+            if ((ox0.isNaN() || Geo.distToSeg(bx, by, ox0, oy0, ox1, oy1) > 2.2f + 1.4f) && !onCrossing(n, bx, by)) {
+                val ax = x0 + ux * t; val ay = y0 + uy * t
+                val cx1 = ax + ux * .6f; val cy1 = ay + uy * .6f
+                scene.quad(ax - px, ay - py, .045f, cx1 - px, cy1 - py, .045f, cx1 + px, cy1 + py, .045f, ax + px, ay + py, .045f, white)
+            }
+            t += 1.25f
         }
     }
 

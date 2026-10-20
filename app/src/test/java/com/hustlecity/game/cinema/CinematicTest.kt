@@ -22,6 +22,7 @@ import com.hustlecity.game.render.gpu.GpuFrame
 import com.hustlecity.game.world.BKind
 import com.hustlecity.game.world.Building
 import com.hustlecity.game.world.RoadClass
+import com.hustlecity.game.world.Traffic
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -53,6 +54,9 @@ class CinematicTest {
     private val w = if (preview) 960 else 1920
     private val h = if (preview) 540 else 1080
     private val fps = 24
+    /** How busy the streets are on film: eight times the people and three times the cars a phone shows on high. */
+    private val crowds = 8f
+    private val busyRoads = 3f
     private val root = File(if (preview) "build/cinema_preview" else "build/cinema")
 
     private fun on(name: String): Boolean {
@@ -66,6 +70,9 @@ class CinematicTest {
         e.newGame("Alex Rivera", 1, 2, 1, mapId = mapId)
         e.ui.tip = null; e.ui.phoneOpen = false
         e.settings.quality = 2
+        // the city at its busiest: filming has no frame rate to keep
+        e.settings.crowds = crowds; e.settings.busyRoads = busyRoads
+        e.traffic.ensure(e.settings.carCount, e.settings.pedCount)
         e.state.minute = (e.state.minute / 1440) * 1440 + (hour * 60).toLong()
         e.state.weather.clear()
         e.state.weather += WeatherSpan(e.state.minute - 600, e.state.minute + 3 * 1440L, sky)
@@ -136,7 +143,7 @@ class CinematicTest {
      * streets first.
      */
     private fun fly(e: GameEngine, name: String, seconds: Float, keys: List<Key>, easing: Float = .6f, warm: Float = 3f,
-                    weather: Boolean = false, haze: Float = .3f, each: (Int, Float) -> Unit = { _, _ -> }) {
+                    weather: Boolean = false, haze: Float = .3f, crowd: Float = 90f, each: (Int, Float) -> Unit = { _, _ -> }) {
         val out = Out(name)
         val r = WorldRenderer(e).apply { cinematic = true; cinemaHaze = haze }
         val frames = (seconds * fps).toInt()
@@ -150,6 +157,9 @@ class CinematicTest {
             if (e.state.player.driving < 0) { e.state.player.x = c.tx; e.state.player.y = c.ty }
         }
         place(0f)
+        // people and cars start spread round the shot, not walking in from out of view, most of the people close by
+        e.traffic.update(0f, e.camera.tx, e.camera.ty, 230f, -9999f, -9999f, initial = true)
+        e.traffic.scatter(e.camera.tx, e.camera.ty, crowd, .65f)
         repeat((warm * fps).toInt()) { each(-1, 0f); e.frame(1f / fps); place(0f) }
         for (f in 0 until frames) {
             val u = f / (frames - 1f).coerceAtLeast(1f)
@@ -224,6 +234,9 @@ class CinematicTest {
             c.tx = tx; c.ty = ty; c.dist = dist(u); c.zoom = c.dist; c.yaw = yaw
             r.cinemaPitch = Math.toRadians(pitch(u).toDouble()).toFloat()
         }
+        place(0f, 1f)
+        e.traffic.update(0f, v.x, v.y, 230f, -9999f, -9999f, initial = true)
+        e.traffic.scatter(v.x, v.y, 110f, .65f)
         repeat((warm * fps).toInt()) { drive(e, v, speed); each(-1, 0f); e.frame(1f / fps); place(0f, 1f) }
         for (f in 0 until frames) {
             val u = f / (frames - 1f).coerceAtLeast(1f)
@@ -438,7 +451,7 @@ class CinematicTest {
         val cx = pr.x[ln] + pr.dirX[ln] * half; val cy = pr.y[ln] + pr.dirY[ln] * half
         val ax = pr.dirY[ln]; val ay = -pr.dirX[ln]
         fly(e, "c10_yokocho", 2.4f, listOf(Key(cx + ax * 6f, cy + ay * 6f, 16f, look(ax, ay), 10f), Key(cx + ax * 11f, cy + ay * 11f, 15f, look(ax, ay) + .08f, 9f)),
-            easing = .2f, warm = 4f, haze = .2f) { _, _ -> clearWeather(e) }
+            easing = .2f, warm = 4f, haze = .2f, crowd = 45f) { _, _ -> clearWeather(e) }
     }
 
     /** The hypercar at golden hour down a Gangnam boulevard. */
@@ -446,6 +459,8 @@ class CinematicTest {
     fun c13() {
         if (!on("c13")) { assumeTrue(false); return }
         val e = engine("seoul", 17.7f)
+        // lighter traffic here, so nothing drives between the camera and the car
+        e.settings.busyRoads = 1.2f; e.traffic.ensure(e.settings.carCount, e.settings.pedCount)
         val v = startCar(e, "vortex", 335f, 1097f, color = 0xFFE53935.toInt(), minLen = 220f)
         chase(e, "c13_hypercar", 2.4f, v, 19f, relYaw = { u -> -2.1f + .6f * u }, dist = { u -> 10f + 1.5f * u }, pitch = { 9f }, lead = .5f) { _, _ -> clearWeather(e) }
     }
@@ -470,13 +485,41 @@ class CinematicTest {
         fly(e, "c15_seoul_night", 2.4f, listOf(Key(t.x, t.y, 520f, -.3f, 8.2f), Key(t.x, t.y, 480f, -.15f, 8.8f)), easing = .2f, haze = .3f) { _, _ -> clearWeather(e) }
     }
 
-    /** The Shibuya scramble at night, full of people. */
+    /** The Shibuya scramble at night: every car holds and the crowd floods across in all directions. */
     @Test
     fun c16() {
         if (!on("c16")) { assumeTrue(false); return }
         val e = engine("tokyo", 20.6f)
         val s = landmark(e, "Shibuya")
-        fly(e, "c16_scramble", 2.6f, listOf(Key(s.x, s.y, 60f, 2.6f, 38f), Key(s.x, s.y, 52f, 2.9f, 34f)), easing = .2f, haze = .25f) { _, _ -> clearWeather(e) }
+        val node = e.city.scrambleNode(s)!!
+        // the walk signal comes on three seconds before the shot, after a long red has gathered people at every corner
+        val warm = 26f
+        e.traffic.lightClock = ((34.5f - node.phase - (warm - 3f)) % Traffic.SCRAMBLE_CYCLE + Traffic.SCRAMBLE_CYCLE) % Traffic.SCRAMBLE_CYCLE
+        fly(e, "c16_scramble", 2.6f, listOf(Key(s.x, s.y, 56f, 2.55f, 31f), Key(s.x, s.y, 49f, 2.85f, 27f)), easing = .2f, warm = warm, haze = .25f,
+            crowd = 45f) { _, _ ->
+            clearWeather(e)
+        }
+    }
+
+    /** Times Square at night from the sidewalk: crowds under the screens, taxis pouring through. */
+    @Test
+    fun c17() {
+        if (!on("c17")) { assumeTrue(false); return }
+        val e = engine("nyc", 20.4f)
+        // low over Seventh Avenue, looking up into the square between its crowded sidewalks
+        fly(e, "c17_times", 2.4f, listOf(Key(621f, 946f, 28f, .1f, 10f), Key(621f, 930f, 26f, .03f, 9f)), easing = .2f, warm = 5f, haze = .22f,
+            crowd = 70f) { _, _ ->
+            clearWeather(e)
+        }
+    }
+
+    @Test
+    fun x1() {
+        // a straight-down debug view: HC_X1=map,x,y,dist[,hour]
+        val a = System.getenv("HC_X1")?.split(',') ?: run { assumeTrue(false); return }
+        val e = engine(a[0], a.getOrNull(4)?.toFloat() ?: 13f)
+        val x = a[1].toFloat(); val y = a[2].toFloat(); val d = a[3].toFloat()
+        fly(e, "x1_top", .2f, listOf(Key(x, y, d, 0f, 89f), Key(x, y, d, 0f, 89f)), easing = .2f) { _, _ -> clearWeather(e) }
     }
 
     /** The finale: Midtown at night, pulling back as the city lights up. */

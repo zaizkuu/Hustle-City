@@ -326,6 +326,7 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
         bounds = layout.bounds
         leftHand = map.leftHand
         for (b in buildings) b.placeId?.let { placeBuildings.getOrPut(it) { mutableListOf() } += b.id }
+        for (l in landmarks) if (l.kind == Landmark.BILLBOARDS && l.style == Landmark.SCRAMBLE) scrambleNode(l)?.scramble = true
         maxHeight = buildings.maxOfOrNull { it.height } ?: 10f
         gx0 = bounds[0] - 60f; gy0 = bounds[1] - 60f
         gCols = ((bounds[2] + 60f - gx0) / cell).toInt() + 1
@@ -340,6 +341,10 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
     }
 
     fun building(id: Int): Building? = buildings.getOrNull(id)
+
+    /** The big junction a scramble-crossing landmark stands on, if any. */
+    fun scrambleNode(l: Landmark): RoadNode? =
+        roads.nodes.filter { it.degree >= 4 && kotlin.math.hypot(it.x - l.x, it.y - l.y) < 18f }.minByOrNull { kotlin.math.hypot(it.x - l.x, it.y - l.y) }
 
     fun placeBuilding(placeId: String): Building? = placeBuildings[placeId]?.firstOrNull()?.let { buildings[it] }
 

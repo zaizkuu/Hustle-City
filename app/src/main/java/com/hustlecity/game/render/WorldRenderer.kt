@@ -813,13 +813,17 @@ class WorldRenderer(private val e: GameEngine) {
      */
     private fun junctionOutline(n: com.hustlecity.game.world.RoadNode): Int {
         val g = e.city.roads
-        val m = min(n.edges.size, jOrder.size)
+        var m = 0
         var any = false
-        for (k in 0 until m) {
+        for (k in 0 until n.edges.size) {
+            if (m >= jOrder.size) break
             val ed = g.edges[n.edges[k]]
-            jOrder[k] = k
+            // a road lying under a bigger one adds no corners of its own
+            if (ed.under) continue
+            jOrder[m] = k
             jAngle[k] = g.angleAway(ed, n.id)
             if ((if (ed.a == n.id) ed.clearA else ed.clearB) > 0f) any = true
+            m++
         }
         if (!any) return -1
         // roads in order of the direction they leave the node
@@ -897,15 +901,30 @@ class WorldRenderer(private val e: GameEngine) {
             if (!n.signal || n.x < bbox[0] - 20f || n.x > bbox[2] + 20f || n.y < bbox[1] - 20f || n.y > bbox[3] + 20f) continue
             for (id in n.edges) {
                 val ed = g.edges[id]
+                if (ed.under) continue
                 val clear = if (ed.a == n.id) ed.clearA else ed.clearB
                 // the approach comes toward the node; its pole stands on the near-side corner past the curb
                 val dx = if (ed.a == n.id) ed.ux else -ed.ux; val dy = if (ed.a == n.id) ed.uy else -ed.uy
                 val side = if (e.city.leftHand) -1f else 1f
                 val off = ed.cls.halfWidth + 1.4f
                 // right of someone driving toward the node (direction -d) is (dy, -dx) in a y-down world
-                block(n, ed, n.x + dx * (clear + 1f) + dy * off * side, n.y + dy * (clear + 1f) - dx * off * side)
+                val px = n.x + dx * (clear + 1f) + dy * off * side; val py = n.y + dy * (clear + 1f) - dx * off * side
+                // where junctions crowd together a short link's corner can fall in the middle of the road: no pole there
+                if (poleOnRoad(n, id, px, py)) continue
+                block(n, ed, px, py)
             }
         }
+    }
+
+    /** Per junction approach (node, index of the edge there): 1 when its light pole would stand on asphalt, 2 when not. */
+    private val poleCheck = HashMap<Int, Int>()
+    private var poleCity: com.hustlecity.game.world.City? = null
+
+    private fun poleOnRoad(n: com.hustlecity.game.world.RoadNode, edgeId: Int, x: Float, y: Float): Boolean {
+        if (poleCity !== e.city) { poleCheck.clear(); poleCity = e.city }
+        val key = n.id * 16 + n.edges.indexOf(edgeId).coerceIn(0, 15)
+        val v = poleCheck.getOrPut(key) { if (e.city.roads.onAsphalt(x, y)) 1 else 2 }
+        return v == 1
     }
 
     private val hx = FloatArray(64)
@@ -989,20 +1008,67 @@ class WorldRenderer(private val e: GameEngine) {
 
     /**
      * Curbs: a pale concrete edge between the asphalt and the sidewalk with a darker gutter inside it, along every
-     * road and round the corners of its junctions.
+     * road and round the corners of its junctions, wherever [curbRuns] found pavement behind them.
      */
     private fun drawCurbs(asphalt: Int, curb: Int) {
         val g = e.city.roads
         val gutter = scene.mix(asphalt, scene.lit(c(0xFF1E2024), 1f), .22f)
-        for (ed in g.edges) {
-            if (ed.overWater || !edgeVisible(ed, 12f)) continue
-            val s0 = ed.clearA; val s1 = ed.len - ed.clearB
+        val c = curbRuns()
+        for (r in 0 until c.edgeCount) {
+            val ed = g.edges[c.edge[r * 4].toInt()]
+            if (!edgeVisible(ed, 12f)) continue
+            val side = c.edge[r * 4 + 1]; val s0 = c.edge[r * 4 + 2]; val s1 = c.edge[r * 4 + 3]
             val hw = ed.cls.halfWidth
-            strip(ed, s0, s1, hw - .38f, hw, .0262f, gutter); strip(ed, s0, s1, -hw, -hw + .38f, .0262f, gutter)
-            strip(ed, s0, s1, hw, hw + .24f, .028f, curb); strip(ed, s0, s1, -hw - .24f, -hw, .028f, curb)
+            if (side > 0f) { strip(ed, s0, s1, hw - .38f, hw, .0262f, gutter); strip(ed, s0, s1, hw, hw + .24f, .028f, curb) }
+            else { strip(ed, s0, s1, -hw, -hw + .38f, .0262f, gutter); strip(ed, s0, s1, -hw - .24f, -hw, .028f, curb) }
         }
+        for (q in 0 until c.cornerCount) {
+            val o = q * 6
+            val ax = c.corner[o]; val ay = c.corner[o + 1]; val bx = c.corner[o + 2]; val by = c.corner[o + 3]
+            if (max(ax, bx) < bbox[0] - 2f || min(ax, bx) > bbox[2] + 2f || max(ay, by) < bbox[1] - 2f || min(ay, by) > bbox[3] + 2f) continue
+            val nx = c.corner[o + 4]; val ny = c.corner[o + 5]
+            scene.quad(ax, ay, .028f, bx, by, .028f, bx + nx * .24f, by + ny * .24f, .028f, ax + nx * .24f, ay + ny * .24f, .028f, curb)
+        }
+    }
+
+    /** Curb pieces for a city: along roads (edge, side, from, to) and round junction corners (x0, y0, x1, y1, outward normal). */
+    private class CurbRuns(val edge: FloatArray, val edgeCount: Int, val corner: FloatArray, val cornerCount: Int)
+
+    private var curbCache: CurbRuns? = null
+    private var curbCity: com.hustlecity.game.world.City? = null
+
+    /**
+     * Where curbs run, worked out once per city. A curb only stands where there is pavement behind it: where two
+     * junctions crowd together, one's corner can land on the other's asphalt, and a curb drawn there would be a stray
+     * line across the road.
+     */
+    private fun curbRuns(): CurbRuns {
+        curbCache?.let { if (curbCity === e.city) return it }
+        val g = e.city.roads
+        val runs = ArrayList<Float>()
+        for (ed in g.edges) {
+            if (ed.overWater || ed.under) continue
+            val s0 = ed.clearA; val s1 = ed.len - ed.clearB
+            if (s1 <= s0) continue
+            val hw = ed.cls.halfWidth
+            val pieces = kotlin.math.ceil((s1 - s0) / 2f).toInt().coerceAtLeast(1)
+            for (side in floatArrayOf(1f, -1f)) {
+                // the strip's sideways direction is (uy, -ux); probe just behind the curb on this side
+                val lx = ed.uy * side; val ly = -ed.ux * side
+                var runStart = Float.NaN
+                for (p in 0..pieces) {
+                    val a = s0 + (s1 - s0) * p / pieces
+                    val keep = p < pieces && run {
+                        val m = a + (s1 - s0) / pieces * .5f
+                        !g.onAsphalt(ed.ax + ed.ux * m + lx * (hw + .7f), ed.ay + ed.uy * m + ly * (hw + .7f))
+                    }
+                    if (keep && runStart.isNaN()) runStart = a
+                    if (!keep && !runStart.isNaN()) { runs += ed.id.toFloat(); runs += side; runs += runStart; runs += a; runStart = Float.NaN }
+                }
+            }
+        }
+        val corners = ArrayList<Float>()
         for (n in g.nodes) {
-            if (n.x < bbox[0] - 30f || n.x > bbox[2] + 30f || n.y < bbox[1] - 30f || n.y > bbox[3] + 30f) continue
             val k = junctionOutline(n)
             for (i in 0 until k) {
                 if (mouth[i]) continue
@@ -1013,9 +1079,11 @@ class WorldRenderer(private val e: GameEngine) {
                 if (l < .05f) continue
                 var nx = -dy / l; var ny = dx / l
                 if (nx * ((ax + bx) * .5f - n.x) + ny * ((ay + by) * .5f - n.y) < 0f) { nx = -nx; ny = -ny }
-                scene.quad(ax, ay, .028f, bx, by, .028f, bx + nx * .24f, by + ny * .24f, .028f, ax + nx * .24f, ay + ny * .24f, .028f, curb)
+                if (g.onAsphalt((ax + bx) * .5f + nx * .7f, (ay + by) * .5f + ny * .7f)) continue
+                corners += ax; corners += ay; corners += bx; corners += by; corners += nx; corners += ny
             }
         }
+        return CurbRuns(runs.toFloatArray(), runs.size / 4, corners.toFloatArray(), corners.size / 6).also { curbCache = it; curbCity = e.city }
     }
 
     private fun drawMarkings() {
@@ -1036,11 +1104,13 @@ class WorldRenderer(private val e: GameEngine) {
         val g = e.city.roads
         val left = e.city.leftHand
         for (ed in g.edges) {
-            if (!edgeVisible(ed, 12f)) continue
+            if (ed.under || !edgeVisible(ed, 12f)) continue
             val s0 = ed.clearA + 3.5f; val s1 = ed.len - ed.clearB - 3.5f
             if (s1 <= s0) continue
             val hw = ed.cls.halfWidth
-            if (near) {
+            // a stub between two close junctions gets no lines: a scrap of centre line there reads as a stray mark
+            val lines = s1 - s0 >= 4f
+            if (near && lines) {
                 // tyre tracks darken the middle of every lane, and old repairs patch the asphalt here and there
                 if (!ed.overWater) {
                     for (lane in 0 until ed.cls.lanes) for (sd in -1..1 step 2) {
@@ -1060,7 +1130,7 @@ class WorldRenderer(private val e: GameEngine) {
                     }
                 }
             }
-            when {
+            if (lines) when {
                 // divided roads: a double yellow line, and dashed white lines between the lanes; the paint is worn in places
                 ed.cls.rank >= 2 -> {
                     var t = s0; var k = 0
@@ -1086,7 +1156,8 @@ class WorldRenderer(private val e: GameEngine) {
             for (end in 0..1) {
                 val node = g.nodes[if (end == 0) ed.a else ed.b]
                 val style = crossStyle(node)
-                if (style == 0 || ed.cls.rank < 1) continue
+                // lanes go unmarked, except where they join a scramble: there every road has its crossing
+                if (style == 0 || (ed.cls.rank < 1 && !node.scramble)) continue
                 val clear = if (end == 0) ed.clearA else ed.clearB
                 val a = if (end == 0) clear + .5f else ed.len - clear - 3.2f
                 val salt = ed.id * 2 + end

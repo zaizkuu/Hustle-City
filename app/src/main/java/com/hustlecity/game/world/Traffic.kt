@@ -131,6 +131,19 @@ class Traffic(private val rnd: Random = Random(7)) {
         }
     }
 
+    /** Puts [fraction] of the walkers on sidewalks within [radius] of (fx, fy): a busy moment right where you're looking. */
+    fun scatter(fx: Float, fy: Float, radius: Float, fraction: Float) {
+        val g = roads ?: return
+        val n = (peds.size * fraction).toInt()
+        for (i in 0 until n) {
+            // a road picked near the point can run on far past it: keep trying for a spot within the radius
+            for (attempt in 0 until 30) {
+                spawnPed(g, peds[i], fx, fy, radius, true)
+                if (dist(peds[i].x, peds[i].y, fx, fy) <= radius) break
+            }
+        }
+    }
+
     fun ensure(carCount: Int, pedCount: Int) {
         while (cars.size < carCount) cars += Agent()
         while (cars.size > carCount) cars.removeAt(cars.size - 1)
@@ -153,9 +166,24 @@ class Traffic(private val rnd: Random = Random(7)) {
     fun light(node: RoadNode, edge: RoadEdge): Int {
         if (!node.signal) return 0
         val g = roads ?: return 0
+        if (node.scramble) {
+            // two road phases, then every car waits while the crossing fills with people
+            val t = (lightClock + node.phase) % SCRAMBLE_CYCLE
+            return if (group(g, node, edge) == 0) when { t < 14f -> 0; t < 17f -> 1; else -> 2 }
+            else when { t in 17f..31f -> 0; t in 31f..34f -> 1; else -> 2 }
+        }
         val t = (lightClock + node.phase) % 40f
         return if (group(g, node, edge) == 0) when { t < 20f -> 0; t < 23f -> 1; else -> 2 }
         else when { t in 23f..37f -> 0; t > 37f -> 1; else -> 2 }
+    }
+
+    /** True while a scramble crossing's walk signal is on: all its traffic is held and people cross any way they like. */
+    fun scrambleWalk(node: RoadNode): Boolean = node.scramble && node.signal && (lightClock + node.phase) % SCRAMBLE_CYCLE in 34.5f..45f
+
+    /** Seconds until [node]'s scramble walk signal next comes on (0 while it's on). */
+    fun untilScrambleWalk(node: RoadNode): Float {
+        val t = (lightClock + node.phase) % SCRAMBLE_CYCLE
+        return if (t in 34.5f..45f) 0f else ((34.5f - t) % SCRAMBLE_CYCLE + SCRAMBLE_CYCLE) % SCRAMBLE_CYCLE
     }
 
     // ------------------------------------------------------------------ geometry
@@ -235,7 +263,7 @@ class Traffic(private val rnd: Random = Random(7)) {
         candidates.clear()
         g.forCells(fx - radius, fy - radius, fx + radius, fy + radius) { id ->
             val e = g.edges[id]
-            if (e.len < 6f) return@forCells
+            if (e.len < 6f || (!car && e.under)) return@forCells
             // bigger roads get more traffic
             val w = if (car) e.cls.rank + 1 else 2
             repeat(w) { candidates += id }
@@ -344,16 +372,19 @@ class Traffic(private val rnd: Random = Random(7)) {
             if (id == from.id) continue
             total += weight(g, node, inA, g.edges[id], car)
         }
+        if (total <= 0f) return from.id
         var r = rnd.nextFloat() * total
         for (id in node.edges) {
             if (id == from.id) continue
-            r -= weight(g, node, inA, g.edges[id], car)
-            if (r <= 0f) return id
+            val w = weight(g, node, inA, g.edges[id], car)
+            r -= w
+            if (w > 0f && r <= 0f) return id
         }
-        return node.edges.firstOrNull { it != from.id } ?: from.id
+        return node.edges.firstOrNull { it != from.id && weight(g, node, inA, g.edges[it], car) > 0f } ?: from.id
     }
 
     private fun weight(g: RoadGraph, node: RoadNode, inA: Float, e: RoadEdge, car: Boolean): Float {
+        if (!car && e.under) return 0f
         val out = g.angleAway(e, node.id)
         val turn = angleDiff(inA, out)
         val straight = if (turn < .5f) 2.2f else 1f
@@ -659,7 +690,9 @@ class Traffic(private val rnd: Random = Random(7)) {
         // stay on whichever side of the next road we're already on
         val ox = if (node.id == ne.a) ne.ux else -ne.ux; val oy = if (node.id == ne.a) ne.uy else -ne.uy
         val rx = -oy; val ry = ox
-        val side = if ((a.x - node.x) * rx + (a.y - node.y) * ry >= 0f) 1 else -1
+        var side = if ((a.x - node.x) * rx + (a.y - node.y) * ry >= 0f) 1 else -1
+        // at a scramble half the crowd cuts straight across to the far side, through the middle
+        if (node.scramble && rnd.nextFloat() < .5f) side = -side
         a.next = nextId
         a.nextLane = side
         at(ne, node.id, walkStart(g, ne, node.id, side), pedOffset(ne, a) * side, tmp)
@@ -674,19 +707,29 @@ class Traffic(private val rnd: Random = Random(7)) {
             val reach = clearAt(f, node.id) + f.cls.halfWidth + 3f
             if (Geo.segHit(a.x, a.y, a.tx, a.ty, node.x, node.y, node.x + fx * reach, node.y + fy * reach, tmp2)) { a.lane = id; break }
         }
-        a.state = if (a.lane >= 0 && node.signal) 1 else 2
+        // at a scramble every walk off the curb waits for the walk signal, the crowd spreading along the curb
+        val off = node.scramble && dist(a.x, a.y, a.tx, a.ty) > 6f
+        a.state = if ((a.lane >= 0 || off) && node.signal) 1 else 2
+        if (off && a.state == 1) {
+            val back = rnd.nextFloat() * 1.6f; val along = (rnd.nextFloat() * 2f - 1f) * 2.4f
+            val wx = a.x - node.x; val wy = a.y - node.y; val wl = max(.01f, kotlin.math.sqrt(wx * wx + wy * wy))
+            a.x += wx / wl * back - wy / wl * along; a.y += wy / wl * back + wx / wl * along
+        }
     }
 
     private fun crossing(g: RoadGraph, a: Agent, dt: Float) {
         if (a.state == 1) {
-            // waiting for the walk signal: cars on the road we cross must have red
+            // waiting for the walk signal: cars on the road we cross must have red (at a scramble, all of them)
             val node = g.nodes[a.jNode]
             val crossed = g.edges.getOrNull(a.lane)
-            if (crossed == null || light(node, crossed) == 2) a.state = 2 else { a.speed = 0f; return }
+            val go = if (node.scramble) scrambleWalk(node) else crossed == null || light(node, crossed) == 2
+            if (go) a.state = 2 else { a.speed = 0f; return }
         }
         var speed = a.cruise * hurry
         val crossed = g.edges.getOrNull(a.lane)
-        if (crossed != null && g.nodes[a.jNode].signal && light(g.nodes[a.jNode], crossed) != 2) speed *= 1.6f
+        val node = g.nodes[a.jNode]
+        val late = if (node.scramble) !scrambleWalk(node) else crossed != null && node.signal && light(node, crossed) != 2
+        if (late) speed *= 1.6f
         if (walkTo(a, dt, a.tx, a.ty, speed)) {
             val ne = g.edges[a.next]
             a.edge = ne.id
@@ -712,6 +755,9 @@ class Traffic(private val rnd: Random = Random(7)) {
     }
 
     companion object {
+        /** Seconds round a scramble crossing's lights: two road phases, then the walk. */
+        const val SCRAMBLE_CYCLE = 48f
+
         /** The original city's car colors. */
         val DEFAULT_PALETTE = intArrayOf(
             c(0xFFC0392B), c(0xFFE0E0E0), c(0xFF2C3E50), c(0xFF7F8C8D), c(0xFF1F3A93), c(0xFFF2F2F2), c(0xFF8E2442),

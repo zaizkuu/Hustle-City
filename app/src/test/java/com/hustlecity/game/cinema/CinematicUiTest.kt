@@ -62,6 +62,9 @@ class CinematicUiTest {
         e.newGame("Alex Rivera", 1, 2, 1, mapId = mapId)
         e.ui.tip = null; e.ui.phoneOpen = false
         e.settings.quality = 2
+        // as busy as the world shots
+        e.settings.crowds = 8f; e.settings.busyRoads = 3f
+        e.traffic.ensure(e.settings.carCount, e.settings.pedCount)
         e.state.minute = (e.state.minute / 1440) * 1440 + (hour * 60).toLong()
         e.state.weather.clear(); e.state.weather += WeatherSpan(e.state.minute - 600, e.state.minute + 3 * 1440L, Sky.CLEAR)
         e.weather.ensure()
@@ -160,6 +163,8 @@ class CinematicUiTest {
         val p = e.state.player
         val dest = e.city.buildings.filter { it.kind == BKind.RETAIL && hypot(it.doorX - p.x, it.doorY - p.y) in 280f..480f }.minByOrNull { hypot(it.doorX - p.x, it.doorY - p.y) }!!
         e.setWaypoint(dest.id)
+        e.traffic.update(0f, v.x, v.y, 230f, -9999f, -9999f, initial = true)
+        e.traffic.scatter(v.x, v.y, 110f, .65f)
         record(e, "u2_drive", 2.6f, warm = 60) {
             val g = e.gps
             var target: Pair<Float, Float>? = null
