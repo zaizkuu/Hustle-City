@@ -557,6 +557,18 @@ class CinematicTest {
         }
     }
 
+    @Test
+    fun x3() {
+        // still looks from any cameras: HC_X3=map;hour;x,y,dist,yaw,pitch;x,y,dist,yaw,pitch;... -> x3_0, x3_1, ...
+        val a = System.getenv("HC_X3")?.split(';')?.map { it.trim() } ?: run { assumeTrue(false); return }
+        val e = engine(a[0], a[1].toFloat())
+        for ((n, cam) in a.drop(2).withIndex()) {
+            val v = cam.split(',').map { it.trim().toFloat() }
+            val k = Key(v[0], v[1], v[2], v[3], v[4])
+            fly(e, "x3_$n", .05f, listOf(k, k), easing = .2f, warm = 1f) { _, _ -> clearWeather(e) }
+        }
+    }
+
     /** The finale: Midtown at night, pulling back as the city lights up. */
     @Test
     fun e1() {

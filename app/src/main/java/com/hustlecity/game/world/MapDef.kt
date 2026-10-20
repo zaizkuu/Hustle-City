@@ -147,7 +147,7 @@ abstract class PlannedMap(id: String, title: String, blurb: String) : MapDef(id,
 
     /** Landmark grounds, the corridor under elevated railways and the old city walls have no trees. */
     private fun clearOfTrees(p: Plan, x: Float, y: Float): Boolean {
-        for (l in p.landmarks) { val f = l.footprint ?: continue; if (Geo.inside(x, y, f)) return true }
+        for (l in p.landmarks) { val f = l.footprint ?: l.clearance ?: continue; if (Geo.inside(x, y, f)) return true }
         for (r in p.rails) { val q = r.pts; for (i in 0 until q.size / 2 - 1) if (Geo.distToSeg(x, y, q[i * 2], q[i * 2 + 1], q[i * 2 + 2], q[i * 2 + 3]) < 6.5f) return true }
         for (w in p.walls) for (i in 0 until w.size / 2 - 1) if (Geo.distToSeg(x, y, w[i * 2], w[i * 2 + 1], w[i * 2 + 2], w[i * 2 + 3]) < City.WALL_BAND) return true
         return false

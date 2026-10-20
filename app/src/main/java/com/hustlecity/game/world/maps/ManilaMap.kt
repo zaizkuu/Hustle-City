@@ -123,6 +123,10 @@ object ManilaMap : PlannedMap("manila", "Manila", "Manila Bay, the Pasig River, 
         landmarks += Landmark(Landmark.MONUMENT, 300f, 795f, 0f, 1.1f, "Rizal Monument")
         // a Ferris wheel on the bay walk, between the water and Roxas Boulevard
         landmarks += Landmark(Landmark.WHEEL, 183f, 1215f, Math.PI.toFloat() / 2, 1f, "MOA Eye")
+        // Manila City Hall's clock tower in the park's corner by the walls, facing Taft Avenue
+        landmarks += Landmark(Landmark.CITY_HALL, 448f, 769f, Math.PI.toFloat() / 2, 1f, "Manila City Hall")
+        // the Chinatown arch over the Binondo end of Jones Bridge
+        landmarks += Landmark(Landmark.ARCH, 401.3f, 427f, -.074f, 1f, "Binondo Arch")
         // Ermita and Malate: the grid along the bay
         grid(floatArrayOf(205f, 860f, 760f, 850f, 760f, 1360f, 205f, 1360f), 300f, 900f, -.05f, 78f, 60f,
             { RoadClass.STREET }, { RoadClass.STREET }, { ermita[Math.floorMod(it, ermita.size)] }, { ermita[Math.floorMod(it + 6, ermita.size)] })

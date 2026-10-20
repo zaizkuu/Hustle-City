@@ -388,14 +388,26 @@ class Waterfront(private val city: City) {
                 if (p < r.s0 || p >= r.s1) continue
                 for (sd in -1..1 step 2) {
                     scene.box(p - .45f, sd * y - .42f, 0f, p + .45f, sd * y + .42f, 1.45f, BRIDGE_STONE, BRIDGE_STONE)
-                    if (k % 2 == 0 && d < 260f) {
-                        scene.box(p - .08f, sd * y - .08f, 1.45f, p + .08f, sd * y + .08f, 5.3f, LAMP, LAMP)
-                        val glow = if (night) c(0xFFFFE6A8) else c(0xFF5B6168)
-                        scene.box(p - .24f, sd * y - .24f, 5.3f, p + .24f, sd * y + .24f, 5.85f, LAMP, glow)
-                    }
+                    if (k % 2 == 0 && d < 260f) lampStandard(scene, p, sd * y, night, near)
                 }
             }
         } finally { scene.material = Mat.PLAIN; scene.clearFrame() }
+    }
+
+    /** A cast-iron lamp standard on a pier's pilaster: a moulded base, a post with a collar, an arm with two globes and one on top. */
+    private fun lampStandard(scene: Scene3D, s: Float, o: Float, night: Boolean, near: Boolean) {
+        val globe = if (night) c(0xFFFFF3C4) else c(0xFFE9E6DA)
+        scene.box(s - .2f, o - .2f, 1.45f, s + .2f, o + .2f, 2.15f, LAMP, LAMP)
+        scene.box(s - .085f, o - .085f, 2.15f, s + .085f, o + .085f, 5.7f, LAMP, LAMP)
+        if (!near) { scene.box(s - .24f, o - .24f, 5.3f, s + .24f, o + .24f, 5.85f, LAMP, globe); return }
+        scene.box(s - .15f, o - .15f, 3.2f, s + .15f, o + .15f, 3.42f, LAMP, LAMP)
+        scene.box(s - .9f, o - .05f, 5.12f, s + .9f, o + .05f, 5.24f, LAMP, LAMP)
+        for (gx in -1..1 step 2) {
+            scene.box(s + gx * .9f - .04f, o - .04f, 4.98f, s + gx * .9f + .04f, o + .04f, 5.12f, LAMP, LAMP)
+            scene.blob(s + gx * .9f, o, 4.74f, .27f, globe, 8)
+        }
+        scene.blob(s, o, 5.98f, .3f, globe, 8)
+        scene.box(s - .03f, o - .03f, 6.25f, s + .03f, o + .03f, 6.55f, LAMP, LAMP)
     }
 
     // ------------------------------------------------------------------ city walls

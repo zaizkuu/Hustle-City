@@ -201,6 +201,7 @@ class Landmark(val kind: Int, val x: Float, val y: Float, val angle: Float = 0f,
         PALACE_GATE -> floatArrayOf(-46f, -10f, 46f, 10f)
         CHURCH -> floatArrayOf(-14.5f, -34f, 14.5f, 27f)
         WHEEL -> floatArrayOf(-33f, -11f, 33f, 11f)
+        CITY_HALL -> floatArrayOf(-21f, -13f, 21f, 12f)
         else -> null
     }
 
@@ -210,6 +211,14 @@ class Landmark(val kind: Int, val x: Float, val y: Float, val angle: Float = 0f,
         val k = size
         floatArrayOf(wx(ex[0] * k, ex[1] * k), wy(ex[0] * k, ex[1] * k), wx(ex[2] * k, ex[1] * k), wy(ex[2] * k, ex[1] * k),
             wx(ex[2] * k, ex[3] * k), wy(ex[2] * k, ex[3] * k), wx(ex[0] * k, ex[3] * k), wy(ex[0] * k, ex[3] * k))
+    }
+
+    /** Ground kept clear without taking it from lots or roads: the sidewalks under a street arch's columns. */
+    val clearance: FloatArray? by lazy {
+        if (kind != ARCH) return@lazy null
+        val k = size
+        floatArrayOf(wx(-11f * k, -2f * k), wy(-11f * k, -2f * k), wx(11f * k, -2f * k), wy(11f * k, -2f * k),
+            wx(11f * k, 2f * k), wy(11f * k, 2f * k), wx(-11f * k, 2f * k), wy(-11f * k, 2f * k))
     }
 
     /** Roads are cleared out of the footprint (a church square, the ground under a tower or a wheel). */
@@ -246,6 +255,10 @@ class Landmark(val kind: Int, val x: Float, val y: Float, val angle: Float = 0f,
         const val CHURCH = 5
         /** A Ferris wheel. */
         const val WHEEL = 6
+        /** A ceremonial gateway over a street (Binondo's Chinatown arch); local x runs across the street. */
+        const val ARCH = 7
+        /** A city hall with a clock tower: its front toward -y, the tower at the -x end. */
+        const val CITY_HALL = 8
     }
 }
 
@@ -400,7 +413,7 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
 
     /** Inside a landmark's grounds or on the old city walls: street furniture stays out. */
     fun reserved(x: Float, y: Float): Boolean {
-        for (l in landmarks) { val f = l.footprint ?: continue; if (Geo.inside(x, y, f)) return true }
+        for (l in landmarks) { val f = l.footprint ?: l.clearance ?: continue; if (Geo.inside(x, y, f)) return true }
         for (w in walls) for (i in 0 until w.size / 2 - 1) if (Geo.distToSeg(x, y, w[i * 2], w[i * 2 + 1], w[i * 2 + 2], w[i * 2 + 3]) < WALL_BAND) return true
         return false
     }

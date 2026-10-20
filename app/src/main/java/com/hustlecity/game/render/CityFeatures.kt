@@ -131,7 +131,10 @@ class CityFeatures(val city: City) {
         rails.drawCar(scene, i, d < 95f)
     }
 
-    /** Ground layers: landmark paving and crossings, lawns, quays and bridge sides; the viaduct's painted shadow. */
+    /** Landmark squares and forecourts, painted under the roads. */
+    fun drawPaving(scene: Scene3D, bbox: FloatArray) = landmarks.drawPaving(scene, bbox)
+
+    /** Ground layers over the roads: scramble crossings, lawns, quays and bridge sides; the viaduct's painted shadow. */
     fun drawGround(scene: Scene3D, bbox: FloatArray, mapMode: Boolean, shadowDX: Float, shadowDY: Float, paintShadows: Boolean) {
         landmarks.drawGround(scene, bbox)
         water.drawGround(scene, bbox, mapMode)

@@ -684,6 +684,8 @@ class WorldRenderer(private val e: GameEngine) {
                 scene.quad(path[0] + nx, path[1] + ny, .03f, path[2] + nx, path[3] + ny, .03f, path[2] - nx, path[3] - ny, .03f, path[0] - nx, path[1] - ny, .03f, pathC)
             }
         }
+        // landmark squares, under the streets that run past them
+        features.drawPaving(scene, bbox)
         // neighborhood tint (map filters)
         if (mapMode) for (h in city.neighborhoods) {
             if (e.ui.mapFilters["hood:${h.id}"] != true) continue

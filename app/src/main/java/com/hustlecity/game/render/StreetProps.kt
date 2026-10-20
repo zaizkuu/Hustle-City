@@ -27,6 +27,13 @@ class StreetProps(val city: City) {
         const val VENDING = 13
         /** Tokyo's yokocho alleys: a string of red paper lanterns across the lane. */
         const val LANTERNS = 14
+        /** Manila's barangay streets: banderitas, strings of little fiesta flags, across the street. */
+        const val BUNTING = 15
+        /** Manila's residential lanes: a home-made basketball hoop on a post, hanging over the street. */
+        const val HOOP = 16
+        /** Manila's neighborhoods of narrow streets and fiestas: Tondo, Quiapo, Sampaloc and Paco. */
+        private val BARANGAYS = setOf(0, 2, 3, 7)
+        private val FLAGS = intArrayOf(c(0xFFE53935), c(0xFFFDD835), c(0xFF1E88E5), c(0xFFF5F5F5), c(0xFF43A047), c(0xFFEC407A), c(0xFFFB8C00))
 
         private val POLE = c(0xFF2F3A35)
         private val IRON = c(0xFF2A2D31)
@@ -47,8 +54,10 @@ class StreetProps(val city: City) {
     var dirY = FloatArray(4096); private set
     /** Poles: the next pole the wires run to (-1 for none). */
     var link = IntArray(4096); private set
-    /** Lantern strings: how far across the lane they reach. Poles: 1 when wires drop into a house behind. */
+    /** Lantern and bunting strings: how far across the street they reach. Poles: 1 when wires drop into a house behind. */
     var aux = FloatArray(4096); private set
+    /** Poles: how far across the street a bundle of wires runs to the houses on the other side (0 for none). */
+    var cross = FloatArray(4096); private set
     /** Trees hidden because a park path or fountain is there. */
     val hiddenTree = BooleanArray(city.trees.size)
     /**
@@ -78,9 +87,10 @@ class StreetProps(val city: City) {
         if (count == x.size) {
             x = x.copyOf(count * 2); y = y.copyOf(count * 2); kind = kind.copyOf(count * 2); face = face.copyOf(count * 2)
             dirX = dirX.copyOf(count * 2); dirY = dirY.copyOf(count * 2); link = link.copyOf(count * 2); aux = aux.copyOf(count * 2)
+            cross = cross.copyOf(count * 2)
         }
         x[count] = px; y[count] = py; kind[count] = k; face[count] = 1; dirX[count] = dx; dirY[count] = dy
-        link[count] = -1; aux[count] = 0f
+        link[count] = -1; aux[count] = 0f; cross[count] = 0f
         return count++
     }
 
@@ -97,8 +107,8 @@ class StreetProps(val city: City) {
     private fun clearSpot(px: Float, py: Float, ux: Float, uy: Float, nx: Float, ny: Float, k: Int): Boolean {
         val g = city.roads
         val half = footprint(k)
-        // the wire strings of lanterns reach across their own lane, so only their foot is checked
-        val margin = if (k == LANTERNS) .1f else .25f
+        // the strings of lanterns and flags reach across their own street, so only their foot is checked
+        val margin = if (k == LANTERNS || k == BUNTING) .1f else .25f
         for (sx in floatArrayOf(-half, 0f, half)) for (sy in floatArrayOf(0f, if (k == BUS_STOP || k == VENDING) .7f else .3f)) {
             val qx = px + ux * sx + nx * sy; val qy = py + uy * sx + ny * sy
             if (g.nearAsphalt(qx, qy, margin)) return false
@@ -173,8 +183,10 @@ class StreetProps(val city: City) {
                         val i = at(if (nearTree(px, py, 1.6f)) s + 2.2f else s, curb, UTIL_POLE)
                         if (i >= 0) {
                             if (prev >= 0 && dist(x[prev], y[prev], x[i], y[i]) < 40f) link[prev] = i
-                            // service drops run back into the houses
+                            // service drops run back into the houses, and now and then a bundle across the street
                             if (building(x[i] + nx * (e.cls.sidewalk + 3f), y[i] + ny * (e.cls.sidewalk + 3f))) aux[i] = 1f
+                            val across = curb + e.cls.halfWidth + e.cls.sidewalk - .4f
+                            if (rand() < .45f && building(x[i] - nx * (across + 1.2f), y[i] - ny * (across + 1.2f))) cross[i] = across
                             prev = i
                         }
                         s += if (e.cls == RoadClass.LANE) 24f else 28f
@@ -193,6 +205,22 @@ class StreetProps(val city: City) {
                     val s = s0 + 8f + rand() * (s1 - s0 - 16f).coerceAtLeast(1f)
                     val px = e.ax + e.ux * s + nx * (curb + 1.1f); val py = e.ay + e.uy * s + ny * (curb + 1.1f)
                     if (!nearTree(px, py, 3.6f)) at(s, curb + 1.1f, VENDOR)
+                }
+                // Manila's barangays: banderitas strung across the street, a basketball hoop by the lane
+                val barangay = manila && e.cls.rank <= 1 && hood.id in BARANGAYS
+                if (barangay && side > 0 && e.id % 4 == 0) {
+                    val off = e.cls.halfWidth + e.cls.sidewalk * .85f
+                    var s = s0 + 4f
+                    while (s < s1 - 3f) {
+                        val i = at(s, off, BUNTING)
+                        if (i >= 0) aux[i] = off * 2f
+                        s += 7.5f
+                    }
+                }
+                if (barangay && e.cls == RoadClass.LANE && rand() < .3f) {
+                    val s = s0 + 6f + rand() * (s1 - s0 - 12f).coerceAtLeast(1f)
+                    val px = e.ax + e.ux * s + nx * wall; val py = e.ay + e.uy * s + ny * wall
+                    if (!nearTree(px, py, 2f)) at(s, wall, HOOP)
                 }
                 // vending machines against the walls of Tokyo's (and Seoul's) side streets
                 if ((tokyo || seoul) && e.cls.rank <= 1 && rand() < (if (tokyo) .75f else .35f)) {
@@ -392,6 +420,8 @@ class StreetProps(val city: City) {
             VENDOR -> foodCart(scene, i, near)
             VENDING -> vending(scene, i, near, night)
             LANTERNS -> lanterns(scene, i, near, night)
+            BUNTING -> bunting(scene, i, near)
+            HOOP -> hoop(scene, i, near)
         }
     }
 
@@ -421,6 +451,12 @@ class StreetProps(val city: City) {
     private fun localX(i: Int, px: Float, py: Float) = (px - x[i]) * dirY[i] + (py - y[i]) * -dirX[i]
     private fun localY(i: Int, px: Float, py: Float) = -(px - x[i]) * -dirX[i] + (py - y[i]) * dirY[i]
 
+    /**
+     * A Manila utility pole and its share of the "spaghetti": power lines on the cross-arm, then a sagging mass of
+     * phone, cable and internet lines lower down, every one hung by a different crew at a different slack, one drooping
+     * in a long loop. Junction boxes and coils of spare cable cling to the pole, drops run into the houses behind, and
+     * now and then a bundle crosses the street to the houses opposite.
+     */
     private fun utilityPole(scene: Scene3D, i: Int, near: Boolean, night: Boolean) {
         val concrete = c(0xFFA8A49B)
         val dark = c(0xFF1E1F22)
@@ -437,20 +473,38 @@ class StreetProps(val city: City) {
             scene.cylinder(0f, -.42f, .3f, 6f, 6.95f, 8, c(0xFF7D858C), c(0xFF5E666D))
             if (near) scene.box(-.05f, -.25f, 6.4f, .05f, -.15f, 6.5f, IRON, IRON)
         }
+        // junction boxes of the cable and phone companies, strapped on one above the other
+        if (i % 2 == 0) scene.box(-.17f, -.36f, 4.7f, .17f, -.15f, 5.25f, c(0xFF8D9399), c(0xFF6E757C))
+        if (i % 3 == 1) scene.box(-.15f, .15f, 5.05f, .15f, .34f, 5.45f, c(0xFF55606A), c(0xFF454E57))
         if (near) for (yy in floatArrayOf(-.65f, -.22f, .22f, .65f)) scene.box(-.04f, yy - .04f, 8.08f, .04f, yy + .04f, 8.22f, c(0xFFE8E4DA), c(0xFFE8E4DA))
         val nxt = link[i]
+        val segs = if (near) 7 else 4
         if (nxt >= 0) {
             val tx = localX(i, x[nxt], y[nxt]); val ty = localY(i, x[nxt], y[nxt])
-            // power on the cross-arm, then the sagging bundle of phone and cable TV lines lower down
-            for ((k, yy) in floatArrayOf(-.65f, -.22f, .22f, .65f).withIndex()) wire(scene, 0f, yy, 8.15f, tx, ty + yy, 8.15f, .45f + k * .06f, dark)
-            for (k in 0..3) {
-                val z = 5.6f + k * .22f
-                wire(scene, .1f, -.1f + k * .05f, z, tx - .1f, ty - .1f + k * .05f, z + (k % 2) * .1f, .8f + k * .25f + (i % 4) * .1f, dark, .045f)
+            // power on the cross-arm
+            for ((k, yy) in floatArrayOf(-.65f, -.22f, .22f, .65f).withIndex()) wire(scene, 0f, yy, 8.15f, tx, ty + yy, 8.15f, .45f + k * .06f, dark, segs = segs)
+            // the tangle: seven lines at their own heights and slack, mostly black, a grey one and a pale fibre
+            for (k in 0 until 7) {
+                val h = ((i * 7 + k * 13) * 2654435761L ushr 9).toInt() and 0xFF
+                val z0 = 5.0f + k * .2f + (h % 5) * .04f
+                val z1 = z0 + ((h shr 3) % 3 - 1) * .12f
+                val sag = .7f + (h % 9) * .12f + k * .05f
+                val off = -.18f + k * .06f
+                val col = when (k) { 2 -> c(0xFF3C4046); 5 -> c(0xFFCFCBC0); else -> dark }
+                wire(scene, .1f, off, z0, tx - .1f, ty + off + ((h shr 5) % 3 - 1) * .08f, z1, sag, col, .04f + (k % 3) * .006f, segs)
             }
+            // and one hanging slack in a long loop
+            wire(scene, .12f, .05f, 5.5f, tx - .12f, ty + .05f, 5.6f, 2.0f + (i % 3) * .25f, dark, .035f, segs)
             if (near) {
-                // a coil of spare cable hanging off the pole
+                // coils of spare cable hanging off the pole
                 scene.blob(.35f, -.2f, 5.4f, .32f, dark, 8)
                 scene.blob(.35f, -.2f, 5.4f, .18f, scene.lit(c(0xFF2C2E31), 1f), 6)
+                if (i % 2 == 1) {
+                    scene.blob(-.3f, .25f, 6.15f, .26f, dark, 8)
+                    scene.blob(-.3f, .25f, 6.15f, .14f, scene.lit(c(0xFF2C2E31), 1f), 6)
+                }
+                // lines wrapped round the pole where they change direction
+                for (k in 0..2) scene.box(-.19f, -.19f, 5.15f + k * .32f, .19f, .19f, 5.24f + k * .32f, dark, dark)
             }
         }
         if (aux[i] > 0f) {
@@ -459,6 +513,11 @@ class StreetProps(val city: City) {
             wire(scene, 0f, -.1f, 6.1f, -2.2f, back, 4.6f, .3f, dark, .03f, 4)
             wire(scene, 0f, -.1f, 5.8f, 1.8f, back, 4.3f, .35f, dark, .03f, 4)
             if (i % 2 == 0) wire(scene, 0f, -.1f, 6.3f, 3.6f, back - 1f, 5.4f, .4f, dark, .03f, 4)
+        }
+        val across = cross[i]
+        if (across > 0f) {
+            // a bundle over the street to the houses opposite
+            for (k in 0 until 3) wire(scene, 0f, .15f, 5.9f + k * .18f, -1.6f + k * 1.4f, across, 4.7f + k * .2f, .55f + k * .15f, dark, .03f, segs)
         }
     }
 
@@ -551,6 +610,72 @@ class StreetProps(val city: City) {
             if (near) {
                 scene.cylinder(0f, ly, .15f, lz - .1f, lz - .02f, 6, dark)
                 scene.cylinder(0f, ly, .15f, lz - .7f, lz - .62f, 6, dark)
+            }
+        }
+    }
+
+    /**
+     * Banderitas: two strings of little triangular flags across the street, for the barangay fiesta that never quite
+     * ends. Up close every flag shows; from afar every other one.
+     */
+    private fun bunting(scene: Scene3D, i: Int, near: Boolean) {
+        val span = aux[i]
+        if (span <= 0f) return
+        val string = c(0xFFE8E2D0)
+        val step = if (near) .42f else .84f
+        for (row in 0..1) {
+            val z = 5.2f + row * .55f
+            val sag = .55f - row * .12f
+            val shift = row * .21f
+            wire(scene, 0f, 0f, z, 0f, span, z, sag, string, .012f, 5)
+            var y = .3f + shift
+            var k = (i + row * 3) % FLAGS.size
+            while (y < span - .3f) {
+                val t = y / span
+                val zt = z - sag * 4f * t * (1f - t)
+                fx3[0] = 0f; fy3[0] = y - .15f; fz3[0] = zt
+                fx3[1] = 0f; fy3[1] = y + .15f; fz3[1] = zt
+                fx3[2] = 0f; fy3[2] = y; fz3[2] = zt - .34f
+                scene.poly(3, fx3, fy3, fz3, scene.lit(FLAGS[k], 1f))
+                y += step; k = (k + 1) % FLAGS.size
+            }
+        }
+    }
+
+    private val fx3 = FloatArray(3); private val fy3 = FloatArray(3); private val fz3 = FloatArray(3)
+
+    /** A basketball hoop on a post by the lane: a plywood backboard, an orange rim over the street and a ragged net. */
+    private fun hoop(scene: Scene3D, i: Int, near: Boolean) {
+        val post = if (i % 2 == 0) c(0xFF6B4E33) else c(0xFF5E666D)
+        val board = if (i % 3 == 0) c(0xFFD9C9A3) else c(0xFFF2F2EE)
+        val orange = c(0xFFE8622A)
+        scene.box(-.08f, -.08f, 0f, .08f, .08f, 3.95f, post, post)
+        scene.box(-.05f, 0f, 3.55f, .05f, .82f, 3.65f, post, post)
+        scene.box(-.62f, .78f, 2.85f, .62f, .84f, 3.8f, board, board)
+        if (near) {
+            // the painted square over the rim
+            val paint = c(0xFFC0392B)
+            scene.box(-.25f, .845f, 3.1f, .25f, .855f, 3.13f, paint, paint)
+            scene.box(-.25f, .845f, 3.45f, .25f, .855f, 3.48f, paint, paint)
+            scene.box(-.25f, .845f, 3.1f, -.22f, .855f, 3.48f, paint, paint)
+            scene.box(.22f, .845f, 3.1f, .25f, .855f, 3.48f, paint, paint)
+        }
+        // the rim: a ring of short bars
+        val cy = 1.08f; val r = .23f
+        for (k in 0 until 8) {
+            val a0 = k * 6.2832f / 8; val a1 = (k + 1) * 6.2832f / 8
+            val x0 = kotlin.math.cos(a0) * r; val y0 = cy + kotlin.math.sin(a0) * r
+            val x1 = kotlin.math.cos(a1) * r; val y1 = cy + kotlin.math.sin(a1) * r
+            scene.box(minOf(x0, x1) - .02f, minOf(y0, y1) - .02f, 3.03f, maxOf(x0, x1) + .02f, maxOf(y0, y1) + .02f, 3.07f, orange, orange)
+        }
+        if (near) {
+            // the net, narrowing as it hangs
+            val net = c(0xFFE9E6DD)
+            for (k in 0 until 6) {
+                val a = k * 6.2832f / 6
+                val xa = kotlin.math.cos(a) * r; val ya = cy + kotlin.math.sin(a) * r
+                val xb = kotlin.math.cos(a) * r * .55f; val yb = cy + kotlin.math.sin(a) * r * .55f
+                scene.quad(xa - .012f, ya, 3.03f, xa + .012f, ya, 3.03f, xb + .012f, yb, 2.62f, xb - .012f, yb, 2.62f, net)
             }
         }
     }
