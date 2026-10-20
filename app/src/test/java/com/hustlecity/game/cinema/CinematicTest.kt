@@ -436,8 +436,9 @@ class CinematicTest {
         val l = hypot(nx, ny); val ax = nx / l; val ay = ny / l
         // stand back from the pole, over the road, and look along the line of wires
         val x0 = pr.x[pole] + pr.dirX[pole] * 4f; val y0 = pr.y[pole] + pr.dirY[pole] * 4f
-        // jeepneys coming up the street toward the camera, one pulling away, and a tricycle
-        val traffic = listOf(Triple(15f, true, 4), Triple(34f, true, 4), Triple(52f, true, 5), Triple(4f, false, 4), Triple(26f, false, 4))
+        // jeepneys old and new coming up the street toward the camera and pulling away, mopeds weaving between them
+        val traffic = listOf(Triple(15f, true, 4), Triple(23f, true, 12), Triple(33f, true, 11), Triple(44f, true, 12), Triple(54f, true, 5),
+            Triple(4f, false, 11), Triple(12f, false, 12), Triple(26f, false, 4), Triple(38f, false, 12))
         fly(e, "c9_manila", 2.4f, listOf(Key(x0 + ax * 6f, y0 + ay * 6f, 24f, look(ax, ay) + .35f, 12f), Key(x0 + ax * 12f, y0 + ay * 12f, 22f, look(ax, ay) + .2f, 11f)),
             easing = .2f, warm = 4f) { f, _ ->
             clearWeather(e)
@@ -535,6 +536,25 @@ class CinematicTest {
         val e = engine(a[0], a.getOrNull(4)?.toFloat() ?: 13f)
         val x = a[1].toFloat(); val y = a[2].toFloat(); val d = a[3].toFloat()
         fly(e, "x1_top", .2f, listOf(Key(x, y, d, 0f, 89f), Key(x, y, d, 0f, 89f)), easing = .2f) { _, _ -> clearWeather(e) }
+    }
+
+    @Test
+    fun x2() {
+        // a line-up of vehicles at the curb to look at up close: HC_X2=map,style,style,...
+        val a = System.getenv("HC_X2")?.split(',') ?: run { assumeTrue(false); return }
+        val e = engine(a[0], 10.5f)
+        val g = e.city.roads
+        val ed = g.edges.filter { it.cls.rank == 2 && !it.overWater && it.len > 90f }.minByOrNull { hypot((it.ax + it.bx) / 2 - e.camera.tx, (it.ay + it.by) / 2 - e.camera.ty) }!!
+        val styles = a.drop(1).map { it.toInt() }
+        val mid = ed.len / 2
+        // the camera stands across the road looking at the line, from a little ahead
+        val cx = ed.ax + ed.ux * mid; val cy = ed.ay + ed.uy * mid
+        val yaw = look(-ed.uy, ed.ux) + (System.getenv("HC_X2_TURN")?.toFloat() ?: .5f)
+        fly(e, "x2_lineup", .2f, listOf(Key(cx, cy, 15f, yaw, 14f), Key(cx, cy, 15f, yaw, 14f)), easing = .2f, warm = .05f) { f, _ ->
+            clearWeather(e)
+            if (f <= 0) for ((k, st) in styles.withIndex()) e.traffic.placeCar(k, ed.id, ed.a, mid - 14f + k * 4.6f, st)
+            for (k in styles.indices) e.traffic.cars[k].speed = 0f
+        }
     }
 
     /** The finale: Midtown at night, pulling back as the city lights up. */

@@ -47,7 +47,8 @@ abstract class MapDef(val id: String, val title: String, val blurb: String) {
 
     /**
      * Street traffic: body styles weighted by repetition (0 sedan, 1 pickup, 2 van, 3 sports car, 4 jeepney,
-     * 5 tricycle, 6 kei car or boxy minivan, 7 city bus, 8 scooter, 9 SUV, 10 box truck) and the colors cars come in.
+     * 5 tricycle, 6 kei car or boxy minivan, 7 city bus, 8 scooter, 9 SUV, 10 box truck, 11 modern jeepney, 12 moped)
+     * and the colors cars come in.
      */
     open val trafficMix: IntArray = intArrayOf(0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 9, 9, 10)
     open val trafficPalette: IntArray = Traffic.DEFAULT_PALETTE

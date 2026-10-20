@@ -148,8 +148,9 @@ object ManilaMap : PlannedMap("manila", "Manila", "Manila Bay, the Pasig River, 
 
     override fun parkSpecies(park: Park, rnd: kotlin.random.Random) = if (rnd.nextFloat() < .5f) 1 else 0
 
-    // nearly a third jeepneys, tricycles on the side streets, white cabs, buses and AUV vans; mostly white and silver cars
-    override val trafficMix = intArrayOf(4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 0, 0, 0, 0, 0, 0, 1, 2, 2, 6, 7, 7, 8, 8, 9)
+    // nearly a third jeepneys, the old kind and the new minibuses, mopeds weaving everywhere, tricycles on the side
+    // streets, white cabs, buses and AUV vans; mostly white and silver cars
+    override val trafficMix = intArrayOf(4, 4, 4, 4, 4, 4, 11, 11, 11, 5, 5, 5, 0, 0, 0, 0, 0, 1, 2, 2, 6, 7, 7, 8, 12, 12, 12, 12, 9)
     override val trafficPalette = intArrayOf(
         c(0xFFF2F2F2), c(0xFFE8E8E4), c(0xFFB0B7BF), c(0xFF7F8C8D), c(0xFF212121), c(0xFFC0392B), c(0xFF2C3E50),
         c(0xFF8E2442), c(0xFFCFC2A8),
@@ -166,7 +167,18 @@ object ManilaMap : PlannedMap("manila", "Manila", "Manila Bay, the Pasig River, 
         c(0xFF8E44AD), c(0xFFF2F2F2), c(0xFFE67E22), c(0xFF2B2B2B),
     )
     private val buses = intArrayOf(c(0xFFF2F2F2), c(0xFF1F4FA0), c(0xFFF2F2F2), c(0xFFC0392B), c(0xFF1F4FA0), c(0xFFF2C230))
-    override fun livery(style: Int) = when (style) { 4 -> jeepneys; 5 -> tricycles; 7 -> buses; else -> null }
+    /** Modern jeepneys: mostly white or cream, banded in their cooperative's color. */
+    private val modernJeeps = intArrayOf(
+        c(0xFFF5F5F5), c(0xFF0E8C8C), c(0xFFF5F5F5), c(0xFF1E5BC6), c(0xFFEDE6D3), c(0xFF2E9E4F), c(0xFFF5F5F5), c(0xFFE67E22),
+        c(0xFFC9CED3), c(0xFFC0392B), c(0xFFF2F2F2), c(0xFF7D3C98), c(0xFF5FAF6A), c(0xFFF5F5F5),
+    )
+    /** Mopeds, and delivery riders with a box on the rack in its color (a second color of their own). */
+    private val mopeds = intArrayOf(
+        c(0xFFC0392B), c(0xFFC0392B), c(0xFF1E1E1E), c(0xFF1E1E1E), c(0xFFF2F2F2), c(0xFFF2F2F2), c(0xFF1E5BC6), c(0xFF1E5BC6),
+        c(0xFF9AA0A6), c(0xFF9AA0A6), c(0xFF2B2B2B), c(0xFF2B2B2B), c(0xFF8E2442), c(0xFF8E2442),
+        c(0xFF1E1E1E), c(0xFF19A55A), c(0xFFF2F2F2), c(0xFFD7307A), c(0xFF2B2B2B), c(0xFFF28C28),
+    )
+    override fun livery(style: Int) = when (style) { 4 -> jeepneys; 5 -> tricycles; 7 -> buses; 11 -> modernJeeps; 12 -> mopeds; else -> null }
     override val taxiEvery = 3
     override val taxiColors = intArrayOf(c(0xFFF4F4F2))
 }

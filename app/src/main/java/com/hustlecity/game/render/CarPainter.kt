@@ -45,7 +45,8 @@ class CarPainter(private val scene: Scene3D) {
     }
 
     /**
-     * Draws a vehicle. [style] 0 sedan, 1 pickup, 2 van, 3 sports, 4 jeepney, 5 tricycle, 6 kei car, 7 city bus.
+     * Draws a vehicle. [style] 0 sedan, 1 pickup, 2 van, 3 sports, 4 jeepney, 5 tricycle, 6 kei car, 7 city bus,
+     * 8 motorbike, 9 SUV, 10 box truck, 11 modern jeepney, 12 moped.
      * [near] adds wheels, lights and trim. [braking] brightens the tail lights; [taxi] adds the roof sign. [accent]
      * is a livery's second color (stripes, a two-tone roof); 0 lets the painter pick one.
      */
@@ -78,6 +79,8 @@ class CarPainter(private val scene: Scene3D) {
             7 -> bus(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
             8 -> { bike(0f, hl, body, if (accent != 0) accent else CHROME, night, braking, camF, nearSide, fine); shift(0f) }
             10 -> boxTruck(hl, hw, len, hgt, body, accent, night, braking, camF, nearSide)
+            11 -> modernJeep(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
+            12 -> moped(hl, body, accent, night, braking, camF, nearSide, fine)
             else -> classic(hl, hw, len, wid, hgt, body, style, taxi, night, braking, camF, nearSide)
         }
         tiltF = 0f; tiltL = 0f
@@ -346,6 +349,39 @@ class CarPainter(private val scene: Scene3D) {
         shift(-l)
     }
 
+    /**
+     * A step-through moped: a leg shield and floorboard between small wheels, the seat over the engine. One in four
+     * carries a passenger riding pillion; with a livery accent of its own it's a delivery rider with a box on the rack.
+     */
+    private fun moped(hl: Float, body: Int, accent: Int, night: Boolean, braking: Boolean, camF: Float, nearSide: Int, fine: Boolean) {
+        val frame = c(0xFF2B2E33)
+        val wf = hl - .3f; val wr = -hl + .32f
+        val pillion = ((body ushr 5) xor (body ushr 13)) and 3 == 0
+        val box = accent != 0 && accent != body
+        if (camF > 0f) wheelAt(wr, .23f, -.05f, .05f, nearSide) else wheelAt(wf, .23f, -.05f, .05f, nearSide)
+        // the floorboard, the body over the engine and the seat on it
+        slab(-.3f, .3f, -.16f, .16f, .26f, .34f, frame)
+        P(0, wr - .14f, .3f); P(1, -.26f, .3f); P(2, -.2f, .64f); P(3, wr - .02f, .7f); P(4, wr - .2f, .54f)
+        prism(5, -.16f, .16f, body, body)
+        slab(-.74f, -.18f, -.15f, .15f, .7f, .78f, c(0xFF1E1E1E))
+        // the leg shield sweeping up from the floor to the handlebars
+        P(0, .24f, .28f); P(1, .46f, .3f); P(2, wf - .1f, .98f); P(3, wf - .26f, 1.0f)
+        prism(4, -.2f, .2f, body, body)
+        if (box) slab(-1.02f, -.54f, -.24f, .24f, .8f, 1.28f, accent, scene.mix(accent, 0xFFFFFFFF.toInt(), .2f))
+        if (pillion) { ahead(-.5f); rider(body * 31 + 7, fine); ahead(.5f) }
+        ahead(-.1f); rider(body xor accent, fine); ahead(.1f)
+        // handlebars with the headlamp in their cowl, the tail lamp under the seat
+        slab(wf - .3f, wf - .22f, -.34f, .34f, .98f, 1.03f, frame)
+        slab(wf - .28f, wf - .14f, -.11f, .11f, .9f, 1.05f, body)
+        frontRect(wf - .135f, -.07f, .07f, .93f, 1.02f, if (night) HEAD else c(0xFFE8ECEF))
+        val tail = if (braking) c(0xFFFF2E2E) else if (night) c(0xFFE53935) else TAIL
+        frontRect(wr - .15f, -.06f, .06f, .6f, .67f, tail, rear = true)
+        if (camF > 0f) wheelAt(wf, .23f, -.05f, .05f, nearSide) else wheelAt(wr, .23f, -.05f, .05f, nearSide)
+    }
+
+    /** Moves the frame [f] meters forward, so a rider can sit further back. */
+    private fun ahead(f: Float) { ox += fx * f; oy += fy * f }
+
     /** The driver astride the bike: knees forward, hands on the bars, a helmet up close. */
     private fun rider(seed: Int, fine: Boolean) {
         val h = (seed ushr 3) and 0xffff
@@ -448,6 +484,66 @@ class CarPainter(private val scene: Scene3D) {
         wheelPair(front, rear, .5f, hw - .34f, hw + .01f, nearSide)
     }
 
+    /**
+     * A modern jeepney: the new boxy minibus with a flat front, a big windscreen under the LED route board, a tinted
+     * window band, the door on the curb side and an air conditioner on the roof, in its cooperative's colors.
+     */
+    private fun modernJeep(hl: Float, hw: Float, hgt: Float, body: Int, accent: Int, night: Boolean, braking: Boolean, camF: Float, nearSide: Int, fine: Boolean) {
+        val band = if (accent != 0) accent else scene.mix(body, 0xFF000000.toInt(), .35f)
+        val front = hl - 1.2f; val rear = -hl + 1.5f
+        val curb = if (leftHand) -1 else 1
+        wheelPair(front, rear, .42f, hw - .3f, hw + .01f, -nearSide)
+        if (camF > 0f) modernJeepRear(hl, hw, hgt, night, braking, fine) else modernJeepFront(hl, hw, hgt, night, band)
+        P(0, -hl, .36f); P(1, hl, .36f); P(2, hl, hgt - .26f); P(3, hl - .22f, hgt); P(4, -hl + .1f, hgt); P(5, -hl, hgt - .1f)
+        prism(6, -hw, hw, body, BUS_ROOF)
+        // the cooperative's colors: a dark skirt, a bold band under the windows and a thin one over them
+        sideRect(-hl, hl, .36f, .52f, hw, scene.mix(body, 0xFF000000.toInt(), .5f))
+        sideRect(-hl, hl, .82f, 1.08f, hw, band)
+        sideRect(-hl, hl, 2.4f, 2.48f, hw, band)
+        // passenger windows back to the door, which opens on the curb side just behind the front wheel
+        val win = if (night) LIT_WINDOW else GLASS
+        val door0 = front - 1.55f; val door1 = front - .5f
+        val w0 = -hl + .35f; val w1 = door0 - .08f
+        val n = if (fine) 4 else 2
+        val step = (w1 - w0) / n
+        for (k in 0 until n) sideRect(w0 + k * step + .06f, w0 + (k + 1) * step - .06f, 1.2f, 2.32f, hw, win)
+        sideRectAt(door0, hl - .2f, 1.2f, 2.32f, -hw, hw, win, only = -curb)
+        sideRectAt(door0, door1, .42f, 2.36f, -hw, hw, c(0xFF1B2128), only = curb)
+        sideRectAt(door0 + .07f, door1 - .07f, .52f, 2.3f, -hw - .01f, hw + .01f, GLASS, only = curb)
+        sideRectAt(door1 + .08f, hl - .2f, 1.2f, 2.32f, -hw, hw, win, only = curb)
+        if (fine) {
+            // the route card in the window by the door, and mirrors on stalks
+            sideRectAt(door1 + .2f, door1 + .85f, 1.7f, 2.05f, -hw - .015f, hw + .015f, c(0xFFF5F5F0), only = curb)
+            slab(hl + .02f, hl + .2f, -hw - .2f, -hw - .04f, 1.6f, 2.1f, BUMPER)
+            slab(hl + .02f, hl + .2f, hw + .04f, hw + .2f, 1.6f, 2.1f, BUMPER)
+        }
+        // the air conditioner on the roof
+        slab(-1.3f, 1.0f, -hw * .6f, hw * .6f, hgt, hgt + .22f, c(0xFFD4D8DC))
+        if (camF > 0f) modernJeepFront(hl, hw, hgt, night, band) else modernJeepRear(hl, hw, hgt, night, braking, fine)
+        wheelPair(front, rear, .42f, hw - .3f, hw + .01f, nearSide)
+    }
+
+    private fun modernJeepFront(hl: Float, hw: Float, hgt: Float, night: Boolean, band: Int) {
+        slab(hl - .02f, hl + .1f, -hw + .03f, hw - .03f, .36f, .62f, BUMPER)
+        frontRect(hl + .01f, -hw + .1f, hw - .1f, 1.02f, 2.3f, GLASS)
+        // the route board, amber letters on black, and the cooperative's band across the nose
+        frontRect(hl + .01f, -hw + .12f, hw - .12f, 2.37f, hgt - .3f, c(0xFF15171A))
+        frontRect(hl + .015f, -hw + .35f, hw - .35f, 2.44f, hgt - .37f, LED)
+        frontRect(hl + .01f, -hw + .1f, hw - .1f, .66f, .9f, band)
+        val head = if (night) HEAD else c(0xFFE8ECEF)
+        frontRect(hl + .015f, -hw + .14f, -hw + .5f, .68f, .86f, head)
+        frontRect(hl + .015f, hw - .5f, hw - .14f, .68f, .86f, head)
+    }
+
+    private fun modernJeepRear(hl: Float, hw: Float, hgt: Float, night: Boolean, braking: Boolean, fine: Boolean) {
+        slab(-hl - .1f, -hl + .02f, -hw + .03f, hw - .03f, .36f, .58f, BUMPER)
+        frontRect(-hl - .01f, -hw + .32f, hw - .32f, 1.3f, 2.3f, GLASS, rear = true)
+        if (fine) frontRect(-hl - .015f, -.35f, .35f, 2.42f, 2.62f, LED, rear = true)
+        val tail = if (braking) c(0xFFFF2E2E) else if (night) c(0xFFE53935) else TAIL
+        frontRect(-hl - .01f, -hw + .08f, -hw + .28f, .7f, 1.5f, tail, rear = true)
+        frontRect(-hl - .01f, hw - .28f, hw - .08f, .7f, 1.5f, tail, rear = true)
+    }
+
     private fun busFront(hl: Float, hw: Float, hgt: Float, night: Boolean, fine: Boolean) {
         slab(hl - .02f, hl + .1f, -hw + .03f, hw - .03f, .32f, .58f, BUMPER)
         frontRect(hl + .01f, -hw + .1f, hw - .1f, 1.0f, 2.6f, GLASS)
@@ -541,7 +637,12 @@ class CarPainter(private val scene: Scene3D) {
                 slab(-hl, hl, -hw, hw, 1.15f, 2.6f, GLASS, GLASS)
                 slab(-hl, hl, -hw, hw, 2.6f, hgt, color, BUS_ROOF)
             }
-            8 -> slab(-hl * .8f, hl * .8f, -.2f, .2f, .25f, 1.3f, color)
+            8, 12 -> slab(-hl * .8f, hl * .8f, -.2f, .2f, .25f, 1.3f, color)
+            11 -> {
+                slab(-hl, hl, -hw, hw, .36f, 1.15f, color)
+                slab(-hl, hl, -hw, hw, 1.15f, 2.36f, GLASS, GLASS)
+                slab(-hl, hl, -hw, hw, 2.36f, hgt, color, BUS_ROOF)
+            }
             9 -> {
                 slab(-hl, hl, -hw, hw, .4f, hgt * .6f, color)
                 slab(-hl + .2f, hl - len * .3f, -hw * .9f, hw * .9f, hgt * .6f, hgt, GLASS, color)

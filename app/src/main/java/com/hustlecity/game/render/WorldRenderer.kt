@@ -1482,7 +1482,14 @@ class WorldRenderer(private val e: GameEngine) {
             val shedV0 = wid - 3.4f; val shedV1 = wid - .4f
             val shedFirst = camV < shedV0
             if (shedFirst) terminalShed(b, len, shedV0, shedV1, ::lx, ::ly)
+            // the lane nearest the street holds the new modern jeepneys, the rest the classic kind
+            val modern = e.city.map.livery(11)
             for (i in 0 until n) {
+                if (modern != null && lanes > 1 && tqI[i] / 16 == 0) {
+                    val p = ((b.id * 5 + tqI[i] * 3) % (modern.size / 2)) * 2
+                    drawCar(lx(tqU[i], tqV[i]), ly(tqU[i], tqV[i]), heading, 7f, 2.2f, 2.85f, modern[p], 11, false, accent = modern[p + 1])
+                    continue
+                }
                 val p = ((b.id * 7 + tqI[i] * 3) % (liv.size / 2)) * 2
                 drawCar(lx(tqU[i], tqV[i]), ly(tqU[i], tqV[i]), heading, 6.2f, 2.05f, 2.3f, liv[p], 4, false, accent = liv[p + 1])
             }

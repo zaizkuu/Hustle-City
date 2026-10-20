@@ -59,6 +59,8 @@ class Agent {
     var roll = 0f
     var lastSpeed = 0f
     var lastHeading = 0f
+    /** Set down by hand for a shot ([Traffic.placeCar]): others placed after it make room elsewhere, not here. */
+    var staged = false
 }
 
 /** Eases a car's body [a] toward the lean its braking, accelerating and turning would give it. */
@@ -105,7 +107,7 @@ class Traffic(private val rnd: Random = Random(7)) {
     var mix: IntArray = intArrayOf(0, 0, 0, 0, 0, 0, 1, 1, 2, 2)
     var palette: IntArray = DEFAULT_PALETTE
     /** Per style: body and accent color pairs for vehicles with a livery, or null to take the palette. */
-    var liveries = arrayOfNulls<IntArray>(8)
+    var liveries = arrayOfNulls<IntArray>(16)
     private val shirtColors = intArrayOf(
         c(0xFFEB5757), c(0xFF2F80ED), c(0xFF27AE60), c(0xFFF2C94C), c(0xFF9B51E0), c(0xFFF2994A), c(0xFFE0E0E0), c(0xFF333333), c(0xFF56CCF2),
     )
@@ -116,7 +118,7 @@ class Traffic(private val rnd: Random = Random(7)) {
         leftHand = city.leftHand
         mix = city.map.trafficMix
         palette = city.map.trafficPalette
-        liveries = Array(8) { city.map.livery(it) }
+        liveries = Array(16) { city.map.livery(it) }
         walk = FloatArray(city.roads.edges.size * 4) { Float.NaN }
         for (a in cars) a.placed = false
         for (p in peds) p.placed = false
@@ -146,8 +148,10 @@ class Traffic(private val rnd: Random = Random(7)) {
         a.x = tmp[0]; a.y = tmp[1]
         a.heading = headingOf(e, from)
         a.placed = true
+        a.staged = true
         dress(a, style, e)
-        for (o in cars) if (o !== a && o.placed && abs(o.x - a.x) < 9f && abs(o.y - a.y) < 9f) o.placed = false
+        // traffic already in the spot drives on from somewhere else
+        for (o in cars) if (o !== a && o.placed && !o.staged && dist(o.x, o.y, a.x, a.y) < 6f) o.placed = false
     }
 
     /** Puts [fraction] of the walkers on sidewalks within [radius] of (fx, fy): a busy moment right where you're looking. */
@@ -311,6 +315,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             break
         }
         a.placed = true
+        a.staged = false
         dress(a, null, g.edges[a.edge.coerceAtLeast(0)])
     }
 
@@ -324,11 +329,11 @@ class Traffic(private val rnd: Random = Random(7)) {
             a.color = livery[k]; a.accent = livery[k + 1]
         } else a.accent = 0
         // jeepney, tricycle, kei car and bus at their real sizes (CarPainter builds them to fit)
-        a.length = when (a.style) { 0 -> 4.2f + rnd.nextFloat() * .6f; 1 -> 5.2f; 2 -> 5.8f; 4 -> 6.2f; 5 -> 2.5f; 6 -> 3.4f; 7 -> 11f; 8 -> 1.9f; 9 -> 4.8f; 10 -> 7.2f; else -> 4.6f }
-        a.width = when (a.style) { 2 -> 2.1f; 4 -> 2.05f; 5 -> 1.5f; 6 -> 1.48f; 7 -> 2.5f; 8 -> .78f; 9 -> 2.0f; 10 -> 2.4f; else -> 1.85f }
-        a.height = when (a.style) { 0, 3 -> 1.45f; 1 -> 1.8f; 2 -> 2.5f; 4 -> 2.3f; 5 -> 1.75f; 6 -> 1.7f; 7 -> 3.1f; 8 -> 1.3f; 9 -> 1.85f; 10 -> 3.3f; else -> 1.5f }
+        a.length = when (a.style) { 0 -> 4.2f + rnd.nextFloat() * .6f; 1 -> 5.2f; 2 -> 5.8f; 4 -> 6.2f; 5 -> 2.5f; 6 -> 3.4f; 7 -> 11f; 8 -> 1.9f; 9 -> 4.8f; 10 -> 7.2f; 11 -> 7f; 12 -> 1.8f; else -> 4.6f }
+        a.width = when (a.style) { 2 -> 2.1f; 4 -> 2.05f; 5 -> 1.5f; 6 -> 1.48f; 7 -> 2.5f; 8 -> .78f; 9 -> 2.0f; 10 -> 2.4f; 11 -> 2.2f; 12 -> .72f; else -> 1.85f }
+        a.height = when (a.style) { 0, 3 -> 1.45f; 1 -> 1.8f; 2 -> 2.5f; 4 -> 2.3f; 5 -> 1.75f; 6 -> 1.7f; 7 -> 3.1f; 8 -> 1.3f; 9 -> 1.85f; 10 -> 3.3f; 11 -> 2.85f; 12 -> 1.3f; else -> 1.5f }
         // city speeds: a bit under the road's limit, slower on small streets
-        a.cruise = e.cls.speed * (.68f + rnd.nextFloat() * .2f) * (if (a.style == 5 || a.style == 7) .8f else 1f)
+        a.cruise = e.cls.speed * (.68f + rnd.nextFloat() * .2f) * (if (a.style == 5 || a.style == 7 || a.style == 11) .8f else 1f)
         a.speed = a.cruise * .6f
         a.blocked = 0f
     }

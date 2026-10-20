@@ -146,7 +146,7 @@ object SeoulMap : PlannedMap("seoul", "Seoul", "The Han River and its bridges, G
     }
 
     // boxy city cars and minivans, orange and silver cabs, and a lot of buses; white, gray and black cars
-    override val trafficMix = intArrayOf(0, 0, 0, 0, 0, 0, 0, 0, 6, 6, 6, 6, 2, 2, 2, 1, 3, 7, 7, 7, 8, 8, 9, 9, 10)
+    override val trafficMix = intArrayOf(0, 0, 0, 0, 0, 0, 0, 0, 6, 6, 6, 6, 2, 2, 2, 1, 3, 7, 7, 7, 8, 8, 9, 9, 10, 12, 12, 12)
     override val trafficPalette = intArrayOf(
         c(0xFFF5F5F5), c(0xFFF0F0F0), c(0xFFC0C6CC), c(0xFF7F878E), c(0xFF1C1C1E), c(0xFF26323F), c(0xFF5A6570), c(0xFF8E2442),
     )
@@ -155,7 +155,12 @@ object SeoulMap : PlannedMap("seoul", "Seoul", "The Han River and its bridges, G
         c(0xFF1F6FD1), c(0xFFF4F5F2), c(0xFF1F6FD1), c(0xFFF4F5F2), c(0xFF4CAF50), c(0xFFF4F5F2), c(0xFF4CAF50), c(0xFFF4F5F2),
         c(0xFFD63A2F), c(0xFFF4F5F2), c(0xFFF2B705), c(0xFFF4F5F2),
     )
-    override fun livery(style: Int) = if (style == 7) buses else null
+    /** Mopeds: most of them delivering, a box on the rack. */
+    private val mopeds = intArrayOf(
+        c(0xFF2B2B2B), c(0xFF2AC1BC), c(0xFFF2F2F2), c(0xFFE53935), c(0xFF1E1E1E), c(0xFFF2F2F2), c(0xFF9AA0A6), c(0xFF9AA0A6),
+        c(0xFF1E5BC6), c(0xFF1E5BC6), c(0xFF2B2B2B), c(0xFF2AC1BC),
+    )
+    override fun livery(style: Int) = when (style) { 7 -> buses; 12 -> mopeds; else -> null }
     override val taxiEvery = 3
     override val taxiColors = intArrayOf(c(0xFFF0812E), c(0xFFD5DADE), c(0xFFF0812E), c(0xFFF4F5F2))
 }

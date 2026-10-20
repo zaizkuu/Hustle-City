@@ -154,7 +154,7 @@ object TokyoMap : PlannedMap("tokyo", "Tokyo", "The palace and its moat, Shinjuk
     }
 
     // kei cars and minivans, black and green cabs, Toei buses; pearl white, silver and black cars
-    override val trafficMix = intArrayOf(6, 6, 6, 6, 6, 6, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 1, 3, 7, 7, 8, 8, 10)
+    override val trafficMix = intArrayOf(6, 6, 6, 6, 6, 6, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 1, 3, 7, 7, 8, 8, 10, 12, 12)
     override val trafficPalette = intArrayOf(
         c(0xFFF5F5F2), c(0xFFF0EEE8), c(0xFFC4C9CE), c(0xFF8F969C), c(0xFF1E1F22), c(0xFF2C3E50), c(0xFF6E2A35), c(0xFFDCD3BE),
     )
