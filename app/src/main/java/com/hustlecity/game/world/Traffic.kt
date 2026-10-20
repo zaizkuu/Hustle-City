@@ -311,13 +311,13 @@ class Traffic(private val rnd: Random = Random(7)) {
             break
         }
         a.placed = true
-        dress(a, mix[rnd.nextInt(mix.size)], g.edges[a.edge.coerceAtLeast(0)])
+        dress(a, null, g.edges[a.edge.coerceAtLeast(0)])
     }
 
-    /** Gives a car its body: [style], a livery or palette color, its real size, and a speed for road [e]. */
-    private fun dress(a: Agent, style: Int, e: RoadEdge) {
+    /** Gives a car its body: [style] (or one from the city's mix), a livery or palette color, its real size, and a speed for road [e]. */
+    private fun dress(a: Agent, style: Int?, e: RoadEdge) {
         a.color = palette[rnd.nextInt(palette.size)]
-        a.style = style
+        a.style = style ?: mix[rnd.nextInt(mix.size)]
         val livery = liveries.getOrNull(a.style)
         if (livery != null) {
             val k = rnd.nextInt(livery.size / 2) * 2
