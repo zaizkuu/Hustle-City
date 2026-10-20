@@ -14,3 +14,4 @@ dist/
 # agent worktrees
 .claude/worktrees/
 .kotlin/
+__pycache__/
