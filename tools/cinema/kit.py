@@ -2,7 +2,7 @@
 
 A cut sets where its frames are with use(), builds each frame with these pieces and hands frame_at to encode().
 """
-import math, os, subprocess
+import bisect, math, os, subprocess
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
@@ -89,11 +89,13 @@ _cache = {}
 
 
 def src(shot, i):
-    """A rendered frame, clamped to the shot's length."""
+    """Rendered frame [i] of a shot, or the nearest one rendered (a cut may render only the frames it uses)."""
     d = os.path.join(_dirs['frames'], shot)
-    if shot not in _cache: _cache[shot] = sorted(n for n in os.listdir(d) if n.endswith('.png'))
-    names = _cache[shot]
-    return Image.open(os.path.join(d, names[max(0, min(len(names) - 1, i))]))
+    if shot not in _cache: _cache[shot] = sorted(int(n[:-4]) for n in os.listdir(d) if n.endswith('.png'))
+    nums = _cache[shot]
+    k = bisect.bisect_left(nums, i)
+    if k == len(nums) or (k > 0 and i - nums[k - 1] < nums[k] - i): k -= 1
+    return Image.open(os.path.join(d, f'{nums[k]:04d}.png'))
 
 
 _ov = {}
