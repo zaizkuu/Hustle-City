@@ -470,9 +470,11 @@ class CinematicTest {
         val e = engine("tokyo", 21.4f)
         val pr = StreetProps(e.city)
         val ln = (0 until pr.count).filter { pr.kind[it] == StreetProps.LANTERNS }.minByOrNull { hypot(pr.x[it] - 300f, pr.y[it] - 980f) }!!
-        // the lane runs across the lantern strings; its middle is half a string out from the prop
-        val half = pr.aux[ln] / 2
-        val cx = pr.x[ln] + pr.dirX[ln] * half; val cy = pr.y[ln] + pr.dirY[ln] * half
+        // the lane runs across the lantern strings, whose props hang over its middle
+        val hit = RoadHit()
+        e.city.roads.nearest(pr.x[ln], pr.y[ln], 12f, hit)
+        val lane = e.city.roads.edges[hit.edge]
+        val cx = lane.ax + lane.ux * hit.s; val cy = lane.ay + lane.uy * hit.s
         val ax = pr.dirY[ln]; val ay = -pr.dirX[ln]
         fly(e, "c10_yokocho", 2.4f, listOf(Key(cx + ax * 6f, cy + ay * 6f, 16f, look(ax, ay), 10f), Key(cx + ax * 11f, cy + ay * 11f, 15f, look(ax, ay) + .08f, 9f)),
             easing = .2f, warm = 4f, haze = .2f, crowd = 45f) { _, _ -> clearWeather(e) }
@@ -615,8 +617,9 @@ class CinematicTest {
         if (!on("m07")) { assumeTrue(false); return }
         val e = engine("manila", 10.8f)
         val ax = .17f; val ay = .985f
-        fly(e, "m07_jeepneys", 2.6f, listOf(Key(236f, 268f, 17f, look(ax, ay) + .1f, 6f), Key(237f, 276f, 16f, look(ax, ay) - .05f, 7f)), easing = .2f, warm = 4f,
-            crowd = 45f) { f, _ ->
+        // above head height, so the people on the street pass under the lens rather than in front of it
+        fly(e, "m07_jeepneys", 2.6f, listOf(Key(236f, 268f, 21f, look(ax, ay) + .1f, 10f), Key(237f, 276f, 20f, look(ax, ay) - .05f, 10f)), easing = .2f, warm = 4f,
+            crowd = 60f) { f, _ ->
             clearWeather(e)
             if (f == 0) stage(e, 236f, 268f, ax, ay, parade)
         }
@@ -638,7 +641,7 @@ class CinematicTest {
     fun m09() {
         if (!on("m09")) { assumeTrue(false); return }
         val e = engine("manila", 16.3f)
-        fly(e, "m09_barangay", 2.6f, listOf(Key(236f, 273f, 15f, -3.06f, 6f), Key(237f, 280f, 14f, -2.9f, 7f)), easing = .2f, warm = 4f, crowd = 35f) { f, _ ->
+        fly(e, "m09_barangay", 2.6f, listOf(Key(236f, 273f, 19f, -3.06f, 10f), Key(237f, 280f, 18f, -2.9f, 11f)), easing = .2f, warm = 4f, crowd = 50f) { f, _ ->
             clearWeather(e)
             if (f == 0) stage(e, 236f, 273f, .17f, .985f, listOf(Triple(18f, true, 5), Triple(30f, true, 12), Triple(42f, false, 5)))
         }
@@ -725,12 +728,13 @@ class CinematicTest {
         fly(e, "m18_bay_night", 2.6f, listOf(Key(190f, 1150f, 140f, 2.62f, 9f), Key(190f, 1160f, 125f, 2.76f, 10f)), easing = .2f, haze = .3f) { _, _ -> clearWeather(e) }
     }
 
-    /** Jones Bridge at night, its lamps lit, the arch at its far end. */
+    /** Binondo Church at night, its belfry lit, the LRT running past. */
     @Test
     fun m19() {
         if (!on("m19")) { assumeTrue(false); return }
         val e = engine("manila", 20.5f)
-        fly(e, "m19_jones_night", 2.6f, listOf(Key(404f, 478f, 70f, 1.5f, 11f), Key(404f, 470f, 62f, 1.3f, 12f)), easing = .2f, haze = .28f) { _, _ -> clearWeather(e) }
+        val c = landmark(e, "Binondo Church")
+        fly(e, "m19_binondo_night", 2.6f, listOf(Key(c.x, c.y, 95f, 2.3f, 18f), Key(c.x, c.y, 82f, 2.5f, 16f)), easing = .2f, haze = .28f) { _, _ -> clearWeather(e) }
     }
 
     /** Quiapo Church at night over the lit streets. */

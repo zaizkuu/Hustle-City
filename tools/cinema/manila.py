@@ -46,7 +46,7 @@ EDL = [
     (34.0, 36.0, 'shot', dict(shot='m16_cathedral_night', f0=8, look='night')),
     (36.0, 40.0, 'shot', dict(shot='m17_makati', f0=8, look='night')),
     (40.0, 42.0, 'shot', dict(shot='m18_bay_night', f0=8, look='night')),
-    (42.0, 44.0, 'shot', dict(shot='m19_jones_night', f0=8, look='night')),
+    (42.0, 44.0, 'shot', dict(shot='m19_binondo_night', f0=8, look='night')),
     (44.0, 46.0, 'shot', dict(shot='m20_quiapo_night', f0=8, look='night')),
 ]
 # the four words a Manileño lives by, a second each from 46.0 at double speed
