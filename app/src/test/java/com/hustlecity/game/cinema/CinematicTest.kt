@@ -580,7 +580,8 @@ class CinematicTest {
         if (!on("m03")) { assumeTrue(false); return }
         val e = engine("manila", 7.6f)
         val m = landmark(e, "Rizal")
-        fly(e, "m03_rizal", 2.6f, listOf(Key(m.x + 4f, m.y - 5f, 80f, 3.28f, 11f), Key(m.x + 4f, m.y - 5f, 70f, 3.06f, 12f)), easing = .2f, crowd = 70f) { _, _ -> clearWeather(e) }
+        // an orbit at one distance: closer in, the flag flies off the top of the frame
+        fly(e, "m03_rizal", 2.6f, listOf(Key(m.x + 4f, m.y - 5f, 80f, 3.28f, 11f), Key(m.x + 4f, m.y - 5f, 80f, 3.06f, 11f)), easing = .2f, crowd = 70f) { _, _ -> clearWeather(e) }
     }
 
     /** City Hall's clock tower against the sunset, the LRT in front. */

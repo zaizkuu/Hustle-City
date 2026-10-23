@@ -29,7 +29,8 @@ LOOKS.update({  # exposure, contrast, saturation, shadow tint, highlight tint, b
 EDL = [
     (0.0, 4.0, 'shot', dict(shot='m01_dawn', f0=8, look='dawn')),
     (4.0, 8.0, 'shot', dict(shot='m02_cathedral', f0=8, look='morning')),
-    (8.0, 10.0, 'shot', dict(shot='m03_rizal', f0=8, look='morning')),
+    # lowered under the letterbox so the flag over Luneta flies clear of the top bar
+    (8.0, 10.0, 'shot', dict(shot='m03_rizal', f0=8, look='morning', lower=144)),
     (10.0, 11.5, 'shot', dict(shot='m04_cityhall', f0=6, look='sunset')),
     (11.5, 12.0, 'black', {}),
     (12.0, 14.0, 'shot', dict(shot='m05_arch', f0=8, look='dusk')),
@@ -119,6 +120,9 @@ def frame_at(n):
     else:
         i = int(round((t - t0) * FPS)) * prm.get('step', 1)
         a = grade(src(prm['shot'], prm['f0'] + i), prm['look'])
+        if prm.get('lower'):  # reframe in the edit: the picture slides down, the open sky at its top filling in above
+            k = prm['lower']
+            a = np.concatenate([np.repeat(a[:1], k, 0), a[:H - k]], 0)
         if prm['shot'] in WEATHER:  # rain streaks ride on top of the graded city
             ov = overlay(prm['shot'], prm['f0'] + i)
             if ov:
