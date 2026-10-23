@@ -72,6 +72,21 @@ class Agent {
     /** Seconds left of a stop on the sidewalk, and the heading to walk on with afterwards. */
     var pause = 0f
     var walkHeading = 0f
+    /** How far a dog or child has fallen in behind (0 alongside, 1 in line) where the pavement is too narrow to pass side by side. */
+    var tuck = 0f
+}
+
+/**
+ * Where walker [a]'s dog or child is: the dog trots ahead on the right, the child walks alongside holding a hand, and
+ * both fall in behind where the pavement is too narrow to pass side by side ([Agent.tuck]).
+ */
+fun companionAt(a: Agent, out: FloatArray) {
+    val fx = sin(a.heading); val fy = -cos(a.heading)
+    val t = a.tuck
+    val ahead = if (a.companion == 1) .75f - 1.55f * t else -.6f * t
+    val aside = (if (a.companion == 1) .45f else .55f) * (1f - t)
+    // right of the heading in a y-down world is (-fy, fx)
+    out[0] = a.x + fx * ahead - fy * aside; out[1] = a.y + fy * ahead + fx * aside
 }
 
 /** Eases a car's body [a] toward the lean its braking, accelerating and turning would give it. */
@@ -240,6 +255,8 @@ class Traffic(private val rnd: Random = Random(7)) {
         if (!walk[k].isNaN()) return k
         val sign = if (phys == 0) 1f else -1f
         val near = e.cls.halfWidth + .3f; val far = e.cls.halfWidth + e.cls.sidewalk * .8f
+        // as far out as anyone walks (stepping round something on the pavement)
+        val outer = max(far, e.cls.halfWidth + e.cls.sidewalk - .45f)
         val steps = max(2, e.len.toInt())
         var bestLo = 0f; var bestHi = -1f; var runLo = -1f
         for (i in 0..steps) {
@@ -247,10 +264,17 @@ class Traffic(private val rnd: Random = Random(7)) {
             val bx = e.ax + e.ux * s; val by = e.ay + e.uy * s
             // right of a→b in a y-down world is (-uy, ux)
             val nx = -e.uy * sign; val ny = e.ux * sign
-            // off the asphalt, and on land: where the shore cuts into a sidewalk nobody walks on
+            // off the asphalt, and on land all the way across: where the shore cuts into a sidewalk nobody walks on
             val c = city
-            val clear = !g.onAsphalt(bx + nx * near, by + ny * near) && !g.onAsphalt(bx + nx * far, by + ny * far) &&
-                (c == null || (!c.inWater(bx + nx * near, by + ny * near) && !c.inWater(bx + nx * far, by + ny * far)))
+            var clear = !g.onAsphalt(bx + nx * near, by + ny * near) && !g.onAsphalt(bx + nx * far, by + ny * far)
+            if (clear && c != null) {
+                var o = near
+                while (clear) {
+                    if (c.inWater(bx + nx * o, by + ny * o)) clear = false
+                    if (o >= outer) break
+                    o = min(outer, o + .5f)
+                }
+            }
             if (clear) {
                 if (runLo < 0f) runLo = s
                 if (s - runLo > bestHi - bestLo) { bestLo = runLo; bestHi = s }
@@ -405,14 +429,19 @@ class Traffic(private val rnd: Random = Random(7)) {
     }
 
     // the stretches of sidewalk blocked where a walker is: out from, out to, and how close they are (0..1)
-    private val ivLo = FloatArray(16); private val ivHi = FloatArray(16)
+    private val ivLo = FloatArray(16); private val ivHi = FloatArray(16); private val ivW = FloatArray(16)
+    private val wetTmp = FloatArray(2)
+    /** Whether the last [clearOffset] found no way past at the berth asked for. */
+    private var squeezed = false
 
     /**
      * The offset from the centre line a walker [s] meters from [from] along [e], on [side], takes instead of [want]
-     * to step round what stands on the pavement there: easing out to pass it a little before and back after. With
-     * several things side by side (a food cart and a bench beyond it) they look for a way past all of them.
+     * to step round what stands on the pavement there, keeping [clear] from it: easing out to pass it a little before
+     * and back after. With several things side by side (a food cart and a bench beyond it) they look for a way past all
+     * of them, and where there's none (a narrow sidewalk) the way least in the way, always on dry land.
      */
-    private fun clearOffset(e: RoadEdge, from: Int, side: Int, s: Float, want: Float): Float {
+    private fun clearOffset(e: RoadEdge, from: Int, side: Int, s: Float, want: Float, clear: Float = CLEAR): Float {
+        squeezed = false
         val b = bandsOf(e, phys(e, from, side)) ?: return want
         if (b.isEmpty()) return want
         val sa = if (from == e.a) s else e.len - s
@@ -420,26 +449,39 @@ class Traffic(private val rnd: Random = Random(7)) {
         var n = 0; var w = 0f
         var k = 0
         while (k < b.size) {
-            val a0 = b[k]; val a1 = b[k + 1]; val o0 = b[k + 2] - CLEAR; val o1 = b[k + 3] + CLEAR
+            val a0 = b[k]; val a1 = b[k + 1]; val o0 = b[k + 2] - clear; val o1 = b[k + 3] + clear
             k += 4
             if (a0 > sa + RAMP) break
             if (sa > a1 + RAMP || n == ivLo.size) continue
-            ivLo[n] = o0; ivHi[n] = o1; n++
             // how hard this one pushes: fully alongside it, easing in and out over RAMP meters
-            if (want > o0 && want < o1) w = max(w, when { sa < a0 -> 1f - (a0 - sa) / RAMP; sa > a1 -> 1f - (sa - a1) / RAMP; else -> 1f })
+            val near = when { sa < a0 -> 1f - (a0 - sa) / RAMP; sa > a1 -> 1f - (sa - a1) / RAMP; else -> 1f }
+            ivLo[n] = o0; ivHi[n] = o1; ivW[n] = near; n++
+            if (want > o0 && want < o1) w = max(w, near)
         }
         if (w <= 0f) return want
-        // the nearest place across the sidewalk that's clear of everything here
-        var best = Float.NaN
-        for (i in 0 until n) for (p in floatArrayOf(ivLo[i], ivHi[i])) {
+        // the nearest place across the sidewalk clear of everything here, or else the one in the way of the least
+        var best = Float.NaN; var bestCost = Float.MAX_VALUE
+        for (i in -1 until n) for (q in 0..1) {
+            val p = if (i < 0) (if (q == 0) lo else hi) else if (q == 0) ivLo[i] else ivHi[i]
             if (p < lo || p > hi) continue
-            var clear = true
-            for (j in 0 until n) if (p > ivLo[j] + 1e-3f && p < ivHi[j] - 1e-3f) { clear = false; break }
-            if (clear && (best.isNaN() || abs(p - want) < abs(best - want))) best = p
+            var cost = 0f
+            for (j in 0 until n) if (p > ivLo[j] + 1e-3f && p < ivHi[j] - 1e-3f) cost = max(cost, ivW[j])
+            if (!(cost < bestCost - 1e-4f || (cost <= bestCost + 1e-4f && abs(p - want) < abs(best - want)))) continue
+            at(e, from, s, p * side, wetTmp)
+            if (city?.inWater(wetTmp[0], wetTmp[1]) == true) continue
+            best = p; bestCost = cost
         }
         if (best.isNaN()) return want
+        squeezed = bestCost > 0f
+        // ease out as hard as the nearest of everything between here and there pushes (not only what's in the way of
+        // [want]: a bench behind with a food cart alongside would leave them halfway, in the cart)
+        val p0 = min(want, best); val p1 = max(want, best)
+        for (j in 0 until n) if (ivLo[j] < p1 && ivHi[j] > p0) w = max(w, ivW[j])
         return want + (best - want) * (w * w * (3f - 2f * w))
     }
+
+    /** How far a walker keeps from what stands on the pavement: further with a dog or a child alongside. */
+    private fun clearOf(a: Agent) = if (a.companion != 0) CLEAR + COMPANION else CLEAR
 
     private val lookTmp = com.hustlecity.game.render.Look()
 
@@ -457,6 +499,7 @@ class Traffic(private val rnd: Random = Random(7)) {
         a.jitter = rnd.nextFloat() * 2f - 1f
         a.dodge = 0f
         a.state = 0
+        a.tuck = 0f
         a.hidden = false
         for (attempt in 0 until 12) {
             val id = pickEdge(g, fx, fy, radius, false)
@@ -468,7 +511,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             val s0 = walkStart(g, e, a.from, a.side); val s1 = walkEnd(g, e, a.from, a.side)
             if (s1 - s0 < 3f) continue
             a.s = s0 + rnd.nextFloat() * (s1 - s0)
-            at(e, a.from, a.s, clearOffset(e, a.from, a.side, a.s, pedOffset(e, a)) * a.side, tmp)
+            at(e, a.from, a.s, clearOffset(e, a.from, a.side, a.s, pedOffset(e, a), clearOf(a)) * a.side, tmp)
             a.x = tmp[0]; a.y = tmp[1]
             a.heading = headingOf(e, a.from)
             if (initial || dist(a.x, a.y, fx, fy) > radius * .55f) break
@@ -762,7 +805,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             }
             5 -> { // back out onto the sidewalk
                 val e = g.edges[a.edge]
-                at(e, a.from, a.s, clearOffset(e, a.from, a.side, a.s, pedOffset(e, a)) * a.side, tmp)
+                at(e, a.from, a.s, clearOffset(e, a.from, a.side, a.s, pedOffset(e, a), clearOf(a)) * a.side, tmp)
                 if (walkTo(a, dt, tmp[0], tmp[1], a.cruise)) { a.state = 0; a.timer = 8f }
                 return
             }
@@ -824,7 +867,19 @@ class Traffic(private val rnd: Random = Random(7)) {
             planCorner(g, a, e, to)
             return
         }
-        at(e, a.from, a.s, clearOffset(e, a.from, a.side, a.s, max(pedOffset(e, a) - a.dodge, e.cls.halfWidth + .3f)) * a.side, tmp)
+        val want = max(pedOffset(e, a) - a.dodge, e.cls.halfWidth + .3f)
+        var off = clearOffset(e, a.from, a.side, a.s, want, clearOf(a))
+        // no room to pass side by side: the dog or child falls in behind and they pass as one
+        var tight = a.companion != 0 && squeezed
+        if (tight) off = clearOffset(e, a.from, a.side, a.s, want)
+        if (a.companion == 1 && !tight) {
+            // the dog trots on ahead, and gets there first
+            val dog = clearOffset(e, a.from, a.side, a.s + .75f, want, clearOf(a))
+            if (squeezed) { tight = true; off = clearOffset(e, a.from, a.side, a.s, want) }
+            else if (abs(dog - want) > abs(off - want)) off = dog
+        }
+        a.tuck = (a.tuck + (if (tight) dt else -dt) * 2.5f).coerceIn(0f, 1f)
+        at(e, a.from, a.s, off * a.side, tmp)
         val hx = tmp[0] - a.x; val hy = tmp[1] - a.y
         if (hx * hx + hy * hy > 1e-6f) a.heading = atan2(hx, -hy)
         a.x = tmp[0]; a.y = tmp[1]
@@ -847,7 +902,7 @@ class Traffic(private val rnd: Random = Random(7)) {
         if (node.scramble && rnd.nextFloat() < .5f) side = -side
         fun target(edge: RoadEdge, sd: Int) {
             val st = walkStart(g, edge, node.id, sd)
-            at(edge, node.id, st, clearOffset(edge, node.id, sd, st, pedOffset(edge, a)) * sd, tmp)
+            at(edge, node.id, st, clearOffset(edge, node.id, sd, st, pedOffset(edge, a), clearOf(a)) * sd, tmp)
         }
         target(ne, side)
         if (wetWalk(a.x, a.y, tmp[0], tmp[1])) {
@@ -895,7 +950,7 @@ class Traffic(private val rnd: Random = Random(7)) {
     /** Whether a straight walk from (x0, y0) to (x1, y1) would cross water. */
     private fun wetWalk(x0: Float, y0: Float, x1: Float, y1: Float): Boolean {
         val c = city ?: return false
-        val n = (dist(x0, y0, x1, y1) / 1.5f).toInt() + 1
+        val n = (dist(x0, y0, x1, y1) / .5f).toInt() + 1
         for (k in 0..n) {
             val t = k / n.toFloat()
             if (c.inWater(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return true
@@ -947,6 +1002,8 @@ class Traffic(private val rnd: Random = Random(7)) {
         /** How far ahead a walker starts stepping round something on the pavement, and how wide a berth they give it. */
         private const val RAMP = 1.6f
         private const val CLEAR = .34f
+        /** The dog trots, or the child walks, about half a meter to one side (see [companionAt]). */
+        private const val COMPANION = .42f
 
         /** The original city's car colors. */
         val DEFAULT_PALETTE = intArrayOf(

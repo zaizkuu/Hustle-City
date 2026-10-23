@@ -7,6 +7,7 @@ import com.hustlecity.game.render.StreetProps
 import com.hustlecity.game.world.City
 import com.hustlecity.game.world.Curbside
 import com.hustlecity.game.world.Maps
+import com.hustlecity.game.world.companionAt
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -99,6 +100,7 @@ class PlacementAuditTest {
             var samples = 0; var inside = 0; var wet = 0
             val kinds = IntArray(4)
             val where = ArrayList<String>()
+            val comp = FloatArray(2)
             // the crowds where you start, at a few junctions and along the waterfront
             val rnd = java.util.Random(11)
             val g = e.city.roads
@@ -127,6 +129,17 @@ class PlacementAuditTest {
                         inside++; kinds[pv.kind(hit)]++
                         if (where.size < 8) where += "${a.x.toInt()},${a.y.toInt()} in kind ${pv.kind(hit)}"
                     }
+                    // nor does the dog or child alongside
+                    if (a.companion != 0) {
+                        companionAt(a, comp)
+                        val cx = comp[0]; val cy = comp[1]
+                        var chit = -1
+                        pv.forNear(cx, cy, 1f) { i -> if (chit < 0 && pv.contains(i, cx, cy, -.1f)) chit = i }
+                        if (chit >= 0) {
+                            inside++; kinds[pv.kind(chit)]++
+                            if (where.size < 8) where += "${cx.toInt()},${cy.toInt()} companion in kind ${pv.kind(chit)}"
+                        }
+                    }
                 }
             }
             }
@@ -137,7 +150,7 @@ class PlacementAuditTest {
         }
         File("build").mkdirs()
         File("build/walkers.txt").writeText(out.toString())
-        org.junit.Assert.assertTrue("walkers inside things on the pavement:\n$out", worst < .001)
+        org.junit.Assert.assertTrue("walkers inside things on the pavement:\n$out", worst < .0002)
     }
 
     private fun carRect(cb: Curbside, i: Int): Rect {

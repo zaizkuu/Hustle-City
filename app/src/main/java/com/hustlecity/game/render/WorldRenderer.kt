@@ -1590,6 +1590,8 @@ class WorldRenderer(private val e: GameEngine) {
     private val dogs = DogPainter(scene)
     private val collar = FloatArray(3)
 
+    private val compTmp = FloatArray(2)
+
     private fun drawPed(a: com.hustlecity.game.world.Agent, i: Int) {
         // most people carry an umbrella in the rain (and some in the snow); runners don't
         val v = e.skyVis
@@ -1602,12 +1604,12 @@ class WorldRenderer(private val e: GameEngine) {
             a.color, PersonPainter.PANTS[(i * 3) % PersonPainter.PANTS.size], skin, PersonPainter.HAIR[(i * 5) % PersonPainter.HAIR.size],
             umbrella = umbrella, pose = if (a.jog) Pose.RUN else Pose.STAND, look = a.look, warm = warm, activity = a.activity)
         if (a.companion == 0) return
-        // the dog trots ahead on the curb side, the child walks alongside holding a hand
+        // the dog trots ahead on one side, the child walks alongside holding a hand (see companionAt)
         val fx = kotlin.math.sin(a.heading); val fy = -kotlin.math.cos(a.heading)
         val rx = -fy; val ry = fx
+        com.hustlecity.game.world.companionAt(a, compTmp)
         if (a.companion == 1) {
-            val dx = a.x + fx * .75f + rx * .45f; val dy = a.y + fy * .75f + ry * .45f
-            dogs.draw(dx, dy, a.heading, a.phase, moving, a.look, collar)
+            dogs.draw(compTmp[0], compTmp[1], a.heading, a.phase, moving, a.look, collar)
             if (scene.smooth) {
                 // the leash, slack in the middle
                 val hx = a.x + fx * .15f + rx * .26f; val hy = a.y + fy * .15f + ry * .26f
@@ -1616,8 +1618,7 @@ class WorldRenderer(private val e: GameEngine) {
                 scene.tube(mx, my, .45f, .01f, collar[0], collar[1], collar[2], .01f, 3, c(0xFFB0303A), Mat.PLAIN)
             }
         } else {
-            val cx = a.x + rx * .55f; val cy = a.y + ry * .55f
-            people.draw(cx, cy, 0f, a.heading, a.phase * 1.35f, moving, PersonPainter.UMBRELLAS[(i + 2) % PersonPainter.UMBRELLAS.size],
+            people.draw(compTmp[0], compTmp[1], 0f, a.heading, a.phase * 1.35f, moving, PersonPainter.UMBRELLAS[(i + 2) % PersonPainter.UMBRELLAS.size],
                 PersonPainter.PANTS[(i + 1) % PersonPainter.PANTS.size], skin, PersonPainter.HAIR[(i * 5) % PersonPainter.HAIR.size], .58f,
                 look = a.look * 31 + 7, warm = warm)
         }
