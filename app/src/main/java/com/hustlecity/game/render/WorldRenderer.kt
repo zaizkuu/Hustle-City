@@ -74,6 +74,8 @@ class WorldRenderer(private val e: GameEngine) {
     private val painter = BuildingPainter(this, e)
     private val cars = CarPainter(scene)
     private val trees = TreePainter(scene)
+    /** Street props this close to the camera (meters) are drawn as their HD models; further off, as simple shapes. */
+    private val PROP_MODEL_DIST = 110f
     private var propsCache: StreetProps? = null
     private val props: StreetProps
         get() = propsCache?.takeIf { it.city === e.city } ?: StreetProps(e.city).also { propsCache = it }
@@ -469,10 +471,11 @@ class WorldRenderer(private val e: GameEngine) {
                     drawCar(v.x, v.y, v.heading, v.def.length, v.def.width, v.def.height, if (v.color != 0) v.color else v.def.color, v.def.style, true,
                         braking = driving && e.input.brake, pitch = lean.pitch, roll = lean.roll)
                 }
-                6 -> drawTrafficLight(dIdx[i])
+                6 -> drawTrafficLight(dIdx[i], false)
+                15 -> drawTrafficLight(dIdx[i], true)
                 7 -> drawParkedCar(dIdx[i])
                 8 -> {
-                    props.draw(scene, dIdx[i], dKey[i] < 55f * 55f, e.realTime)
+                    props.draw(scene, dIdx[i], dKey[i] < 55f * 55f, e.realTime, modelled = dKey[i] < PROP_MODEL_DIST * PROP_MODEL_DIST)
                     if (props.kind[dIdx[i]] == StreetProps.VENDOR && dKey[i] < 120f * 120f) vendor(dIdx[i])
                 }
                 12 -> features.draw(scene, dIdx[i], e.realTime, scene.gpu == null, mapMode, if (e.hasGame) e.state.hour else 12)
@@ -1308,6 +1311,11 @@ class WorldRenderer(private val e: GameEngine) {
             if (dyn && proj.dist < 240) forSignals { n, ed, x, y ->
                 add(6, (n.id shl 4) or n.edges.indexOf(ed.id).coerceIn(0, 15), keyFor(x, y))
             }
+            // near the camera, signal poles are modelled and cached; each frame only lights their lamps
+            if (mode == STATIC && proj.dist < 240 && signalModel() != null) forSignals { n, ed, x, y ->
+                val k = keyFor(x, y)
+                if (k < PROP_MODEL_DIST * PROP_MODEL_DIST) add(15, (n.id shl 4) or n.edges.indexOf(ed.id).coerceIn(0, 15), k)
+            }
         }
         if (dyn) for (v in e.state.vehicles) if (!e.ops.away(v) && v.x in bbox[0] - 5..bbox[2] + 5 && v.y in bbox[1] - 5..bbox[3] + 5) add(5, v.id, keyFor(v.x, v.y))
         if (dyn && e.hasGame && p.driving < 0 && p.inBuilding < 0 && !mapMode && !cinematic) add(4, 0, playerKey)
@@ -1433,7 +1441,14 @@ class WorldRenderer(private val e: GameEngine) {
     private var leanT = 0f
 
 
-    private fun drawTrafficLight(code: Int) {
+    /** The HD renderer's traffic signal model (pole, mast arm and signal head), or null. */
+    private fun signalModel(): Models.Mesh? = if (scene.gpu != null) Models.prop("traffic_light")?.get(0) else null
+
+    /**
+     * The traffic light of one junction approach ([code]: node id and edge index). With the HD model, [poleOnly] draws the
+     * pole and its arm (cached with the city) and otherwise only the lit lamp; without it everything is drawn at once.
+     */
+    private fun drawTrafficLight(code: Int, poleOnly: Boolean) {
         val g = e.city.roads
         val n = g.nodes.getOrNull(code shr 4) ?: return
         val ed = g.edges.getOrNull(n.edges.getOrElse(code and 15) { -1 }) ?: return
@@ -1443,6 +1458,20 @@ class WorldRenderer(private val e: GameEngine) {
         val off = ed.cls.halfWidth + 1.4f
         val x = n.x + dx * (clear + 1f) + dy * off * side
         val y = n.y + dy * (clear + 1f) - dx * off * side
+        // modelled when the cache was built near enough (see collectDrawables): measured from where its camera was
+        val model = if (poleOnly || dist(x, y, sCamX, sCamY) < PROP_MODEL_DIST) signalModel() else null
+        if (model != null) {
+            // the arm reaches over the lanes; the signal faces the cars coming up the approach (along +d)
+            val armX = -dy * side; val armY = dx * side
+            if (poleOnly) { scene.meshAt(model, x, y, 0f, dx, dy, armX, armY); return }
+            val state = e.traffic.light(n, ed)
+            val lit = when (state) { 0 -> c(0xFF2EE87A); 1 -> c(0xFFFFD34D); else -> c(0xFFFF4D4D) }
+            val z = when (state) { 0 -> 3.62f; 1 -> 3.9f; else -> 4.18f }
+            val lx = x + armX * 2.62f + dx * .17f; val ly = y + armY * 2.62f + dy * .17f
+            scene.box(lx - .07f, ly - .07f, z - .07f, lx + .07f, ly + .07f, z + .07f, lit, lit)
+            return
+        }
+        if (poleOnly) return
         val pole = c(0xFF3A3D42)
         scene.box(x - .1f, y - .1f, 0f, x + .1f, y + .1f, 4.4f, pole, pole)
         // the arm reaches over the lanes it controls

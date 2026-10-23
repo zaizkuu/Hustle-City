@@ -375,7 +375,10 @@ def tube(points, r, color, n=6, mat=''):
         ln = np.linalg.norm(d)
         if ln < 1e-9:
             continue
-        seg = lathe([(r, 0), (r, ln)], color, n=n, mat=mat, smooth=False, cap=False)
+        # each piece runs a little past the bends at either end, which closes them without extra geometry
+        e0 = r * .7 if i > 0 else 0.0
+        e1 = r * .7 if i < len(pts) - 2 else 0.0
+        seg = lathe([(r, -e0), (r, ln + e1)], color, n=n, mat=mat, smooth=False, cap=False)
         # turn z to d
         z = d / ln
         x = np.cross([0, 0, 1], z) if abs(z[2]) < .999 else np.array([1.0, 0, 0])
@@ -384,6 +387,4 @@ def tube(points, r, color, n=6, mat=''):
         m = np.stack([x, y, z], axis=1)
         seg = seg._rot(m)
         out = out + seg.move(*a)
-        # a ball at each joint keeps bends closed
-        out = out + sphere(r, r, r, color, nu=n, nv=3, mat=mat).move(*b)
     return out

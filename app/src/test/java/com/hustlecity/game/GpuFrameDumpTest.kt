@@ -38,10 +38,10 @@ class GpuFrameDumpTest {
     private val h = 760
     private val root = File("build/glframes").apply { mkdirs() }
 
-    private fun engine(): GameEngine {
-        // HD frames draw the furniture models
+    private fun engine(mapId: String? = null): GameEngine {
+        // HD frames draw the models (furniture, products, street props)
         com.hustlecity.game.render.Models.assets = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().assets
-        return GameEngine(null).also { it.newGame("Tester", 1, 0, 1); it.ui.tip = null }
+        return GameEngine(null).also { if (mapId == null) it.newGame("Tester", 1, 0, 1) else it.newGame("Tester", 1, 0, 1, mapId = mapId); it.ui.tip = null }
     }
 
     private fun dump(name: String, frame: GpuFrame, overlay: Bitmap, canvasRender: Bitmap) {
@@ -107,11 +107,37 @@ class GpuFrameDumpTest {
     @Test
     fun cities() {
         for ((id, hour) in listOf("nyc" to 15, "manila" to 15, "tokyo" to 15, "seoul" to 15, "tokyo" to 21, "seoul" to 21)) {
-            val e = GameEngine(null).also { it.newGame("Tester", 1, 0, 1, mapId = id); it.ui.tip = null }
+            val e = engine(id)
             e.state.minute = hour * 60L
             e.camera.zoom = 75f; e.camera.dist = 75f; e.camera.yaw = .4f
             city("city_${id}_$hour", e)
         }
+    }
+
+    /** Close-ups of each kind of modelled street furniture where it stands, by day, and a street corner at night. */
+    @Test
+    fun streetProps() {
+        val e0 = engine("nyc")
+        val pr = com.hustlecity.game.render.StreetProps(e0.city)
+        val kinds = listOf(com.hustlecity.game.render.StreetProps.BUS_STOP to "bus_stop", com.hustlecity.game.render.StreetProps.NEWS to "news",
+            com.hustlecity.game.render.StreetProps.MAILBOX to "mailbox", com.hustlecity.game.render.StreetProps.BIKE_RACK to "bike_rack",
+            com.hustlecity.game.render.StreetProps.HYDRANT to "hydrant", com.hustlecity.game.render.StreetProps.BENCH to "bench",
+            com.hustlecity.game.render.StreetProps.PARK_LAMP to "park_lamp")
+        for ((kind, name) in kinds) {
+            val i = (0 until pr.count).firstOrNull { pr.kind[it] == kind } ?: continue
+            val e = engine("nyc")
+            // stand back from it on the pavement, looking at it across the street's edge
+            e.state.player.x = pr.x[i] - pr.dirX[i] * 1.5f + pr.dirY[i] * 2f; e.state.player.y = pr.y[i] - pr.dirY[i] * 1.5f - pr.dirX[i] * 2f
+            e.camera.tx = pr.x[i]; e.camera.ty = pr.y[i]
+            e.camera.zoom = 7f; e.camera.dist = 7f; e.camera.yaw = .5f
+            e.state.minute = 14L * 60
+            city("prop_$name", e)
+        }
+        // night: lamp lenses, signals and the light they throw
+        val e = engine("nyc")
+        e.state.minute = 21L * 60 + 30
+        e.camera.zoom = 32f; e.camera.dist = 32f; e.camera.yaw = .3f
+        city("props_night", e)
     }
 
     @Test
@@ -249,6 +275,40 @@ class GpuFrameDumpTest {
             }
             val blank = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             dump("products_$shot", frame, blank, blank)
+        }
+    }
+
+    /** The street prop models side by side on a pavement, facing the road (+y), in two shots: small things, then tall ones. */
+    @Test
+    fun propModels() {
+        com.hustlecity.game.render.Models.assets = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().assets
+        com.hustlecity.game.render.Models.clear()
+        val ids = com.hustlecity.game.render.Models.propIds().sorted()
+        assertTrue("props are packaged", ids.size >= 10)
+        val tall = setOf("lamp", "park_lamp", "traffic_light", "bus_stop")
+        for ((shot, list) in listOf(ids.filter { it !in tall }, ids.filter { it in tall }).withIndex()) {
+            val proj = com.hustlecity.game.render.Projector()
+            val span = if (shot == 0) 3.2f else 5f
+            proj.tx = (list.size - 1) * span / 2; proj.ty = .5f; proj.dist = if (shot == 0) 9f else 13f
+            proj.pitch = Math.toRadians(if (shot == 0) 32.0 else 22.0).toFloat(); proj.yaw = 0f; proj.near = .1f
+            proj.update(w.toFloat(), h.toFloat(), if (shot == 0) .55f else .7f)
+            val frame = GpuFrame()
+            frame.setCamera(proj)
+            com.hustlecity.game.render.gpu.GpuLighting.interior(frame, 0xFF9DB8D2.toInt())
+            frame.setShadow(-4f, -4f, list.size * span + 4f, 6f, 8f, 2048, .6f)
+            val scene = com.hustlecity.game.render.Scene3D(proj, com.hustlecity.game.render.RenderBatch())
+            scene.gpu = frame
+            scene.material = com.hustlecity.game.render.Mat.SIDEWALK
+            scene.groundRect(-4f, -4f, list.size * span + 4f, 1.2f, 0f, 0xFFB9BCC1.toInt())
+            scene.material = com.hustlecity.game.render.Mat.ASPHALT
+            scene.groundRect(-4f, 1.2f, list.size * span + 4f, 8f, 0f, 0xFF4A4D52.toInt())
+            scene.material = com.hustlecity.game.render.Mat.PLAIN
+            for ((k, id) in list.withIndex()) {
+                val looks = com.hustlecity.game.render.Models.prop(id)!!
+                scene.meshAt(looks[looks.size - 1], k * span, 0f, 0f, 1f, 0f, 0f, 1f)
+            }
+            val blank = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            dump("prop_models_$shot", frame, blank, blank)
         }
     }
 

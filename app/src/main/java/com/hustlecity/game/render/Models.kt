@@ -5,10 +5,11 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * Furniture and product meshes built by tools/models from free (CC0) model packs and our own models, stored as HCM1
- * files in assets/models/ (products in assets/models/products/). The GPU renderer draws them in place of the box models;
- * the classic renderer keeps the boxes. A furniture mesh sits in its item's own tile units: x across the footprint,
- * y deep, z up in meters, front toward +y. A product mesh is in meters, centered on its middle, front toward +y.
+ * Furniture, product and street prop meshes built by tools/models from free (CC0) model packs and our own models,
+ * stored as HCM1 files in assets/models/ (products in assets/models/products/, props in assets/models/props/). The GPU
+ * renderer draws them in place of the box models; the classic renderer keeps the boxes. A furniture mesh sits in its
+ * item's own tile units: x across the footprint, y deep, z up in meters, front toward +y. A product mesh is in meters,
+ * centered on its middle, front toward +y. A prop mesh is in meters around where it stands, +y toward the road.
  */
 object Models {
     /**
@@ -47,24 +48,30 @@ object Models {
     }
 
     private val products = HashMap<String, Array<Mesh>>()
+    private val props = HashMap<String, Array<Mesh>>()
 
     /**
      * The looks of product [pid] (models/products/<pid>.hcm, then <pid>.1.hcm, <pid>.2.hcm...: neighboring slots of a
      * display take turns), or null when it has no model.
      */
-    fun product(pid: String): Array<Mesh>? {
+    fun product(pid: String): Array<Mesh>? = looks("products", pid, products)
+
+    /** The looks of street prop [id] (models/props/<id>.hcm and its variants), or null when it has no model. */
+    fun prop(id: String): Array<Mesh>? = looks("props", id, props)
+
+    private fun looks(folder: String, id: String, cache: HashMap<String, Array<Mesh>>): Array<Mesh>? {
         if (!enabled) return null
         val am = assets ?: return null
-        synchronized(products) {
-            val known = products[pid]
+        synchronized(cache) {
+            val known = cache[id]
             if (known != null) return if (known.isEmpty()) null else known
             val looks = ArrayList<Mesh>()
             while (true) {
-                val name = if (looks.isEmpty()) "models/products/$pid.hcm" else "models/products/$pid.${looks.size}.hcm"
+                val name = if (looks.isEmpty()) "models/$folder/$id.hcm" else "models/$folder/$id.${looks.size}.hcm"
                 looks += runCatching { am.open(name).use { read(it.readBytes()) } }.getOrNull() ?: break
             }
             val arr = looks.toTypedArray()
-            products[pid] = arr
+            cache[id] = arr
             return if (arr.isEmpty()) null else arr
         }
     }
@@ -76,9 +83,14 @@ object Models {
     fun productIds(): List<String> =
         assets?.list("models/products")?.filter { it.endsWith(".hcm") }?.map { it.substringAfterLast('/').removeSuffix(".hcm").substringBefore('.') }?.distinct() ?: emptyList()
 
+    /** Street prop ids that have a model. */
+    fun propIds(): List<String> =
+        assets?.list("models/props")?.filter { it.endsWith(".hcm") }?.map { it.substringAfterLast('/').removeSuffix(".hcm").substringBefore('.') }?.distinct() ?: emptyList()
+
     fun clear() {
         synchronized(cache) { cache.clear() }
         synchronized(products) { products.clear() }
+        synchronized(props) { props.clear() }
     }
 
     /** Parses an HCM1 file (see tools/models/build_models.py). */

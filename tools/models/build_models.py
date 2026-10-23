@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Builds the furniture and product models the HD renderer draws, from manifest.py and products.py.
+"""Builds the furniture, product and street prop models the HD renderer draws, from manifest.py, products.py and props.py.
 
-usage: python3 tools/models/build_models.py [--preview out.png] [--products | --furniture] [id ...]
+usage: python3 tools/models/build_models.py [--preview out.png] [--products | --props | --furniture] [id ...]
 
 Each model is assembled from one or more parts: a source mesh (glTF) turned to face a direction and fitted into a box,
 or a shape modelled with shapes.py. Furniture is in the item's own tile units (x across its footprint, y deep, z up in
 meters; the front faces +y unless the manifest says otherwise); products are in meters at their real size. Colors come
 from the source materials (palette textures are sampled per vertex), and material names pick the shader's surface
-(wood, cloth, glass...). Output: app/src/main/assets/models/<id>.hcm and models/products/<id>[.<look>].hcm, read by
-render/Models.kt.
+(wood, cloth, glass...). Output: app/src/main/assets/models/<id>.hcm, models/products/<id>[.<look>].hcm and
+models/props/<id>[.<look>].hcm, read by render/Models.kt.
 
 HCM1 layout (little endian): "HCM1", u32 vertex count, u32 index count, 6 x f32 bounds (min xyz, max xyz), then per
 vertex f32 x, y, z, i8 nx, ny, nz, u8 flags (material * 2 + emissive), u8 r, g, b, a; then u16 indices.
@@ -25,11 +25,14 @@ sys.path.insert(0, HERE)
 import gltf  # noqa: E402
 from manifest import MODELS, SOURCES  # noqa: E402
 from products import PRODUCTS, Variants  # noqa: E402
+from props import PROPS  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..'))
 OUT = os.path.join(ROOT, 'app', 'src', 'main', 'assets', 'models')
 # product models go in their own folder: products/<product id>.hcm
 PRODUCT_OUT = os.path.join(OUT, 'products')
+# street furniture: props/<prop>.hcm
+PROP_OUT = os.path.join(OUT, 'props')
 
 # shader surfaces (render/Scene3D.kt Mat)
 PLAIN, GLASS, WOOD, FOLIAGE, FABRIC, PAINT = 0, 3, 7, 13, 15, 16
@@ -223,18 +226,23 @@ def main():
     ap.add_argument('ids', nargs='*', help='furniture or product ids (default: all)')
     ap.add_argument('--preview')
     ap.add_argument('--products', action='store_true', help='only the products')
+    ap.add_argument('--props', action='store_true', help='only the street props')
     ap.add_argument('--furniture', action='store_true', help='only the furniture')
     a = ap.parse_args()
-    ids = a.ids or ([] if a.products else sorted(MODELS)) + ([] if a.furniture else sorted(PRODUCTS))
+    only = a.products or a.props or a.furniture
+    ids = a.ids or (sorted(MODELS) if a.furniture or not only else []) + (sorted(PRODUCTS) if a.products or not only else []) \
+        + (sorted(PROPS) if a.props or not only else [])
     meshes = []
     total = 0
     jobs = []
     for mid in ids:
-        if mid in PRODUCTS:
-            entry = PRODUCTS[mid]
+        group = PRODUCTS if mid in PRODUCTS else PROPS if mid in PROPS else None
+        if group is not None:
+            entry = group[mid]
             # variants: <id>.hcm, then <id>.1.hcm, <id>.2.hcm...
             looks = entry if isinstance(entry, Variants) else [entry]
-            jobs += [(mid if k == 0 else f'{mid}.{k}', parts, PRODUCT_OUT) for k, parts in enumerate(looks)]
+            out = PRODUCT_OUT if group is PRODUCTS else PROP_OUT
+            jobs += [(mid if k == 0 else f'{mid}.{k}', parts, out) for k, parts in enumerate(looks)]
         else:
             jobs.append((mid, MODELS[mid], OUT))
     for name, parts, out in jobs:

@@ -53,6 +53,8 @@ class StreetProps(val city: City) {
         private val WOOD = c(0xFF9C6B43)
         private val CONCRETE = c(0xFFB9B4AA)
         private val NEWS_COLORS = intArrayOf(c(0xFFD63031), c(0xFF0984E3), c(0xFFFDCB6E), c(0xFF00B894))
+        /** Model of each kind of prop (by kind), where it has one. */
+        private val MODEL_IDS = arrayOf("lamp", "hydrant", "bin", "bench", "bus_stop", "news", "mailbox", null, "park_lamp", "bike_rack", "planter")
         private val VENDING_BODIES = intArrayOf(c(0xFFF2F2F0), c(0xFFD32F2F), c(0xFF1E5BC6), c(0xFFF2F2F0), c(0xFF2E9E4F), c(0xFFF2F2F0))
         private val DRINKS = intArrayOf(c(0xFFE53935), c(0xFF1E88E5), c(0xFFFDD835), c(0xFF43A047), c(0xFF6D4C41), c(0xFFF5F5F5), c(0xFFFB8C00))
     }
@@ -419,11 +421,52 @@ class StreetProps(val city: City) {
 
     // ------------------------------------------------------------------ painting
 
-    /** Draws prop [i]. [near] adds the small parts. */
-    fun draw(scene: Scene3D, i: Int, near: Boolean, time: Float) {
+    /**
+     * Draws prop [i]. [near] adds the small parts; [modelled] lets the HD renderer draw it as its 3D model (see
+     * tools/models/props.py), with what glows, shows through or gathers snow drawn on top.
+     */
+    fun draw(scene: Scene3D, i: Int, near: Boolean, time: Float, modelled: Boolean = false) {
         // local +y points at the road: world (-sin, cos) = (dirX, dirY)
         scene.setFrame(x[i], y[i], dirY[i], -dirX[i])
-        try { drawLocal(scene, i, near, time) } finally { scene.clearFrame() }
+        try {
+            val m = if (modelled && scene.smooth) model(i) else null
+            if (m == null || !scene.meshAt(m, 0f, 0f, 0f, 1f, 0f, 0f, 1f)) drawLocal(scene, i, near, time) else onModel(scene, i, near)
+        } finally { scene.clearFrame() }
+    }
+
+    /** The model prop [i] is drawn as, or null (no model for its kind). */
+    private fun model(i: Int): Models.Mesh? {
+        val id = MODEL_IDS.getOrNull(kind[i]) ?: return null
+        val looks = Models.prop(id) ?: return null
+        // newspaper boxes keep the colors the box version gives them; bike racks vary in how many bikes are locked up
+        return looks[(if (kind[i] == NEWS) i else i * 7 + 3) % looks.size]
+    }
+
+    /** What's drawn over a prop's model: lamp lenses (lit at night), a bus shelter's glass and advert, snow, shrubs. */
+    private fun onModel(scene: Scene3D, i: Int, near: Boolean) {
+        val night = scene.daylight < .5f
+        when (kind[i]) {
+            LAMP -> {
+                val lens = if (night) c(0xFFFFE6A8) else c(0xFF8A9198)
+                scene.box(-.18f, 1.33f, 5.875f, .18f, 1.87f, 5.9f, lens, lens)
+            }
+            PARK_LAMP -> scene.blob(0f, 0f, 3.85f, .3f, scene.lit(if (night) c(0xFFFFF0C2) else c(0xFFE8EDF0), 1f), 10)
+            BENCH -> if (scene.snow > .15f) scene.box(-.85f, -.22f, .47f, .85f, .22f, .49f, scene.snowy(WOOD), scene.snowy(WOOD))
+            BUS_STOP -> {
+                // the advert, lit from inside at night, and glass sides
+                val ad = if (night) c(0xFFFFF1C9) else c(0xFF2F80ED)
+                scene.box(-.8f, -.68f, .3f, .8f, -.66f, 2.1f, ad, ad)
+                if (near) {
+                    val glass = scene.withAlpha(scene.lit(c(0xFFBFD9E8), 1f), .35f)
+                    for (sx in floatArrayOf(-2f, 2f)) scene.box(sx - .01f, -.68f, .3f, sx + .01f, .58f, 2.25f, glass, glass)
+                }
+                if (scene.snow > .15f) scene.box(-2.18f, -.92f, 2.47f, 2.18f, .82f, 2.5f, scene.snowy(c(0xFF4E565E)), scene.snowy(c(0xFF4E565E)))
+            }
+            PLANTER -> {
+                scene.blob(0f, 0f, 1.05f, .55f, scene.lit(scene.mix(c(0xFF4C8C3F), c(0xFFF2F5F8), scene.snow * .6f), .95f), 9)
+                if (near) scene.blob(-.1f, -.1f, 1.25f, .32f, scene.lit(scene.mix(c(0xFF6DB35A), c(0xFFF2F5F8), scene.snow * .7f), 1.05f), 8)
+            }
+        }
     }
 
     private fun drawLocal(scene: Scene3D, i: Int, near: Boolean, time: Float) {

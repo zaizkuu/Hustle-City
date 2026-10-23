@@ -94,12 +94,34 @@ class ModelsTest {
     }
 
     @Test
+    fun streetPropsHaveModels() {
+        setUp()
+        val ids = Models.propIds()
+        for (id in listOf("lamp", "park_lamp", "hydrant", "bin", "bench", "bus_stop", "news", "mailbox", "bike_rack", "planter", "traffic_light")) {
+            assertTrue("$id has a model", id in ids)
+            for ((k, m) in Models.prop(id)!!.withIndex()) {
+                val name = "$id look $k"
+                assertTrue("$name indices in range", m.idx.isNotEmpty() && m.idx.all { it in 0 until m.vertices })
+                for (v in m.pos) assertTrue("$name positions are finite", v.isFinite())
+                val b = m.bounds
+                assertEquals("$name stands on the ground", 0f, b[2], .01f)
+                // the city caches hundreds of these: the common ones have to stay light
+                val budget = if (id in setOf("lamp", "hydrant", "bin", "park_lamp", "planter")) 250 else 1100
+                assertTrue("$name is light enough (${m.vertices} vertices)", m.vertices <= budget)
+            }
+        }
+        // the newspaper boxes come in the four color orders the box version uses
+        assertEquals(4, Models.prop("news")!!.size)
+    }
+
+    @Test
     fun withoutAssetsEverythingStaysBoxes() {
         Models.assets = null
         Models.clear()
         try {
             assertNull(Models.get("sofa"))
             assertNull(Models.product("apples"))
+            assertNull(Models.prop("lamp"))
             assertTrue(Models.ids().isEmpty())
         } finally {
             setUp()

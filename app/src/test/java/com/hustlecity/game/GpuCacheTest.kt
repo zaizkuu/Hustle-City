@@ -25,6 +25,8 @@ import org.robolectric.annotation.GraphicsMode
 class GpuCacheTest {
     @Test
     fun everyCityCachesSoundGeometry() {
+        // the HD renderer's models (street props, traffic lights), as on a phone
+        com.hustlecity.game.render.Models.assets = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().assets
         for (map in Maps.all) {
             val e = GameEngine(null).also { it.newGame("B", 1, 0, 1, mapId = map.id); it.ui.tip = null; it.ui.phoneOpen = false }
             e.settings.quality = 2

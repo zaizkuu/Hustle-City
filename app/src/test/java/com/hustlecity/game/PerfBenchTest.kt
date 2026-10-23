@@ -25,6 +25,8 @@ class PerfBenchTest {
 
     @Test
     fun frameCost() {
+        // the HD renderer's models (street props, traffic lights), as on a phone
+        com.hustlecity.game.render.Models.assets = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().assets
         val out = StringBuilder()
         for (map in com.hustlecity.game.world.Maps.all) {
         out.appendLine("== ${map.id}"); println("== ${map.id}")
