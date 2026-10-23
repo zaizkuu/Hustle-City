@@ -285,6 +285,7 @@ class WorldRenderer(private val e: GameEngine) {
             for (b in st.businesses) k = k * 31 + b.buildingId * 7 + (if (b.tempClosed) 1 else 0) + b.openHour * 3 + b.closeHour * 5 + b.typeId.hashCode()
             for (r in st.rentals) k = k * 31 + r.buildingId
             for (r in st.rivalBusinesses) k = k * 31 + r.buildingId * 3 + r.level
+            k = k * 31 + e.city.curb.hiddenKey()
         }
         return k
     }
@@ -475,6 +476,12 @@ class WorldRenderer(private val e: GameEngine) {
                     if (props.kind[dIdx[i]] == StreetProps.VENDOR && dKey[i] < 120f * 120f) vendor(dIdx[i])
                 }
                 12 -> features.draw(scene, dIdx[i], e.realTime, scene.gpu == null, mapMode, if (e.hasGame) e.state.hour else 12)
+                14 -> {
+                    val cb = e.city.curb; val ci = dIdx[i]
+                    val st = cb.style[ci]
+                    drawCar(cb.x[ci], cb.y[ci], cb.heading[ci], com.hustlecity.game.world.Curbside.length(st), com.hustlecity.game.world.Curbside.width(st),
+                        com.hustlecity.game.world.Curbside.height(st), cb.color[ci], st, false)
+                }
                 13 -> features.drawCar(scene, dIdx[i])
             }
         }
@@ -1289,6 +1296,13 @@ class WorldRenderer(private val e: GameEngine) {
                     if (x < bbox[0] - 3f || x > bbox[2] + 3f || y < bbox[1] - 6f || y > bbox[3] + 3f) return@forIn
                     // fountains move, so they're redrawn every frame; the rest is cached
                     if (mode == ALL || (mode == STATIC) != pr.animated(pi)) add(8, pi, keyFor(x, y))
+                }
+            }
+            // cars parked along the curbs (cached; your own parked car takes a spot's place)
+            if (stat && proj.dist < 230) {
+                val cb = city.curb
+                cb.forIn(bbox[0] - 3f, bbox[1] - 3f, bbox[2] + 3f, bbox[3] + 3f) { ci ->
+                    if (!cb.hidden[ci] && cb.x[ci] in bbox[0] - 3f..bbox[2] + 3f && cb.y[ci] in bbox[1] - 3f..bbox[3] + 3f) add(14, ci, keyFor(cb.x[ci], cb.y[ci]))
                 }
             }
             if (dyn && proj.dist < 240) forSignals { n, ed, x, y ->

@@ -136,6 +136,9 @@ class Traffic(private val rnd: Random = Random(7)) {
     }
 
     /** Eases the number of pedestrians toward [n]: newcomers walk in from the edge, leavers vanish off-screen. */
+    /** How far from the camera people walk (0: the update radius decides); closer in, the same crowd looks busier. */
+    var pedRadius = 0f
+
     fun setPedTarget(n: Int, fx: Float, fy: Float) {
         if (peds.size < n) peds += Agent()
         else if (peds.size > n) {
@@ -403,7 +406,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             stepCar(g, a, i, dt, blockerX, blockerY)
             lean(a, a.speed, a.heading, dt)
         }
-        val pr = radius * .7f
+        val pr = if (pedRadius > 0f) min(pedRadius, radius * .7f) else radius * .7f
         for (p in peds) {
             if (initial || !p.placed || (dist(p.x, p.y, fx, fy) > pr && p.state != 4)) spawnPed(g, p, fx, fy, pr, initial || !p.placed)
             stepPed(g, p, dt)

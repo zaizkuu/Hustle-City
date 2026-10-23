@@ -192,6 +192,49 @@ class GpuFrameDumpTest {
         dump(name, frame, blank, blank)
     }
 
+    /** A store of each kind with a few pieces of furniture in the middle, so the walls show their dressing. */
+    @Test
+    fun interiors() {
+        for (type in listOf("bookstore", "liquor", "electronics", "clothing", "fastfood", "coffee", "gym", "florist", "lawfirm")) {
+            val e = engine()
+            e.state.player.courses += com.hustlecity.game.data.Catalog.COURSE_IMPORT
+            val t = com.hustlecity.game.data.Catalog.type(type)
+            val kind = if (t.office) BKind.OFFICE else BKind.RETAIL
+            val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == kind && it.area in (if (t.office) 150..500 else 110..220) }
+            e.state.rentals += Rental(b.id, b.baseRent, 1)
+            val biz = e.startBusiness(b.id, type, "Test")!!
+            biz.backRoom = 0
+            var x = 3
+            for (req in t.requirements + t.products.mapNotNull { com.hustlecity.game.data.Catalog.product(it.first)?.tag?.let { tag -> com.hustlecity.game.data.Req(tag, tag) } }) {
+                val id = com.hustlecity.game.engine.itemForTag(req.tag)
+                if (biz.furniture.any { it.itemId == id }) continue
+                biz.furniture += PlacedItem(id, x, 3, 0)
+                x += (com.hustlecity.game.data.Catalog.item(id)?.w ?: 1) + 1
+            }
+            for ((pid, _) in t.products) if (com.hustlecity.game.data.Catalog.product(pid)?.service == false) biz.stock[pid] = 40
+            biz.tempClosed = false
+            e.state.minute = 13L * 60
+            e.state.player.inBuilding = b.id
+            e.interior = InteriorScene(e, b, InteriorMode.BUSINESS)
+            repeat(120) { e.frame(1 / 30f) }
+            val r = InteriorRenderer(e)
+            val frame = GpuFrame()
+            val overlay = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            r.draw(Canvas(overlay), w, h, frame)
+            dump("interior_$type", frame, overlay, overlay)
+        }
+        // and a home
+        val e = engine()
+        e.state.player.inBuilding = e.state.player.home
+        e.interior = InteriorScene(e, e.city.building(e.state.player.home)!!, InteriorMode.HOME)
+        repeat(30) { e.frame(1 / 30f) }
+        val r = InteriorRenderer(e)
+        val frame = GpuFrame()
+        val overlay = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        r.draw(Canvas(overlay), w, h, frame)
+        dump("interior_home", frame, overlay, overlay)
+    }
+
     @Test
     fun interior() {
         val e = engine()

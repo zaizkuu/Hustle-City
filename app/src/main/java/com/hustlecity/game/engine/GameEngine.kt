@@ -183,6 +183,7 @@ class GameEngine(context: Context?) {
         ui.toasts.clear()
         lastGroup = -1
         traffic.ensure(settings.carCount, settings.pedCount)
+        traffic.pedRadius = (camera.dist * 1.35f).coerceIn(70f, 161f)
         traffic.update(0f, camera.tx, camera.ty, 220f, -9999f, -9999f, initial = true)
         ui.screen = Screen.GAME
         ui.app = null; ui.panel = null; ui.selected = -1; ui.summary = null; ui.designer = false; ui.phoneOpen = true; ui.ending = null
@@ -212,6 +213,7 @@ class GameEngine(context: Context?) {
         camera.tx = focus.first; camera.ty = focus.second
         camera.yaw = 0f; camera.panX = 0f; camera.panY = 0f; camera.zoom = 70f; camera.dist = 70f
         traffic.ensure(settings.carCount, settings.pedCount)
+        traffic.pedRadius = (camera.dist * 1.35f).coerceIn(70f, 161f)
         traffic.update(0f, camera.tx, camera.ty, 220f, -9999f, -9999f, initial = true)
         hasGame = true
         menuMode = false
@@ -456,6 +458,8 @@ class GameEngine(context: Context?) {
             crowdClock = .5f
             val f = if (hasGame) weather.pedFactor() * crowdAt(camera.tx, camera.ty) else 1f
             traffic.setPedTarget((settings.pedCount * f).toInt(), camera.tx, camera.ty)
+            // people walk where the camera can see them: a tighter ring when zoomed in
+            traffic.pedRadius = (camera.dist * 1.35f).coerceIn(70f, 161f)
             traffic.speedFactor = if (hasGame) weather.carSpeedFactor() else 1f
             traffic.hurry = if (v.rain > .3f || v.snow > .3f) 1.18f else 1f
         }
@@ -507,6 +511,7 @@ class GameEngine(context: Context?) {
         }
         realTime += dt
         updateSky(dt)
+        parkedSpots()
         fpsAcc += dtIn; fpsFrames++
         if (fpsAcc >= .5f) { fps = fpsFrames / fpsAcc; fpsAcc = 0f; fpsFrames = 0 }
         if (crashCooldown > 0) crashCooldown -= dt
@@ -777,6 +782,7 @@ class GameEngine(context: Context?) {
                 city.collide(nx, ny, .45f, tmp)
                 var px = tmp[0]; var py = tmp[1]
                 if (traffic.bump(px, py, .45f, tmp)) { px = tmp[0]; py = tmp[1] }
+                if (city.curb.bump(px, py, .45f, tmp)) { px = tmp[0]; py = tmp[1] }
                 if (cartAllows(px, py) || !cartAllows(p.x, p.y)) { p.x = px; p.y = py }
                 else if (cartWarn <= 0f) { toast("Store carts have to stay in the parking lot", ToastKind.INFO, "hand_truck"); cartWarn = 4f }
                 p.heading = atan2(wx, -wy)
@@ -862,6 +868,7 @@ class GameEngine(context: Context?) {
             val sy = if (k == 0) hy else -hy
             if (city.collide(cx + sx, cy + sy, r, tmp)) { cx += tmp[0] - (cx + sx); cy += tmp[1] - (cy + sy); hit = true }
             if (traffic.bump(cx + sx, cy + sy, r, tmp)) { cx += tmp[0] - (cx + sx); cy += tmp[1] - (cy + sy); hit = true }
+            if (city.curb.nudge(cx + sx, cy + sy, r, tmp)) { cx += tmp[0] - (cx + sx); cy += tmp[1] - (cy + sy) }
         }
         v.x = cx; v.y = cy
         if (hit) {
@@ -902,6 +909,20 @@ class GameEngine(context: Context?) {
         if (abs(carSpeed) > 1.5f) { toast("Stop the car first (hold the brake)", ToastKind.BAD); return false }
         exitVehicle()
         return true
+    }
+
+    private var spotXY = FloatArray(16)
+
+    /** Your parked vehicles take the place of the cars parked at the curb where they stand. */
+    private fun parkedSpots() {
+        val vs = state.vehicles
+        if (spotXY.size < vs.size * 2) spotXY = FloatArray(vs.size * 2 + 8)
+        var n = 0
+        for (v in vs) if (v.id != state.player.driving && !ops.away(v)) { spotXY[n * 2] = v.x; spotXY[n * 2 + 1] = v.y; n++ }
+        val parked = n
+        // the car you drive keeps the spot it's pulling out of until it's clear
+        state.vehicle(state.player.driving)?.let { spotXY[n * 2] = it.x; spotXY[n * 2 + 1] = it.y; n++ }
+        city.curb.hide(spotXY, n, parked)
     }
 
     /**

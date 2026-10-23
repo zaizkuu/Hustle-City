@@ -495,6 +495,9 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
     fun inWater(x: Float, y: Float): Boolean = shore.anyWater(x, y) && !onBridge(x, y)
 
     /** Heading (0 = north) of a car parked at the curb on [side] of [e] (+1 left of a→b), driving with the traffic. */
+    /** Cars parked along the curbs of the ordinary streets. */
+    val curb: Curbside by lazy { Curbside(this) }
+
     fun curbHeading(e: RoadEdge, side: Int): Float {
         val withAB = (side < 0) != leftHand
         return if (withAB) kotlin.math.atan2(e.ux, -e.uy) else kotlin.math.atan2(-e.ux, e.uy)

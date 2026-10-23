@@ -32,6 +32,7 @@ class InteriorRenderer(private val e: GameEngine) {
     private val parts = PartSorter(scene)
     private val stock = StockPainter(scene, parts)
     private val cars = CarPainter(scene)
+    private val decor = InteriorDecor(scene)
     private val px = FloatArray(10); private val py = FloatArray(10); private val pz = FloatArray(10)
 
     companion object {
@@ -46,6 +47,8 @@ class InteriorRenderer(private val e: GameEngine) {
         private val STAFF_RED = c(0xFFC0392B)
         private val LIGHT_WARM = c(0xFFFFE6B0)
         private val LIGHT_COOL = c(0xFFE8F2FF)
+        /** Floor colors laid as wooden boards (see FLOOR_COLORS): oak, walnut and cherry. */
+        private val WOOD_FLOORS = intArrayOf(c(0xFFC08A5B), c(0xFF6B5E55), c(0xFFB5654A))
         /** Sorting offsets: everything beyond the back room wall goes first, then the wall, then the near side. */
         private const val BEYOND = 1e6f
         private const val WALL_KEY = 5e5f
@@ -89,9 +92,11 @@ class InteriorRenderer(private val e: GameEngine) {
         }
         scene.groundPass = true
 
-        // floor (checker tiles)
+        // floor: wooden boards for the wood tones, checker tiles otherwise
         val fa = sc.floorColor
-        val fb = scene.lit(fa, .9f)
+        val wood = fa in WOOD_FLOORS
+        if (gpu != null && wood) scene.material = Mat.WOOD
+        val fb = scene.lit(fa, if (wood) .97f else .9f)
         val room = sc.backRoom
         val backA = scene.lit(BACK_FLOOR, 1f); val backB = scene.lit(BACK_FLOOR, .93f)
         for (y in 0 until sc.d) for (x in 0 until sc.w) {
@@ -99,7 +104,8 @@ class InteriorRenderer(private val e: GameEngine) {
             val col = if (room != null && room.contains(y)) (if (even) backA else backB) else if (even) scene.lit(fa, 1f) else fb
             scene.groundRect(x.toFloat(), y.toFloat(), x + 1f, y + 1f, 0f, col)
         }
-        if (!e.ui.designer) {
+        if (gpu != null) scene.material = Mat.TILE
+        if (!e.ui.designer && !wood) {
             // grout lines between the floor tiles
             val grout = scene.withAlpha(scene.lit(scene.mix(fa, 0xFF000000.toInt(), .45f), 1f), .35f)
             for (x in 1 until sc.w) scene.groundRect(x - .012f, 0f, x + .012f, sc.d.toFloat(), .004f, grout)
@@ -135,12 +141,16 @@ class InteriorRenderer(private val e: GameEngine) {
         val backN = camY > 0; val backS = camY < sc.d; val backW = camX > 0; val backE = camX < sc.w
         val wall = sc.wallColor
         val tall = if (sc.showWalls) WALL_H else .35f
+        // the room dressed for its trade, on stretches of wall nothing stands against
+        decor.plan(sc)
         if (backN) wallN(sc, wall, tall)
         if (backW) wallW(sc, wall, tall)
         if (backE) wallE(sc, wall, tall)
         if (backS) wallS(sc, wall, tall)
 
         scene.material = Mat.PLAIN
+        // only walls seen face on are dressed (one seen edge on would show the tops of its bookcases)
+        if (!e.ui.designer) decor.draw(sc, backN && camY > sc.d * .25f, backW && camX > sc.w * .25f, backE && camX < sc.w * .75f)
         // drawables: items, people, cars (with a back room, whatever is beyond its wall goes first, then the wall)
         dCount = 0
         wallY = room?.depth?.toFloat() ?: -1f
@@ -414,6 +424,7 @@ class InteriorRenderer(private val e: GameEngine) {
         val frame = c(0xFFE9E6DF)
         var x = 1.5f
         while (x + 1.4f < sc.w - .5f) {
+            if (decor.hidesWindow(x - .1f, x + 1.5f)) { x += 3.5f; continue }
             scene.quad(x, .02f, 1.1f, x + 1.4f, .02f, 1.1f, x + 1.4f, .02f, 2.5f, x, .02f, 2.5f, scene.lit(sky, .95f))
             if (day > .3f) {
                 // a few buildings across the street, seen through the glass
@@ -435,7 +446,7 @@ class InteriorRenderer(private val e: GameEngine) {
         }
         // wall lights between the windows
         var lx = 1.5f + 1.4f + 1.05f
-        while (lx < sc.w - 1f) { sconce(lx, 0f, 0f, 1f); lx += 3.5f }
+        while (lx < sc.w - 1f) { if (!decor.hidesWindow(lx - .3f, lx + .3f)) sconce(lx, 0f, 0f, 1f); lx += 3.5f }
         // light switch and outlets
         scene.box(1.0f, 0f, 1.2f, 1.12f, .03f, 1.38f, c(0xFFF5F5F5), c(0xFFF5F5F5))
         var ox = 3.2f
@@ -469,7 +480,7 @@ class InteriorRenderer(private val e: GameEngine) {
         scene.box(0f, 0f, .14f, .025f, sc.d.toFloat(), .92f, wains, wains)
         scene.box(0f, 0f, .92f, .055f, sc.d.toFloat(), .98f, rail, rail)
         var ly = 2.5f
-        while (ly < sc.d - 1.5f) { sconce(0f, ly, 1f, 0f); ly += 4f }
+        while (ly < sc.d - 1.5f) { if (!decor.covers(InteriorDecor.W, ly)) sconce(0f, ly, 1f, 0f); ly += 4f }
         scene.box(0f, 0f, 0f, .05f, sc.d.toFloat(), .14f, trim, trim)
         scene.box(0f, 0f, h - .12f, .04f, sc.d.toFloat(), h, scene.mix(color, 0xFFFFFFFF.toInt(), .3f), scene.mix(color, 0xFFFFFFFF.toInt(), .3f))
     }
@@ -483,7 +494,7 @@ class InteriorRenderer(private val e: GameEngine) {
         scene.box(w - .025f, 0f, .14f, w, sc.d.toFloat(), .92f, wains, wains)
         scene.box(w - .055f, 0f, .92f, w, sc.d.toFloat(), .98f, rail, rail)
         var ly = 2.5f
-        while (ly < sc.d - 1.5f) { sconce(w, ly, -1f, 0f); ly += 4f }
+        while (ly < sc.d - 1.5f) { if (!decor.covers(InteriorDecor.E, ly)) sconce(w, ly, -1f, 0f); ly += 4f }
         scene.box(w - .05f, 0f, 0f, w, sc.d.toFloat(), .14f, trim, trim)
         scene.box(w - .04f, 0f, h - .12f, w, sc.d.toFloat(), h, scene.mix(color, 0xFFFFFFFF.toInt(), .3f), scene.mix(color, 0xFFFFFFFF.toInt(), .3f))
     }

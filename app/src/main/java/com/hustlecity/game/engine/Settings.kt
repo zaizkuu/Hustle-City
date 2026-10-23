@@ -62,7 +62,7 @@ class Settings(context: Context?) {
     var busyRoads = 1f
 
     val carCount get() = ((when (quality) { 0 -> 16; 1 -> 28; else -> 44 }) * busyRoads).toInt()
-    val pedCount get() = ((when (quality) { 0 -> 18; 1 -> 36; else -> 64 }) * crowds).toInt()
+    val pedCount get() = ((when (quality) { 0 -> 26; 1 -> 56; else -> 96 }) * crowds).toInt()
     val shadows get() = quality >= 1
     /** Sun shadow map size for the GPU renderer (0 = no real-time shadows). */
     val shadowMapSize get() = when (quality) { 0 -> 0; 1 -> 1024; else -> 2048 }
