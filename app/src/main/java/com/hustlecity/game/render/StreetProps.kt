@@ -53,6 +53,43 @@ class StreetProps(val city: City) {
         private val WOOD = c(0xFF9C6B43)
         private val CONCRETE = c(0xFFB9B4AA)
         private val NEWS_COLORS = intArrayOf(c(0xFFD63031), c(0xFF0984E3), c(0xFFFDCB6E), c(0xFF00B894))
+        /**
+         * Each kind's plan on the ground in its own frame (x along the street, +y toward the road): x0, y0, x1, y1. A
+         * prop only goes where all of it stands on the pavement, clear of what's already there. Lamps and poles count
+         * their base (their arms reach out over the road); strings hang overhead and take no ground.
+         */
+        private val PLANS = arrayOf(
+            floatArrayOf(-.2f, -.2f, .2f, .2f), // LAMP
+            floatArrayOf(-.25f, -.18f, .25f, .26f), // HYDRANT
+            floatArrayOf(-.34f, -.34f, .34f, .34f), // BIN
+            floatArrayOf(-.87f, -.4f, .87f, .28f), // BENCH
+            floatArrayOf(-2.22f, -.95f, 2.9f, .86f), // BUS_STOP
+            floatArrayOf(-.78f, -.24f, .78f, .25f), // NEWS
+            floatArrayOf(-.29f, -.26f, .29f, .3f), // MAILBOX
+            floatArrayOf(-3.4f, -3.4f, 3.4f, 3.4f), // FOUNTAIN
+            floatArrayOf(-.18f, -.18f, .18f, .18f), // PARK_LAMP
+            floatArrayOf(-1.62f, -.56f, 1.62f, .1f), // BIKE_RACK
+            floatArrayOf(-.56f, -.56f, .56f, .56f), // PLANTER
+            floatArrayOf(-.2f, -.2f, .2f, .2f), // UTIL_POLE
+            floatArrayOf(-1.35f, -.95f, 1f, .56f), // VENDOR
+            floatArrayOf(-1.6f, -.4f, 1.6f, .4f), // VENDING
+            null, null, // LANTERNS, BUNTING
+            floatArrayOf(-.12f, -.12f, .12f, .12f), // HOOP
+        )
+
+        /** Kind [k]'s plan (x0, y0, x1, y1 in its own frame), or null for what hangs overhead. */
+        fun plan(k: Int): FloatArray? = PLANS.getOrNull(k)
+
+        /** How far out from a building's front its doorway (and the steps up to it) needs keeping clear. */
+        const val DOORWAY = 1.7f
+
+        private var shared: StreetProps? = null
+
+        /** The city's street furniture, placed once and shared (it also fills in the city's [City.pavement]). */
+        fun of(city: City): StreetProps = synchronized(this) {
+            shared?.takeIf { it.city === city } ?: StreetProps(city).also { shared = it; city.pavement = it.pavement }
+        }
+
         /** Model of each kind of prop (by kind), where it has one. */
         private val MODEL_IDS = arrayOf("lamp", "hydrant", "bin", "bench", "bus_stop", "news", "mailbox", null, "park_lamp", "bike_rack", "planter")
         private val VENDING_BODIES = intArrayOf(c(0xFFF2F2F0), c(0xFFD32F2F), c(0xFF1E5BC6), c(0xFFF2F2F0), c(0xFF2E9E4F), c(0xFFF2F2F0))
@@ -100,6 +137,60 @@ class StreetProps(val city: City) {
     private val treeGrid: Array<IntArray>
 
     private var seed = 1234567
+
+    /** Everything placed on the pavement so far, and the trees, signal poles and stoops that were there first. */
+    val pavement = com.hustlecity.game.world.Pavement(city.bounds)
+
+    private val nearBuildings = ArrayList<Building>()
+
+    /**
+     * Whether a prop of kind [k] fits at (px, py) facing (dx, dy): all of its plan on the pavement, off the road and out
+     * of buildings and their doorways, and clear of everything on the pavement already.
+     */
+    private fun fits(px: Float, py: Float, k: Int, dx: Float, dy: Float): Boolean {
+        val p = PLANS.getOrNull(k) ?: return true
+        // local x along the street is (dy, -dx); local y, toward the road, is (dx, dy)
+        val ax = dy; val ay = -dx
+        val mx = (p[0] + p[2]) * .5f; val my = (p[1] + p[3]) * .5f
+        val cx = px + ax * mx + dx * my; val cy = py + ay * mx + dy * my
+        val hu = (p[2] - p[0]) * .5f; val hv = (p[3] - p[1]) * .5f
+        if (pavement.overlaps(cx, cy, ax, ay, hu, hv, .12f)) return false
+        val reach = hu + hv + 1f
+        nearBuildings.clear()
+        city.forBuildingsIn(cx - reach - 3f, cy - reach - 3f, cx + reach + 3f, cy + reach + 3f) { b -> if (b.solid) nearBuildings += b }
+        val g = city.roads
+        val nu = max(1, (hu / .2f).toInt()); val nv = max(1, (hv / .2f).toInt())
+        for (i in -nu..nu) for (j in -nv..nv) {
+            val a = (hu - .03f) * i / nu; val b = (hv - .03f) * j / nv
+            val qx = cx + ax * a + dx * b; val qy = cy + ay * a + dy * b
+            if (g.onAsphalt(qx, qy)) return false
+            // where the shore cuts into the pavement there's nothing to stand on
+            if ((i == -nu || i == 0 || i == nu) && (j == -nv || j == 0 || j == nv) && city.inWater(qx, qy)) return false
+            for (bd in nearBuildings) {
+                if (bd.contains(qx, qy)) return false
+                val lx = bd.lx(qx, qy); val ly = bd.ly(qx, qy)
+                if (lx > bd.w * .5f - 1.3f && lx < bd.w * .5f + 1.3f && ly > bd.d - .1f && ly < bd.d + DOORWAY) return false
+            }
+        }
+        return true
+    }
+
+    /** Records prop [i] on the pavement. */
+    private fun occupy(i: Int) {
+        val p = PLANS.getOrNull(kind[i]) ?: return
+        val dx = dirX[i]; val dy = dirY[i]
+        val ax = dy; val ay = -dx
+        val mx = (p[0] + p[2]) * .5f; val my = (p[1] + p[3]) * .5f
+        pavement.add(x[i] + ax * mx + dx * my, y[i] + ay * mx + dy * my, ax, ay, (p[2] - p[0]) * .5f, (p[3] - p[1]) * .5f, com.hustlecity.game.world.Pavement.PROP)
+    }
+
+    /** Adds prop [k] at (px, py) facing (dx, dy) if it fits there (see [fits]): its index, or -1. */
+    private fun place(px: Float, py: Float, k: Int, dx: Float, dy: Float): Int {
+        if (!fits(px, py, k, dx, dy)) return -1
+        val i = add(px, py, k, dx, dy)
+        occupy(i)
+        return i
+    }
 
     private fun rand(): Float {
         seed = seed * 1103515245 + 12345
@@ -204,6 +295,9 @@ class StreetProps(val city: City) {
         val i = add(cx + nx * (a - b) * .5f, cy + ny * (a - b) * .5f, k, -nx, -ny)
         aux[i] = a + b
         link[i] = poles
+        // the poles of its own it's tied to stand on the pavement
+        if (poles and 1 != 0) pavement.add(cx + nx * back, cy + ny * back, 1f, 0f, .15f, .15f, com.hustlecity.game.world.Pavement.POLE)
+        if (poles and 2 != 0) pavement.add(cx - nx * back, cy - ny * back, 1f, 0f, .15f, .15f, com.hustlecity.game.world.Pavement.POLE)
     }
 
     /**
@@ -255,6 +349,27 @@ class StreetProps(val city: City) {
         for ((i, t) in city.trees.withIndex()) tLists[cellOf(t.y, gy0, gRows) * gCols + cellOf(t.x, gx0, gCols)] += i
         treeGrid = Array(tLists.size) { tLists[it].toIntArray() }
         val g = city.roads
+        // what stands on the pavement before any furniture: park paths clear their trees, then the trees' trunks,
+        // the signal poles on the corners (a tree growing right where one stands makes way) and the brownstones' stoops
+        for (park in city.parks) if (park.kind == Park.GREEN) clearPaths(park)
+        val pole = FloatArray(2)
+        for (n in g.nodes) {
+            if (!n.signal) continue
+            for (id in n.edges) {
+                val ed = g.edges[id]
+                if (ed.under) continue
+                g.signalPole(n, ed, city.leftHand, pole)
+                if (g.onAsphalt(pole[0], pole[1]) || city.inWater(pole[0], pole[1])) continue
+                pavement.add(pole[0], pole[1], 1f, 0f, .2f, .2f, com.hustlecity.game.world.Pavement.POLE)
+                for ((ti, t) in city.trees.withIndex()) if (abs(t.x - pole[0]) < .9f && abs(t.y - pole[1]) < .9f) hiddenTree[ti] = true
+            }
+        }
+        for ((ti, t) in city.trees.withIndex()) if (!hiddenTree[ti]) pavement.add(t.x, t.y, 1f, 0f, .35f, .35f, com.hustlecity.game.world.Pavement.TREE)
+        for (b in city.buildings) {
+            if (!b.solid || Styles.of(city, b) != Arch.BROWNSTONE) continue
+            // the stoop: 2.2 m wide, 2.6 m out from the door in the middle of the front
+            pavement.add(b.wx(b.w * .5f, b.d + 1.33f), b.wy(b.w * .5f, b.d + 1.33f), b.cs, b.sn, 1.25f, 1.33f, com.hustlecity.game.world.Pavement.STOOP)
+        }
         val manila = city.mapId == com.hustlecity.game.world.Maps.MANILA
         val tokyo = city.mapId == com.hustlecity.game.world.Maps.TOKYO
         val seoul = city.mapId == com.hustlecity.game.world.Maps.SEOUL
@@ -271,7 +386,7 @@ class StreetProps(val city: City) {
                     val px = e.ax + e.ux * s + nx * off; val py = e.ay + e.uy * s + ny * off
                     if (city.shore.anyWater(px, py) || city.parks.any { Geo.inside(px, py, it.poly) } || city.reserved(px, py)) return -1
                     if (!clearSpot(px, py, e.ux, e.uy, nx, ny, k)) return -1
-                    return add(px, py, k, -nx, -ny)
+                    return place(px, py, k, -nx, -ny)
                 }
                 val hood = city.neighborhoodAt(e.ax + e.ux * (s0 + s1) * .5f + nx * 12f, e.ay + e.uy * (s0 + s1) * .5f + ny * 12f)
                 val busy = hood.traffic > .3f
@@ -344,7 +459,7 @@ class StreetProps(val city: City) {
                 // a hydrant on each side of a block
                 at(if (rand() < .5f) s0 + 6.5f else s1 - 6.5f, curb, HYDRANT)
                 // a bus shelter mid-block on the big roads
-                if (major && s1 - s0 > 50f && rand() < .45f) at((s0 + s1) * .5f, curb + .2f, BUS_STOP)
+                if (major && s1 - s0 > 50f && rand() < .45f) at((s0 + s1) * .5f, curb + .35f, BUS_STOP)
                 // benches, bike racks and planters where it's busy
                 val n = ((s1 - s0) / 60f).toInt().coerceAtLeast(1)
                 repeat(n) {
@@ -385,21 +500,35 @@ class StreetProps(val city: City) {
         grid = Array(lists.size) { lists[it].toIntArray() }
     }
 
+    /** Whether a park gets a fountain where its paths cross. */
+    private fun hasFountain(p: Park): Boolean {
+        if (Geo.area(p.poly) < 2500f) return false
+        val (cx, cy) = p.centre
+        return Geo.inside(cx, cy, p.poly) && !city.shore.anyWater(cx, cy) && !city.reserved(cx, cy) && !city.roads.nearAsphalt(cx, cy, 3.6f)
+    }
+
+    /** Trees make way for a park's paths and its fountain (before anything is placed around them). */
+    private fun clearPaths(p: Park) {
+        if (Geo.area(p.poly) < 2500f) return
+        val (cx, cy) = p.centre
+        if (hasFountain(p)) for ((i, t) in city.trees.withIndex()) if (abs(t.x - cx) < 8f && abs(t.y - cy) < 8f) hiddenTree[i] = true
+        for (path in p.paths) {
+            val ax = path[0]; val ay = path[1]; val bx = path[2]; val by = path[3]
+            if (dist(ax, ay, bx, by) < 10f) continue
+            for ((i, t) in city.trees.withIndex()) if (Geo.distToSeg(t.x, t.y, ax, ay, bx, by) < 2.8f) hiddenTree[i] = true
+        }
+    }
+
     /** A fountain where the park's paths cross, lamps and benches along them, and bins at the edges. */
     private fun park(p: Park) {
         if (Geo.area(p.poly) < 2500f) return
         val (cx, cy) = p.centre
-        if (Geo.inside(cx, cy, p.poly) && !city.shore.anyWater(cx, cy) && !city.reserved(cx, cy)) {
-            add(cx, cy, FOUNTAIN, 0f, 1f)
-            for ((i, t) in city.trees.withIndex()) if (abs(t.x - cx) < 8f && abs(t.y - cy) < 8f) hiddenTree[i] = true
-        }
+        if (hasFountain(p)) occupy(add(cx, cy, FOUNTAIN, 0f, 1f))
         for (path in p.paths) {
             val ax = path[0]; val ay = path[1]; val bx = path[2]; val by = path[3]
             val len = dist(ax, ay, bx, by)
             if (len < 10f) continue
             val ux = (bx - ax) / len; val uy = (by - ay) / len
-            // trees stay off the path
-            for ((i, t) in city.trees.withIndex()) if (Geo.distToSeg(t.x, t.y, ax, ay, bx, by) < 2.8f) hiddenTree[i] = true
             var s = 6f; var k = 0
             while (s < len - 4f) {
                 val px = ax + ux * s; val py = ay + uy * s
@@ -416,7 +545,7 @@ class StreetProps(val city: City) {
 
     /** Park furniture where a road cuts through the park stays on the grass side of the kerb. */
     private fun offRoad(px: Float, py: Float, k: Int, dx: Float, dy: Float) {
-        if (!city.roads.nearAsphalt(px, py, 1.2f)) add(px, py, k, dx, dy)
+        if (!city.roads.nearAsphalt(px, py, 1.2f)) place(px, py, k, dx, dy)
     }
 
     // ------------------------------------------------------------------ painting

@@ -78,7 +78,7 @@ class WorldRenderer(private val e: GameEngine) {
     private val PROP_MODEL_DIST = 110f
     private var propsCache: StreetProps? = null
     private val props: StreetProps
-        get() = propsCache?.takeIf { it.city === e.city } ?: StreetProps(e.city).also { propsCache = it }
+        get() = propsCache?.takeIf { it.city === e.city } ?: StreetProps.of(e.city).also { propsCache = it }
     private var featCache: CityFeatures? = null
     /** Landmarks, elevated railways, bridges, quays and city walls. */
     private val features: CityFeatures
@@ -906,6 +906,8 @@ class WorldRenderer(private val e: GameEngine) {
         return n
     }
 
+    private val sigTmp = FloatArray(2)
+
     /** Each signalled junction approach in view: (node, edge, x, y) of the pole on its corner. */
     private inline fun forSignals(block: (com.hustlecity.game.world.RoadNode, com.hustlecity.game.world.RoadEdge, Float, Float) -> Unit) {
         val g = e.city.roads
@@ -914,13 +916,9 @@ class WorldRenderer(private val e: GameEngine) {
             for (id in n.edges) {
                 val ed = g.edges[id]
                 if (ed.under) continue
-                val clear = if (ed.a == n.id) ed.clearA else ed.clearB
                 // the approach comes toward the node; its pole stands on the near-side corner past the curb
-                val dx = if (ed.a == n.id) ed.ux else -ed.ux; val dy = if (ed.a == n.id) ed.uy else -ed.uy
-                val side = if (e.city.leftHand) -1f else 1f
-                val off = ed.cls.halfWidth + 1.4f
-                // right of someone driving toward the node (direction -d) is (dy, -dx) in a y-down world
-                val px = n.x + dx * (clear + 1f) + dy * off * side; val py = n.y + dy * (clear + 1f) - dx * off * side
+                g.signalPole(n, ed, e.city.leftHand, sigTmp)
+                val px = sigTmp[0]; val py = sigTmp[1]
                 // where junctions crowd together a short link's corner can fall in the middle of the road: no pole there
                 if (poleOnRoad(n, id, px, py)) continue
                 block(n, ed, px, py)
@@ -935,7 +933,7 @@ class WorldRenderer(private val e: GameEngine) {
     private fun poleOnRoad(n: com.hustlecity.game.world.RoadNode, edgeId: Int, x: Float, y: Float): Boolean {
         if (poleCity !== e.city) { poleCheck.clear(); poleCity = e.city }
         val key = n.id * 16 + n.edges.indexOf(edgeId).coerceIn(0, 15)
-        val v = poleCheck.getOrPut(key) { if (e.city.roads.onAsphalt(x, y)) 1 else 2 }
+        val v = poleCheck.getOrPut(key) { if (e.city.roads.onAsphalt(x, y) || e.city.inWater(x, y)) 1 else 2 }
         return v == 1
     }
 
@@ -1452,12 +1450,10 @@ class WorldRenderer(private val e: GameEngine) {
         val g = e.city.roads
         val n = g.nodes.getOrNull(code shr 4) ?: return
         val ed = g.edges.getOrNull(n.edges.getOrElse(code and 15) { -1 }) ?: return
-        val clear = if (ed.a == n.id) ed.clearA else ed.clearB
         val dx = if (ed.a == n.id) ed.ux else -ed.ux; val dy = if (ed.a == n.id) ed.uy else -ed.uy
         val side = if (e.city.leftHand) -1f else 1f
-        val off = ed.cls.halfWidth + 1.4f
-        val x = n.x + dx * (clear + 1f) + dy * off * side
-        val y = n.y + dy * (clear + 1f) - dx * off * side
+        g.signalPole(n, ed, e.city.leftHand, sigTmp)
+        val x = sigTmp[0]; val y = sigTmp[1]
         // modelled when the cache was built near enough (see collectDrawables): measured from where its camera was
         val model = if (poleOnly || dist(x, y, sCamX, sCamY) < PROP_MODEL_DIST) signalModel() else null
         if (model != null) {

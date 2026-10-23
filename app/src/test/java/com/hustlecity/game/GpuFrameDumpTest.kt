@@ -140,6 +140,41 @@ class GpuFrameDumpTest {
         city("props_night", e)
     }
 
+    /**
+     * A sweep for glitches: street-level views all over each city (junctions, bus stops, shopping streets, parks), by day
+     * and a few by night, with the crowds out. Runs with HC_SWEEP=1; frames go to build/glframes/sweep_<city>_<n>.
+     */
+    @Test
+    fun sweep() {
+        if (System.getenv("HC_SWEEP") != "1") return
+        for (map in com.hustlecity.game.world.Maps.all) {
+            val e0 = engine(map.id)
+            val pr = com.hustlecity.game.render.StreetProps.of(e0.city)
+            val rnd = java.util.Random(map.id.hashCode().toLong())
+            val spots = ArrayList<Pair<Float, Float>>()
+            val signals = e0.city.roads.nodes.filter { it.signal }
+            repeat(3) { val n = signals[rnd.nextInt(signals.size)]; spots += n.x to n.y }
+            for (k in listOf(com.hustlecity.game.render.StreetProps.BUS_STOP, com.hustlecity.game.render.StreetProps.BENCH, com.hustlecity.game.render.StreetProps.NEWS,
+                com.hustlecity.game.render.StreetProps.BIKE_RACK, com.hustlecity.game.render.StreetProps.VENDOR, com.hustlecity.game.render.StreetProps.VENDING,
+                com.hustlecity.game.render.StreetProps.FOUNTAIN)) {
+                val all = (0 until pr.count).filter { pr.kind[it] == k }
+                if (all.isNotEmpty()) { val i = all[rnd.nextInt(all.size)]; spots += pr.x[i] to pr.y[i] }
+            }
+            for ((n, spot) in spots.withIndex()) {
+                val e = engine(map.id)
+                e.settings.quality = 2; e.settings.crowds = 3f
+                e.traffic.ensure(e.settings.carCount, e.settings.pedCount)
+                e.state.player.x = spot.first; e.state.player.y = spot.second
+                e.camera.tx = spot.first; e.camera.ty = spot.second
+                e.camera.zoom = 38f; e.camera.dist = 38f; e.camera.yaw = rnd.nextFloat() * 6.28f
+                e.state.minute = (if (n % 4 == 3) 21L else 14L) * 60
+                e.traffic.update(0f, spot.first, spot.second, 230f, -9999f, -9999f, initial = true)
+                e.traffic.scatter(spot.first, spot.second, 60f, .65f)
+                city("sweep_${map.id}_$n", e)
+            }
+        }
+    }
+
     @Test
     fun streetDay() { val e = engine(); e.state.minute = 13L * 60; e.camera.zoom = 60f; e.camera.dist = 60f; city("street_day", e) }
 

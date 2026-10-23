@@ -170,6 +170,19 @@ class RoadGraph(val nodes: List<RoadNode>, val edges: List<RoadEdge>) {
         return on
     }
 
+    /**
+     * Where the signal pole of approach [ed] at junction [n] stands, into [out] (x, y): on the near-side corner past
+     * the curb, to the right of someone driving toward the junction (left where traffic keeps left).
+     */
+    fun signalPole(n: RoadNode, ed: RoadEdge, leftHand: Boolean, out: FloatArray) {
+        val clear = if (ed.a == n.id) ed.clearA else ed.clearB
+        val dx = if (ed.a == n.id) ed.ux else -ed.ux; val dy = if (ed.a == n.id) ed.uy else -ed.uy
+        val side = if (leftHand) -1f else 1f
+        val off = ed.cls.halfWidth + 1.4f
+        // right of someone driving toward the node (direction -d) is (dy, -dx) in a y-down world
+        out[0] = n.x + dx * (clear + 1f) + dy * off * side; out[1] = n.y + dy * (clear + 1f) - dx * off * side
+    }
+
     /** True when (x, y) is on a road's asphalt (not the sidewalk). */
     fun onAsphalt(x: Float, y: Float): Boolean {
         var on = false

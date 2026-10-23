@@ -498,6 +498,9 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
     /** Cars parked along the curbs of the ordinary streets. */
     val curb: Curbside by lazy { Curbside(this) }
 
+    /** What stands on the pavement (street furniture, trees, signal poles, stoops), once the street furniture is placed. */
+    @Volatile var pavement: Pavement? = null
+
     fun curbHeading(e: RoadEdge, side: Int): Float {
         val withAB = (side < 0) != leftHand
         return if (withAB) kotlin.math.atan2(e.ux, -e.uy) else kotlin.math.atan2(-e.ux, e.uy)

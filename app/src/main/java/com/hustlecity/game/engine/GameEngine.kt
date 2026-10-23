@@ -150,6 +150,8 @@ class GameEngine(context: Context?) {
                 slot: Int = saves.freeSlot() ?: saves.slot) {
         saves.slot = slot
         city = City(seed, mapId)
+        // the street furniture goes down first: people on the sidewalks walk round it
+        com.hustlecity.game.render.StreetProps.of(city)
         traffic.attach(city)
         val s = GameState(seed = seed, minute = 8L * 60, mapId = city.mapId)
         s.player = PlayerState(name = name.ifBlank { "Alex" }, skin = skin, shirt = shirt, money = rules.startMoney, difficulty = difficulty, rules = rules)
@@ -200,6 +202,8 @@ class GameEngine(context: Context?) {
         val s = saves.load(slot) ?: return false
         state = s
         city = City(s.seed, s.mapId)
+        // the street furniture goes down first: people on the sidewalks walk round it
+        com.hustlecity.game.render.StreetProps.of(city)
         traffic.attach(city)
         rnd = Random(System.nanoTime())
         economy.rivals.migrate()
@@ -235,6 +239,8 @@ class GameEngine(context: Context?) {
     fun prepareMenuBackground() {
         if (hasGame || menuMode) return
         city = City(1337L, Maps.NYC)
+        // the street furniture goes down first: people on the sidewalks walk round it
+        com.hustlecity.game.render.StreetProps.of(city)
         traffic.attach(city)
         state = GameState(seed = 1337L, minute = 18L * 60 + 40, mapId = city.mapId)
         // the tallest office tower makes a good backdrop

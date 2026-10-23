@@ -5,6 +5,7 @@ import com.hustlecity.game.data.Catalog
 import com.hustlecity.game.data.StockLayouts
 import com.hustlecity.game.data.StockShape
 import com.hustlecity.game.render.Models
+import com.hustlecity.game.render.StreetProps
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -112,6 +113,20 @@ class ModelsTest {
         }
         // the newspaper boxes come in the four color orders the box version uses
         assertEquals(4, Models.prop("news")!!.size)
+        // every look stays within the ground plan street furniture is placed by
+        val kinds = mapOf("lamp" to StreetProps.LAMP, "hydrant" to StreetProps.HYDRANT, "bin" to StreetProps.BIN, "bench" to StreetProps.BENCH,
+            "bus_stop" to StreetProps.BUS_STOP, "news" to StreetProps.NEWS, "mailbox" to StreetProps.MAILBOX, "park_lamp" to StreetProps.PARK_LAMP,
+            "bike_rack" to StreetProps.BIKE_RACK, "planter" to StreetProps.PLANTER)
+        for ((id, k) in kinds) {
+            val plan = StreetProps.plan(k)!!
+            val base = id == "lamp" || id == "park_lamp"
+            for (m in Models.prop(id)!!) {
+                val b = m.bounds
+                // a lamp's plan is its base: only its foot has to fit (the arm reaches out over the road)
+                if (base) continue
+                assertTrue("$id fits its plan ${plan.toList()}: ${b.toList()}", b[0] >= plan[0] - .01f && b[1] >= plan[1] - .01f && b[3] <= plan[2] + .01f && b[4] <= plan[3] + .01f)
+            }
+        }
     }
 
     @Test

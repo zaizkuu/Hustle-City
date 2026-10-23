@@ -33,9 +33,6 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
     private val scene get() = r.scene
     private val proj get() = r.proj
 
-    private var styles: Array<Arch> = emptyArray()
-    private var styleCity: City? = null
-
     private val px = FloatArray(16); private val py = FloatArray(16); private val pz = FloatArray(16)
 
     companion object {
@@ -61,101 +58,9 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         private val SIGN_DAY = intArrayOf(c(0xFFD23C6E), c(0xFF2F80ED), c(0xFFF2C94C), c(0xFF27AE60), c(0xFFE0E0E0), c(0xFFEB5757))
     }
 
-    fun hash(a: Int, b: Int, c: Int): Int {
-        var h = a * 73856093 xor b * 19349663 xor c * 83492791
-        h = h xor (h ushr 13)
-        return h and 0x7fffffff
-    }
+    fun hash(a: Int, b: Int, c: Int): Int = Styles.hash(a, b, c)
 
-    fun style(b: Building): Arch {
-        if (styleCity !== e.city) {
-            styleCity = e.city
-            styles = Array(e.city.buildings.size) { pick(e.city.buildings[it]) }
-        }
-        return styles.getOrElse(b.id) { Arch.MODERN }
-    }
-
-    private fun pick(b: Building): Arch {
-        val h = hash(b.id, 7, 11) % 100
-        if (e.city.mapId == Maps.CLASSIC) return classicPick(b, h)
-        if (b.kind == BKind.WAREHOUSE) return Arch.INDUSTRIAL
-        val office = officePick(b, h)
-        val tall = b.height > 34f
-        return when (b.hood.look) {
-            Look.NY_TOWNHOUSE -> when (b.kind) {
-                BKind.OFFICE -> office
-                BKind.RESIDENTIAL -> when { b.height < 20f && h < 60 -> Arch.BROWNSTONE; tall -> if (h < 50) Arch.MODERN else Arch.DECO; h < 80 -> Arch.WALKUP; else -> Arch.MODERN }
-                BKind.RETAIL -> when { b.height < 11f -> Arch.SHOP; h < 65 -> Arch.WALKUP; h < 85 -> Arch.MODERN; else -> Arch.CLASSIC }
-                else -> Arch.CLASSIC
-            }
-            Look.NY_DOWNTOWN -> when (b.kind) {
-                BKind.OFFICE -> office
-                BKind.RESIDENTIAL -> when { tall -> if (h < 40) Arch.DECO else if (h < 75) Arch.GLASS else Arch.MODERN; h < 60 -> Arch.WALKUP; else -> Arch.CLASSIC }
-                BKind.RETAIL -> when { b.height < 11f -> Arch.SHOP; h < 50 -> Arch.CLASSIC; h < 80 -> Arch.WALKUP; else -> Arch.DECO }
-                else -> Arch.CLASSIC
-            }
-            Look.CBD -> when (b.kind) {
-                BKind.OFFICE -> if (b.height > 30f) (if (h < 70) Arch.GLASS else Arch.MODERN) else (if (h < 55) Arch.MODERN else Arch.GLASS)
-                BKind.RESIDENTIAL -> if (h < 60) Arch.MODERN else Arch.GLASS
-                BKind.RETAIL -> if (b.height < 11f) Arch.SHOP else Arch.MODERN
-                else -> Arch.MODERN
-            }
-            Look.COLONIAL -> when {
-                b.kind == BKind.OFFICE -> if (h < 60) Arch.CLASSIC else Arch.COLONIAL
-                b.height <= 16f -> Arch.COLONIAL
-                else -> if (h < 50) Arch.CLASSIC else Arch.TROPICAL
-            }
-            Look.TROPICAL -> when {
-                b.kind == BKind.OFFICE -> if (b.height > 24f) Arch.GLASS else Arch.MODERN
-                b.height <= 20f -> Arch.TROPICAL
-                else -> if (h < 70) Arch.MODERN else Arch.GLASS
-            }
-            Look.DENSE_ASIA -> when {
-                b.kind == BKind.OFFICE && b.height > 30f -> if (h < 60) Arch.GLASS else Arch.MODERN
-                b.height > 44f -> Arch.MODERN
-                else -> Arch.PENCIL
-            }
-            Look.HANOK -> if (b.height <= 9f && b.kind != BKind.OFFICE) Arch.HANOK else Arch.PENCIL
-            Look.INDUSTRIAL -> when {
-                b.kind == BKind.OFFICE -> Arch.MODERN
-                b.kind == BKind.RETAIL && h < 30 -> Arch.INDUSTRIAL
-                else -> regionalLowRise()
-            }
-        }
-    }
-
-    /** Everyday low-rise of the city: walk-ups in New York, tin-roofed concrete in Manila, pencil buildings in Tokyo and Seoul. */
-    private fun regionalLowRise(): Arch = when (e.city.mapId) {
-        "manila" -> Arch.TROPICAL
-        "tokyo", "seoul" -> Arch.PENCIL
-        else -> Arch.WALKUP
-    }
-
-    private fun officePick(b: Building, h: Int): Arch = when {
-        b.height > 46f -> if (h < 45) Arch.DECO else Arch.GLASS
-        b.height > 28f -> if (h < 40) Arch.GLASS else if (h < 75) Arch.CLASSIC else Arch.DECO
-        else -> if (h < 55) Arch.CLASSIC else Arch.MODERN
-    }
-
-    /** The original city's styles, keyed to its neighborhoods. */
-    private fun classicPick(b: Building, h: Int): Arch = when (b.kind) {
-        BKind.WAREHOUSE -> Arch.INDUSTRIAL
-        BKind.OFFICE -> officePick(b, h)
-        BKind.RESIDENTIAL -> when {
-            b.height < 20f && (b.neighborhood == 5 || b.neighborhood == 0) && h < 55 -> Arch.BROWNSTONE
-            b.height > 34f -> if (h < 50) Arch.MODERN else Arch.DECO
-            b.neighborhood == 3 || b.neighborhood == 4 -> if (h < 45) Arch.MODERN else Arch.WALKUP
-            else -> if (h < 80) Arch.WALKUP else Arch.MODERN
-        }
-        BKind.RETAIL -> when {
-            b.height < 11f -> Arch.SHOP
-            b.neighborhood == 2 -> Arch.INDUSTRIAL
-            h < 55 -> Arch.WALKUP
-            h < 80 -> Arch.MODERN
-            else -> Arch.CLASSIC
-        }
-        else -> Arch.CLASSIC
-    }
+    fun style(b: Building): Arch = Styles.of(e.city, b)
 
     /** Pitched roofs: Spanish tile, hanok and the tin roofs of low tropical houses. */
     private fun pitched(b: Building, st: Arch) = st == Arch.COLONIAL || st == Arch.HANOK || (st == Arch.TROPICAL && b.height < 10f)
@@ -944,38 +849,55 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
     }
 
     private fun sidewalkProps(b: Building, face: Int, len: Float, typeId: String?, brand: Int) {
-        // positions just outside the shop window, on the sidewalk
+        // positions just outside the shop window, close to it so the sidewalk stays clear for people walking by
         fun at(u: Float, out: Float): Pair<Float, Float> = when (face) {
             0 -> (b.w - u) to (0f - out)
             1 -> (u) to (b.d + out)
             2 -> (0f - out) to (u)
             else -> (b.w + out) to (b.d - u)
         }
+        // half extents of something [along] the front and [deep] out from it, in the building's own x and y
+        val alongX = face == 0 || face == 1
+        fun hx(along: Float, deep: Float) = if (alongX) along else deep
+        fun hy(along: Float, deep: Float) = if (alongX) deep else along
+        // whatever already stands there on the pavement (a lamp, a bench, a tree) keeps its spot
+        val pv = e.city.pavement
+        fun free(x: Float, y: Float, along: Float, deep: Float): Boolean =
+            pv == null || !pv.overlaps(b.wx(x, y), b.wy(x, y), b.cs, b.sn, hx(along, deep), hy(along, deep), .1f)
         when (typeId) {
             "coffee", "fastfood" -> for (k in 0..1) {
-                val (x, y) = at(if (k == 0) 2.2f else len - 2.2f, 2.3f)
-                scene.cylinderLike(x, y, .45f, .72f, .78f, c(0xFFE0E0E0))
+                val (x, y) = at(if (k == 0) 2.2f else len - 2.2f, .8f)
+                if (!free(x, y, .85f, .45f)) continue
+                scene.cylinderLike(x, y, .4f, .72f, .78f, c(0xFFE0E0E0))
                 scene.box(x - .04f, y - .04f, 0f, x + .04f, y + .04f, .72f, IRON, IRON)
-                // umbrella
-                scene.box(x - .03f, y - .03f, .78f, x + .03f, y + .03f, 2.3f, c(0xFFE0E0E0), c(0xFFE0E0E0))
-                cone(x, y, 1.3f, 2f, 2.5f, 8, brand)
-                for (s in intArrayOf(-1, 1)) scene.box(x + s * .7f - .2f, y - .2f, 0f, x + s * .7f + .2f, y + .2f, .45f, c(0xFF3A3D42), c(0xFF3A3D42))
+                // a small umbrella, clear of the shop's awning above
+                scene.box(x - .03f, y - .03f, .78f, x + .03f, y + .03f, 2.05f, c(0xFFE0E0E0), c(0xFFE0E0E0))
+                cone(x, y, .75f, 1.85f, 2.3f, 8, brand)
+                // a chair either side, along the front
+                for (sd in intArrayOf(-1, 1)) {
+                    val cx = x + (if (alongX) sd * .62f else 0f); val cy = y + (if (alongX) 0f else sd * .62f)
+                    scene.box(cx - .19f, cy - .19f, 0f, cx + .19f, cy + .19f, .45f, c(0xFF3A3D42), c(0xFF3A3D42))
+                }
             }
             "florist" -> for (k in 0 until 4) {
-                val (x, y) = at(1.2f + k * .9f, 1.2f)
+                val (x, y) = at(1.2f + k * .9f, .55f)
+                if (!free(x, y, .3f, .3f)) continue
                 scene.box(x - .3f, y - .3f, 0f, x + .3f, y + .3f, .45f, c(0xFF9AA3AD), c(0xFF8C939B))
                 scene.blob(x, y, .7f, .38f, scene.lit(AD_COLORS[(k + b.id) % AD_COLORS.size], 1f), 7)
             }
             "produce" -> for (k in 0 until 3) {
-                val (x, y) = at(1.4f + k * 1.3f, 1.3f)
-                scene.box(x - .55f, y - .4f, 0f, x + .55f, y + .4f, .7f, c(0xFFB07A52), c(0xFF8B5A3C))
-                scene.box(x - .5f, y - .35f, .7f, x + .5f, y + .35f, .82f, intArrayOf(c(0xFFEB5757), c(0xFFF2C94C), c(0xFF27AE60))[k], intArrayOf(c(0xFFEB5757), c(0xFFF2C94C), c(0xFF27AE60))[k])
+                val (x, y) = at(1.4f + k * 1.3f, .6f)
+                if (!free(x, y, .55f, .4f)) continue
+                val ax = hx(.55f, .4f); val ay = hy(.55f, .4f)
+                val col = intArrayOf(c(0xFFEB5757), c(0xFFF2C94C), c(0xFF27AE60))[k]
+                scene.box(x - ax, y - ay, 0f, x + ax, y + ay, .7f, c(0xFFB07A52), c(0xFF8B5A3C))
+                scene.box(x - ax + .05f, y - ay + .05f, .7f, x + ax - .05f, y + ay - .05f, .82f, col, col)
             }
             null -> {}
             else -> {
                 // A-frame sandwich board
-                val (x, y) = at(len - 1.6f, 1.5f)
-                scene.box(x - .3f, y - .12f, 0f, x + .3f, y + .12f, .9f, brand, c(0xFF2C2F33))
+                val (x, y) = at(len - 1.6f, .7f)
+                if (free(x, y, .3f, .14f)) scene.box(x - hx(.3f, .12f), y - hy(.3f, .12f), 0f, x + hx(.3f, .12f), y + hy(.3f, .12f), .9f, brand, c(0xFF2C2F33))
             }
         }
     }
@@ -1475,3 +1397,111 @@ fun Scene3D.cylinderLike(x: Float, y: Float, rad: Float, z0: Float, z1: Float, c
 
 @Suppress("unused")
 private fun lenOf(a: Float, b: Float) = sqrt(a * a + b * b)
+
+/**
+ * Which architectural style each building is drawn in: from its kind, its neighborhood's look and a stable hash. Kept
+ * apart from the painter so the street furniture can plan around what the buildings put on the pavement (stoops).
+ */
+object Styles {
+    private var city: City? = null
+    private var styles: Array<Arch> = emptyArray()
+
+    fun hash(a: Int, b: Int, c: Int): Int {
+        var h = a * 73856093 xor b * 19349663 xor c * 83492791
+        h = h xor (h ushr 13)
+        return h and 0x7fffffff
+    }
+
+    fun of(c: City, b: Building): Arch {
+        synchronized(this) {
+            if (city !== c) {
+                city = c
+                styles = Array(c.buildings.size) { pick(c, c.buildings[it]) }
+            }
+            return styles.getOrElse(b.id) { Arch.MODERN }
+        }
+    }
+
+    private fun pick(city: City, b: Building): Arch {
+        val h = hash(b.id, 7, 11) % 100
+        if (city.mapId == Maps.CLASSIC) return classicPick(b, h)
+        if (b.kind == BKind.WAREHOUSE) return Arch.INDUSTRIAL
+        val office = officePick(b, h)
+        val tall = b.height > 34f
+        return when (b.hood.look) {
+            Look.NY_TOWNHOUSE -> when (b.kind) {
+                BKind.OFFICE -> office
+                BKind.RESIDENTIAL -> when { b.height < 20f && h < 60 -> Arch.BROWNSTONE; tall -> if (h < 50) Arch.MODERN else Arch.DECO; h < 80 -> Arch.WALKUP; else -> Arch.MODERN }
+                BKind.RETAIL -> when { b.height < 11f -> Arch.SHOP; h < 65 -> Arch.WALKUP; h < 85 -> Arch.MODERN; else -> Arch.CLASSIC }
+                else -> Arch.CLASSIC
+            }
+            Look.NY_DOWNTOWN -> when (b.kind) {
+                BKind.OFFICE -> office
+                BKind.RESIDENTIAL -> when { tall -> if (h < 40) Arch.DECO else if (h < 75) Arch.GLASS else Arch.MODERN; h < 60 -> Arch.WALKUP; else -> Arch.CLASSIC }
+                BKind.RETAIL -> when { b.height < 11f -> Arch.SHOP; h < 50 -> Arch.CLASSIC; h < 80 -> Arch.WALKUP; else -> Arch.DECO }
+                else -> Arch.CLASSIC
+            }
+            Look.CBD -> when (b.kind) {
+                BKind.OFFICE -> if (b.height > 30f) (if (h < 70) Arch.GLASS else Arch.MODERN) else (if (h < 55) Arch.MODERN else Arch.GLASS)
+                BKind.RESIDENTIAL -> if (h < 60) Arch.MODERN else Arch.GLASS
+                BKind.RETAIL -> if (b.height < 11f) Arch.SHOP else Arch.MODERN
+                else -> Arch.MODERN
+            }
+            Look.COLONIAL -> when {
+                b.kind == BKind.OFFICE -> if (h < 60) Arch.CLASSIC else Arch.COLONIAL
+                b.height <= 16f -> Arch.COLONIAL
+                else -> if (h < 50) Arch.CLASSIC else Arch.TROPICAL
+            }
+            Look.TROPICAL -> when {
+                b.kind == BKind.OFFICE -> if (b.height > 24f) Arch.GLASS else Arch.MODERN
+                b.height <= 20f -> Arch.TROPICAL
+                else -> if (h < 70) Arch.MODERN else Arch.GLASS
+            }
+            Look.DENSE_ASIA -> when {
+                b.kind == BKind.OFFICE && b.height > 30f -> if (h < 60) Arch.GLASS else Arch.MODERN
+                b.height > 44f -> Arch.MODERN
+                else -> Arch.PENCIL
+            }
+            Look.HANOK -> if (b.height <= 9f && b.kind != BKind.OFFICE) Arch.HANOK else Arch.PENCIL
+            Look.INDUSTRIAL -> when {
+                b.kind == BKind.OFFICE -> Arch.MODERN
+                b.kind == BKind.RETAIL && h < 30 -> Arch.INDUSTRIAL
+                else -> regionalLowRise(city)
+            }
+        }
+    }
+
+    /** Everyday low-rise of the city: walk-ups in New York, tin-roofed concrete in Manila, pencil buildings in Tokyo and Seoul. */
+    private fun regionalLowRise(city: City): Arch = when (city.mapId) {
+        "manila" -> Arch.TROPICAL
+        "tokyo", "seoul" -> Arch.PENCIL
+        else -> Arch.WALKUP
+    }
+
+    private fun officePick(b: Building, h: Int): Arch = when {
+        b.height > 46f -> if (h < 45) Arch.DECO else Arch.GLASS
+        b.height > 28f -> if (h < 40) Arch.GLASS else if (h < 75) Arch.CLASSIC else Arch.DECO
+        else -> if (h < 55) Arch.CLASSIC else Arch.MODERN
+    }
+
+    /** The original city's styles, keyed to its neighborhoods. */
+    private fun classicPick(b: Building, h: Int): Arch = when (b.kind) {
+        BKind.WAREHOUSE -> Arch.INDUSTRIAL
+        BKind.OFFICE -> officePick(b, h)
+        BKind.RESIDENTIAL -> when {
+            b.height < 20f && (b.neighborhood == 5 || b.neighborhood == 0) && h < 55 -> Arch.BROWNSTONE
+            b.height > 34f -> if (h < 50) Arch.MODERN else Arch.DECO
+            b.neighborhood == 3 || b.neighborhood == 4 -> if (h < 45) Arch.MODERN else Arch.WALKUP
+            else -> if (h < 80) Arch.WALKUP else Arch.MODERN
+        }
+        BKind.RETAIL -> when {
+            b.height < 11f -> Arch.SHOP
+            b.neighborhood == 2 -> Arch.INDUSTRIAL
+            h < 55 -> Arch.WALKUP
+            h < 80 -> Arch.MODERN
+            else -> Arch.CLASSIC
+        }
+        else -> Arch.CLASSIC
+    }
+
+}

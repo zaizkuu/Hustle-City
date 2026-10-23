@@ -125,6 +125,8 @@ class Traffic(private val rnd: Random = Random(7)) {
 
     /** Switches to a city's roads and its own traffic; everyone is placed again. */
     fun attach(city: City) {
+        this.city = city
+        bands = arrayOfNulls(city.roads.edges.size * 2)
         roads = city.roads
         leftHand = city.leftHand
         mix = city.map.trafficMix
@@ -245,7 +247,10 @@ class Traffic(private val rnd: Random = Random(7)) {
             val bx = e.ax + e.ux * s; val by = e.ay + e.uy * s
             // right of a→b in a y-down world is (-uy, ux)
             val nx = -e.uy * sign; val ny = e.ux * sign
-            val clear = !g.onAsphalt(bx + nx * near, by + ny * near) && !g.onAsphalt(bx + nx * far, by + ny * far)
+            // off the asphalt, and on land: where the shore cuts into a sidewalk nobody walks on
+            val c = city
+            val clear = !g.onAsphalt(bx + nx * near, by + ny * near) && !g.onAsphalt(bx + nx * far, by + ny * far) &&
+                (c == null || (!c.inWater(bx + nx * near, by + ny * near) && !c.inWater(bx + nx * far, by + ny * far)))
             if (clear) {
                 if (runLo < 0f) runLo = s
                 if (s - runLo > bestHi - bestLo) { bestLo = runLo; bestHi = s }
@@ -352,7 +357,89 @@ class Traffic(private val rnd: Random = Random(7)) {
         a.blocked = 0f
     }
 
-    private fun pedOffset(e: RoadEdge, a: Agent) = e.cls.halfWidth + e.cls.sidewalk * (.5f + a.jitter * .28f)
+    /**
+     * How far from the road's centre line a walker keeps: spread over the sidewalk from a step back from the curb (so
+     * drivers turning at the corner don't take them for someone about to cross) to 1.2 m short of the shop fronts
+     * (where shops put out their tables, buckets and boards).
+     */
+    private fun pedOffset(e: RoadEdge, a: Agent): Float {
+        val lo = e.cls.halfWidth + .9f; val hi = maxOf(lo, e.cls.halfWidth + e.cls.sidewalk - 1.2f)
+        return lo + (hi - lo).coerceAtLeast(0f) * (.5f + a.jitter * .5f)
+    }
+
+    private var city: City? = null
+
+    /**
+     * What stands on each sidewalk (per edge and physical side, see [phys]): runs of (along from, along to, out from,
+     * out to), measured from node a along the edge and out from its centre line. Built from the city's pavement the
+     * first time someone walks there.
+     */
+    private var bands = arrayOfNulls<FloatArray>(0)
+    private val span = FloatArray(4)
+
+    private fun bandsOf(e: RoadEdge, ph: Int): FloatArray? {
+        val pv = city?.pavement ?: return null
+        val k = e.id * 2 + ph
+        bands[k]?.let { return it }
+        val sign = if (ph == 0) 1f else -1f
+        val nx = -e.uy * sign; val ny = e.ux * sign
+        val inner = e.cls.halfWidth - .2f; val outer = e.cls.halfWidth + e.cls.sidewalk + .3f
+        val found = HashSet<Int>()
+        val list = ArrayList<FloatArray>()
+        var t = 0f
+        while (true) {
+            val px = e.ax + e.ux * t + nx * (inner + outer) * .5f; val py = e.ay + e.uy * t + ny * (inner + outer) * .5f
+            pv.forNear(px, py, 12f) { i ->
+                if (!found.add(i)) return@forNear
+                pv.span(i, e.ax, e.ay, e.ux, e.uy, nx, ny, span)
+                if (span[1] > -1f && span[0] < e.len + 1f && span[3] > inner && span[2] < outer) list += span.copyOf()
+            }
+            if (t >= e.len) break
+            t = minOf(e.len, t + 10f)
+        }
+        list.sortBy { it[0] }
+        val out = FloatArray(list.size * 4)
+        for ((j, b) in list.withIndex()) System.arraycopy(b, 0, out, j * 4, 4)
+        bands[k] = out
+        return out
+    }
+
+    // the stretches of sidewalk blocked where a walker is: out from, out to, and how close they are (0..1)
+    private val ivLo = FloatArray(16); private val ivHi = FloatArray(16)
+
+    /**
+     * The offset from the centre line a walker [s] meters from [from] along [e], on [side], takes instead of [want]
+     * to step round what stands on the pavement there: easing out to pass it a little before and back after. With
+     * several things side by side (a food cart and a bench beyond it) they look for a way past all of them.
+     */
+    private fun clearOffset(e: RoadEdge, from: Int, side: Int, s: Float, want: Float): Float {
+        val b = bandsOf(e, phys(e, from, side)) ?: return want
+        if (b.isEmpty()) return want
+        val sa = if (from == e.a) s else e.len - s
+        val lo = e.cls.halfWidth + .3f; val hi = e.cls.halfWidth + e.cls.sidewalk - .45f
+        var n = 0; var w = 0f
+        var k = 0
+        while (k < b.size) {
+            val a0 = b[k]; val a1 = b[k + 1]; val o0 = b[k + 2] - CLEAR; val o1 = b[k + 3] + CLEAR
+            k += 4
+            if (a0 > sa + RAMP) break
+            if (sa > a1 + RAMP || n == ivLo.size) continue
+            ivLo[n] = o0; ivHi[n] = o1; n++
+            // how hard this one pushes: fully alongside it, easing in and out over RAMP meters
+            if (want > o0 && want < o1) w = max(w, when { sa < a0 -> 1f - (a0 - sa) / RAMP; sa > a1 -> 1f - (sa - a1) / RAMP; else -> 1f })
+        }
+        if (w <= 0f) return want
+        // the nearest place across the sidewalk that's clear of everything here
+        var best = Float.NaN
+        for (i in 0 until n) for (p in floatArrayOf(ivLo[i], ivHi[i])) {
+            if (p < lo || p > hi) continue
+            var clear = true
+            for (j in 0 until n) if (p > ivLo[j] + 1e-3f && p < ivHi[j] - 1e-3f) { clear = false; break }
+            if (clear && (best.isNaN() || abs(p - want) < abs(best - want))) best = p
+        }
+        if (best.isNaN()) return want
+        return want + (best - want) * (w * w * (3f - 2f * w))
+    }
 
     private val lookTmp = com.hustlecity.game.render.Look()
 
@@ -381,7 +468,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             val s0 = walkStart(g, e, a.from, a.side); val s1 = walkEnd(g, e, a.from, a.side)
             if (s1 - s0 < 3f) continue
             a.s = s0 + rnd.nextFloat() * (s1 - s0)
-            at(e, a.from, a.s, pedOffset(e, a) * a.side, tmp)
+            at(e, a.from, a.s, clearOffset(e, a.from, a.side, a.s, pedOffset(e, a)) * a.side, tmp)
             a.x = tmp[0]; a.y = tmp[1]
             a.heading = headingOf(e, a.from)
             if (initial || dist(a.x, a.y, fx, fy) > radius * .55f) break
@@ -675,7 +762,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             }
             5 -> { // back out onto the sidewalk
                 val e = g.edges[a.edge]
-                at(e, a.from, a.s, pedOffset(e, a) * a.side, tmp)
+                at(e, a.from, a.s, clearOffset(e, a.from, a.side, a.s, pedOffset(e, a)) * a.side, tmp)
                 if (walkTo(a, dt, tmp[0], tmp[1], a.cruise)) { a.state = 0; a.timer = 8f }
                 return
             }
@@ -737,7 +824,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             planCorner(g, a, e, to)
             return
         }
-        at(e, a.from, a.s, max(pedOffset(e, a) - a.dodge, e.cls.halfWidth + .3f) * a.side, tmp)
+        at(e, a.from, a.s, clearOffset(e, a.from, a.side, a.s, max(pedOffset(e, a) - a.dodge, e.cls.halfWidth + .3f)) * a.side, tmp)
         val hx = tmp[0] - a.x; val hy = tmp[1] - a.y
         if (hx * hx + hy * hy > 1e-6f) a.heading = atan2(hx, -hy)
         a.x = tmp[0]; a.y = tmp[1]
@@ -750,17 +837,36 @@ class Traffic(private val rnd: Random = Random(7)) {
             a.from = node.id; a.s = e.len - a.s; a.side = -a.side
             return
         }
-        val nextId = chooseNext(g, node, e, false)
-        val ne = g.edges[nextId]
+        var nextId = chooseNext(g, node, e, false)
+        var ne = g.edges[nextId]
         // stay on whichever side of the next road we're already on
         val ox = if (node.id == ne.a) ne.ux else -ne.ux; val oy = if (node.id == ne.a) ne.uy else -ne.uy
         val rx = -oy; val ry = ox
         var side = if ((a.x - node.x) * rx + (a.y - node.y) * ry >= 0f) 1 else -1
         // at a scramble half the crowd cuts straight across to the far side, through the middle
         if (node.scramble && rnd.nextFloat() < .5f) side = -side
+        fun target(edge: RoadEdge, sd: Int) {
+            val st = walkStart(g, edge, node.id, sd)
+            at(edge, node.id, st, clearOffset(edge, node.id, sd, st, pedOffset(edge, a)) * sd, tmp)
+        }
+        target(ne, side)
+        if (wetWalk(a.x, a.y, tmp[0], tmp[1])) {
+            // the way round the corner runs over water (the shore cuts the pavement): the far side of that road, another
+            // road, or else back the way they came
+            var found = false
+            for (id in listOf(nextId) + node.edges) {
+                val f = g.edges[id]
+                if (f.id == e.id && node.degree > 1) continue
+                for (sd in intArrayOf(side, -side)) {
+                    target(f, sd)
+                    if (!wetWalk(a.x, a.y, tmp[0], tmp[1])) { nextId = id; ne = f; side = sd; found = true; break }
+                }
+                if (found) break
+            }
+            if (!found) { a.from = node.id; a.s = e.len - a.s; a.side = -a.side; return }
+        }
         a.next = nextId
         a.nextLane = side
-        at(ne, node.id, walkStart(g, ne, node.id, side), pedOffset(ne, a) * side, tmp)
         a.tx = tmp[0]; a.ty = tmp[1]
         a.jNode = node.id
         // which road (if any) the walk crosses
@@ -784,6 +890,17 @@ class Traffic(private val rnd: Random = Random(7)) {
                 if (!g.onAsphalt(nx, ny) && !g.nearAsphalt(nx, ny, .4f)) { a.x = nx; a.y = ny; break }
             }
         }
+    }
+
+    /** Whether a straight walk from (x0, y0) to (x1, y1) would cross water. */
+    private fun wetWalk(x0: Float, y0: Float, x1: Float, y1: Float): Boolean {
+        val c = city ?: return false
+        val n = (dist(x0, y0, x1, y1) / 1.5f).toInt() + 1
+        for (k in 0..n) {
+            val t = k / n.toFloat()
+            if (c.inWater(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return true
+        }
+        return false
     }
 
     private fun crossing(g: RoadGraph, a: Agent, dt: Float) {
@@ -826,6 +943,10 @@ class Traffic(private val rnd: Random = Random(7)) {
     companion object {
         /** Seconds round a scramble crossing's lights: two road phases, then the walk. */
         const val SCRAMBLE_CYCLE = 48f
+
+        /** How far ahead a walker starts stepping round something on the pavement, and how wide a berth they give it. */
+        private const val RAMP = 1.6f
+        private const val CLEAR = .34f
 
         /** The original city's car colors. */
         val DEFAULT_PALETTE = intArrayOf(

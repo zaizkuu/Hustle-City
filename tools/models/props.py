@@ -130,13 +130,15 @@ def bicycle(color):
 
 
 def bike_rack(bikes):
+    """Three hoops in a row along the curb, the bikes locked to them standing alongside, on the building side."""
     s = None
-    for k in range(4):
-        x = (k - 1.5) * .75
-        hoop = tube([(x, -.35, 0), (x, -.35, .62), (x, -.28, .78), (x, -.15, .84), (x, .15, .84), (x, .28, .78), (x, .35, .62), (x, .35, 0)], .03, STEEL, n=6)
+    for k in range(3):
+        x = (k - 1) * 1.1
+        hoop = tube([(x - .35, 0, 0), (x - .35, 0, .62), (x - .28, 0, .78), (x - .15, 0, .84), (x + .15, 0, .84), (x + .28, 0, .78), (x + .35, 0, .62),
+                     (x + .35, 0, 0)], .03, STEEL, n=6)
         s = hoop if s is None else s + hoop
-    for k, color in bikes:
-        s = s + bicycle(color).move((k - 1.5) * .75 + .2, .05, 0)
+    for x, color in bikes:
+        s = s + bicycle(color).rotz(90).move(x, -.27, 0)
     return s
 
 
@@ -171,8 +173,8 @@ PROPS = {
     'bus_stop': [gen(bus_shelter())],
     'news': Variants([news_boxes(k) for k in range(len(NEWS_COLORS))]),
     'mailbox': [gen(mailbox())],
-    'bike_rack': Variants([[gen(bike_rack([]))], [gen(bike_rack([(1, '#C0392B')]))], [gen(bike_rack([(0, '#2F80ED'), (2, '#27AE60')]))],
-                           [gen(bike_rack([(3, '#26292E')]))]]),
+    'bike_rack': Variants([[gen(bike_rack([]))], [gen(bike_rack([(-.55, '#C0392B')]))], [gen(bike_rack([(-.55, '#2F80ED'), (.55, '#27AE60')]))],
+                           [gen(bike_rack([(.55, '#26292E')]))]]),
     'planter': [gen(planter())],
     'traffic_light': [gen(traffic_light())],
 }
