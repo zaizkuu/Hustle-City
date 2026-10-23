@@ -16,7 +16,11 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
-/** Prints a one-week profit report per business type to build/balance.txt (useful when tuning numbers). */
+/**
+ * Prints a one-week profit report per business type to build/balance.txt (useful when tuning numbers). The aim is a
+ * daily profit of roughly $300 plus 11% of the fit-out: cheap shops pay back in a few days, big ones in about a week
+ * or two, and imported goods earn a premium for the course and the stock they tie up.
+ */
 class BalanceReportTest {
     @Test
     fun probe() {
@@ -47,7 +51,9 @@ class BalanceReportTest {
             }
             fun emp(start: Int, end: Int) { val em = Employee(e.state.newId(), "E", t.staffRole, .5, t.staffRole.baseWage, t.staffRole.baseWage, 30, businessId = biz.id, shiftStart = start % 24, shiftEnd = end % 24, days = 127); e.state.employees += em }
             val close = if (biz.closeHour <= biz.openHour) biz.closeHour + 24 else biz.closeHour
-            if (t.office) repeat(4) { emp(biz.openHour, close) } else { emp(biz.openHour, biz.openHour + 7); emp(biz.openHour + 7, close) }
+            // one person per shift, or one per chair or desk where each serves their own clients
+            val perShift = when { t.office -> 0; t.id == "hairdresser" -> 2; else -> 1 }
+            if (t.office) repeat(4) { emp(biz.openHour, close) } else repeat(perShift) { emp(biz.openHour, biz.openHour + 7); emp(biz.openHour + 7, close) }
             t.performer?.let { role ->
                 for ((a, z) in listOf(biz.openHour to biz.openHour + 7, biz.openHour + 7 to close)) {
                     e.state.employees += Employee(e.state.newId(), "P", role, .5, role.baseWage, role.baseWage, 30, businessId = biz.id, shiftStart = a % 24, shiftEnd = z % 24, days = 127)
@@ -57,8 +63,9 @@ class BalanceReportTest {
             val days = biz.history.takeLast(5)
             val rev = days.map { it.revenue }.average(); val cogs = days.map { it.cogs }.average(); val wages = days.map { it.wages }.average(); val rent = days.map { it.rent + it.fees }.average()
             val cust = days.map { it.customers }.average()
-            sb.append("%-26s area=%d traffic=%.2f comp=%d  cust/day=%.0f rev=%.0f cogs=%.0f wages=%.0f rent=%.0f  profit=%.0f  furniture=%.0f  sat=%.2f rep=%.2f\n".format(
-                t.name, b.area, b.traffic, com.hustlecity.game.engine.BizCalc.competitors(e, biz), cust, rev, cogs, wages, rent, rev - cogs - wages - rent, furnCost, biz.lastSatisfaction, biz.reputation))
+            val profit = rev - cogs - wages - rent
+            sb.append("%-26s area=%d traffic=%.2f comp=%d  cust/day=%.0f rev=%.0f cogs=%.0f wages=%.0f rent=%.0f  profit=%.0f  furniture=%.0f  payback=%.1fd  sat=%.2f rep=%.2f\n".format(
+                t.name, b.area, b.traffic, com.hustlecity.game.engine.BizCalc.competitors(e, biz), cust, rev, cogs, wages, rent, profit, furnCost, furnCost / profit, biz.lastSatisfaction, biz.reputation))
         }
         println(sb)
         java.io.File("build/balance.txt").writeText(sb.toString())
