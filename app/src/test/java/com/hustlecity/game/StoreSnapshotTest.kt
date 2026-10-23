@@ -165,7 +165,8 @@ class StoreSnapshotTest {
         fun triangles(): Int {
             val frame = com.hustlecity.game.render.gpu.GpuFrame()
             r.draw(Canvas(Bitmap.createBitmap(800, 450, Bitmap.Config.ARGB_8888)), 800, 450, frame)
-            return frame.triangleCount
+            // product models on full displays are in the cached layer the GPU keeps
+            return frame.triangleCount + (frame.staticGeom?.triangleCount ?: 0)
         }
         val empty = triangles()
         s.biz.stock["snacks"] = 140; s.biz.stock["soda"] = 160; s.biz.backStock["soda"] = 48 * 6

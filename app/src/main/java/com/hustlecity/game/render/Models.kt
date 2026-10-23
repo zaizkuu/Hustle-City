@@ -5,9 +5,10 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * Furniture meshes built by tools/models from free (CC0) model packs and our own models, stored as HCM1 files in
- * assets/models/. The GPU renderer draws them in place of the box models; the classic renderer keeps the boxes. A mesh
- * sits in its item's own tile units: x across the footprint, y deep, z up in meters, front toward +y.
+ * Furniture and product meshes built by tools/models from free (CC0) model packs and our own models, stored as HCM1
+ * files in assets/models/ (products in assets/models/products/). The GPU renderer draws them in place of the box models;
+ * the classic renderer keeps the boxes. A furniture mesh sits in its item's own tile units: x across the footprint,
+ * y deep, z up in meters, front toward +y. A product mesh is in meters, centered on its middle, front toward +y.
  */
 object Models {
     /**
@@ -45,10 +46,40 @@ object Models {
         }
     }
 
-    /** Ids that have a model file. */
-    fun ids(): List<String> = assets?.list("models")?.filter { it.endsWith(".hcm") }?.map { it.removeSuffix(".hcm") } ?: emptyList()
+    private val products = HashMap<String, Array<Mesh>>()
 
-    fun clear() = synchronized(cache) { cache.clear() }
+    /**
+     * The looks of product [pid] (models/products/<pid>.hcm, then <pid>.1.hcm, <pid>.2.hcm...: neighboring slots of a
+     * display take turns), or null when it has no model.
+     */
+    fun product(pid: String): Array<Mesh>? {
+        if (!enabled) return null
+        val am = assets ?: return null
+        synchronized(products) {
+            val known = products[pid]
+            if (known != null) return if (known.isEmpty()) null else known
+            val looks = ArrayList<Mesh>()
+            while (true) {
+                val name = if (looks.isEmpty()) "models/products/$pid.hcm" else "models/products/$pid.${looks.size}.hcm"
+                looks += runCatching { am.open(name).use { read(it.readBytes()) } }.getOrNull() ?: break
+            }
+            val arr = looks.toTypedArray()
+            products[pid] = arr
+            return if (arr.isEmpty()) null else arr
+        }
+    }
+
+    /** Ids that have a model file. */
+    fun ids(): List<String> = assets?.list("models")?.filter { it.endsWith(".hcm") && '/' !in it }?.map { it.removeSuffix(".hcm") } ?: emptyList()
+
+    /** Product ids that have a model (each once, however many looks it has). */
+    fun productIds(): List<String> =
+        assets?.list("models/products")?.filter { it.endsWith(".hcm") }?.map { it.substringAfterLast('/').removeSuffix(".hcm").substringBefore('.') }?.distinct() ?: emptyList()
+
+    fun clear() {
+        synchronized(cache) { cache.clear() }
+        synchronized(products) { products.clear() }
+    }
 
     /** Parses an HCM1 file (see tools/models/build_models.py). */
     fun read(bytes: ByteArray): Mesh {

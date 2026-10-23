@@ -587,15 +587,25 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
      * turns the way box models turn (GPU only). Returns false when it wasn't drawn.
      */
     fun mesh(m: Models.Mesh, x: Float, y: Float, rot: Int, w: Float, d: Float, alpha: Float = 1f): Boolean {
-        val g = gpu ?: return false
         // the quarter turn and footprint offset of PartSorter.add, as an affine map of the model's own x, y
-        var ax: Float; var ay: Float; var bx: Float; var by: Float; var ox: Float; var oy: Float
-        when (rot and 3) {
-            0 -> { ax = 1f; ay = 0f; bx = 0f; by = 1f; ox = x; oy = y }
-            1 -> { ax = 0f; ay = 1f; bx = -1f; by = 0f; ox = x + d; oy = y }
-            2 -> { ax = -1f; ay = 0f; bx = 0f; by = -1f; ox = x + w; oy = y + d }
-            else -> { ax = 0f; ay = -1f; bx = 1f; by = 0f; ox = x; oy = y + w }
+        return when (rot and 3) {
+            0 -> meshAt(m, x, y, 0f, 1f, 0f, 0f, 1f, alpha = alpha)
+            1 -> meshAt(m, x + d, y, 0f, 0f, 1f, -1f, 0f, alpha = alpha)
+            2 -> meshAt(m, x + w, y + d, 0f, -1f, 0f, 0f, -1f, alpha = alpha)
+            else -> meshAt(m, x, y + w, 0f, 0f, -1f, 1f, 0f, alpha = alpha)
         }
+    }
+
+    /**
+     * Draws a model mesh with its own origin at grid position (x, y, z), its x axis along (ax, ay) and its y axis along
+     * (bx, by), scaled by [sx], [sy], [sz] (GPU only). Returns false when it wasn't drawn.
+     */
+    fun meshAt(
+        m: Models.Mesh, x: Float, y: Float, z: Float, ax0: Float, ay0: Float, bx0: Float, by0: Float,
+        sx: Float = 1f, sy: Float = 1f, sz: Float = 1f, alpha: Float = 1f,
+    ): Boolean {
+        val g = gpu ?: return false
+        var ax = ax0; var ay = ay0; var bx = bx0; var by = by0; var ox = x; var oy = y
         if (fOn) {
             val nax = ax * fc - ay * fs; val nay = ax * fs + ay * fc
             val nbx = bx * fc - by * fs; val nby = bx * fs + by * fc
@@ -603,10 +613,13 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
             ax = nax; ay = nay; bx = nbx; by = nby; ox = nox; oy = noy
         }
         // skip it when it's wholly behind the camera
-        val cx = ox + (ax * w + bx * d) * .5f; val cy = oy + (ay * w + by * d) * .5f
-        if (proj.camZOf(cx, cy, m.bounds[5] * .5f) < -(w + d + m.bounds[5])) return true
+        val b = m.bounds
+        val mx = (b[0] + b[3]) * .5f * sx; val my = (b[1] + b[4]) * .5f * sy
+        val cx = ox + ax * mx + bx * my; val cy = oy + ay * mx + by * my
+        val reach = (b[3] - b[0]) * sx + (b[4] - b[1]) * sy + (b[5] - b[2]) * sz
+        if (proj.camZOf(cx, cy, z + (b[2] + b[5]) * .5f * sz) < -reach) return true
         val a = (alpha.coerceIn(0f, 1f) * 255).toInt()
-        g.mesh(if (a < 250) com.hustlecity.game.render.gpu.GpuFrame.TRANSPARENT else com.hustlecity.game.render.gpu.GpuFrame.OPAQUE, m, ox, oy, 0f, ax, ay, bx, by, a)
+        g.mesh(if (a < 250) com.hustlecity.game.render.gpu.GpuFrame.TRANSPARENT else com.hustlecity.game.render.gpu.GpuFrame.OPAQUE, m, ox, oy, z, ax, ay, bx, by, a, sx, sy, sz)
         return true
     }
 

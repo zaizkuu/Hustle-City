@@ -213,6 +213,45 @@ class GpuFrameDumpTest {
         dump(name, frame, blank, blank)
     }
 
+    /** Every product model on a counter, a row per shot, as the HD renderer draws them (all their looks side by side). */
+    @Test
+    fun products() {
+        com.hustlecity.game.render.Models.assets = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().assets
+        com.hustlecity.game.render.Models.clear()
+        val ids = com.hustlecity.game.render.Models.productIds().sorted()
+        assertTrue("products are packaged", ids.size >= 40)
+        val perShot = 4
+        for (shot in 0 until (ids.size + perShot - 1) / perShot) {
+            val chunk = ids.subList(shot * perShot, minOf(ids.size, (shot + 1) * perShot))
+            val proj = com.hustlecity.game.render.Projector()
+            proj.tx = 1.6f; proj.ty = .1f; proj.dist = 1.25f; proj.pitch = Math.toRadians(34.0).toFloat(); proj.yaw = 0f; proj.near = .05f
+            proj.update(w.toFloat(), h.toFloat(), .5f)
+            val frame = GpuFrame()
+            frame.setCamera(proj)
+            frame.mode = GpuFrame.MODE_INTERIOR
+            com.hustlecity.game.render.gpu.GpuLighting.interior(frame, 0xFF16181D.toInt())
+            frame.setShadow(-1f, -1f, 4f, 3f, 3f, 2048, .5f)
+            val scene = com.hustlecity.game.render.Scene3D(proj, com.hustlecity.game.render.RenderBatch())
+            scene.gpu = frame
+            scene.material = com.hustlecity.game.render.Mat.WOOD
+            scene.groundRect(-1f, -1f, 4.4f, 3f, 0f, 0xFFC08A5B.toInt())
+            scene.material = com.hustlecity.game.render.Mat.PLAIN
+            for ((k, pid) in chunk.withIndex()) {
+                val looks = com.hustlecity.game.render.Models.product(pid)!!
+                for ((v, m) in looks.withIndex()) {
+                    val b = m.bounds
+                    // each look on its own spot: products in a row across, their looks one behind the other
+                    val x = k * .8f + .4f; val y = .1f - v * .3f + (looks.size - 1) * .1f
+                    val z = if (b[2] < -.01f) .85f else 0f
+                    scene.meshAt(m, x - (b[0] + b[3]) / 2, y - (b[1] + b[4]) / 2, z - (if (z > 0f) b[5] else b[2]), 1f, 0f, 0f, 1f)
+                    if (z > 0f) scene.box(x - .02f, y - .25f, z, x + .02f, y + .25f, z + .02f, 0xFFB8C0CA.toInt(), 0xFFB8C0CA.toInt())
+                }
+            }
+            val blank = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            dump("products_$shot", frame, blank, blank)
+        }
+    }
+
     /** Close-up of the HD people: looks, outfits, poses and the things they carry. */
     @Test
     fun people() {
@@ -305,6 +344,81 @@ class GpuFrameDumpTest {
         val overlay = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         r.draw(Canvas(overlay), w, h, frame)
         dump("interior_home", frame, overlay, overlay)
+    }
+
+    /**
+     * Each kind of store with its displays full, seen up close: the products on them. Also writes how much geometry
+     * and frame-building time the product models cost against the old box shapes to build/products_perf.txt.
+     */
+    @Test
+    fun stores() {
+        val report = StringBuilder()
+        val types = listOf("supermarket", "produce", "florist", "coffee", "fastfood", "giftshop", "liquor", "clothing", "bookstore", "electronics", "jewelry", "nightclub", "cinema")
+        for (type in types) {
+            val e = engine()
+            e.state.player.courses += com.hustlecity.game.data.Catalog.COURSE_IMPORT
+            val t = com.hustlecity.game.data.Catalog.type(type)
+            val b = e.city.buildings.filter { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.area in 150..600 }.maxByOrNull { it.area }!!
+            e.state.rentals += Rental(b.id, b.baseRent, 1)
+            val biz = e.startBusiness(b.id, type, "Test")!!
+            biz.backRoom = 0
+            // one display per product kind, side by side, and a second row of the first ones behind
+            val ids = t.products.mapNotNull { com.hustlecity.game.data.Catalog.product(it.first) }.filter { !it.service }
+                .map { com.hustlecity.game.engine.itemForTag(it.tag) }.distinct()
+            var x = 1; var y = 5; var widest = 0
+            for (id in ids + ids + ids) {
+                val def = com.hustlecity.game.data.Catalog.item(id) ?: continue
+                if (x + def.w > 15) { if (y == 2) break; x = 1; y = 2 }
+                biz.furniture += PlacedItem(id, x, y, 0)
+                x += def.w + 1
+                widest = maxOf(widest, x)
+            }
+            for (p in t.products) if (com.hustlecity.game.data.Catalog.product(p.first)?.service == false) biz.stock[p.first] = 5000
+            biz.tempClosed = true
+            e.state.minute = 13L * 60
+            e.state.player.inBuilding = b.id
+            e.interior = InteriorScene(e, b, InteriorMode.BUSINESS)
+            repeat(150) { e.frame(1 / 30f) }
+            val r = InteriorRenderer(e)
+            r.cinemaTarget = floatArrayOf(minOf(widest, 9) / 2f + .5f, 5.6f, 3.6f)
+            r.cinemaPitch = Math.toRadians(38.0).toFloat()
+            val overlay = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            fun cost(models: Boolean): String {
+                com.hustlecity.game.render.Models.enabled = models
+                val f = GpuFrame()
+                // the first frame (re)builds the cached products; the rest only what changes from frame to frame
+                val t00 = System.nanoTime()
+                r.draw(Canvas(overlay), w, h, f)
+                val first = (System.nanoTime() - t00) / 1e6
+                repeat(4) { r.draw(Canvas(overlay), w, h, f) }
+                val t0 = System.nanoTime()
+                repeat(20) { r.draw(Canvas(overlay), w, h, f) }
+                val ms = (System.nanoTime() - t0) / 20 / 1e6
+                val cachedVerts = f.staticGeom?.streams?.sumOf { it.nv } ?: 0
+                // a customer takes something: that display changes and the layer is put back together
+                val sc = e.interior!!
+                val shown = sc.items.indices.filter { sc.shelf?.slots(it)?.any { p -> p != null } == true }
+                var change = 0L
+                for (k in 0 until 10) {
+                    val slots = sc.shelf!!.slots(shown[k % shown.size])!!
+                    val s = slots.indexOfFirst { it != null }
+                    if (s >= 0) slots[s] = null
+                    val t1 = System.nanoTime()
+                    r.draw(Canvas(overlay), w, h, f)
+                    change += System.nanoTime() - t1
+                }
+                return "per frame %6d verts %5.2f ms, cached %6d verts (first %6.2f ms, a change %5.2f ms)".format(
+                    f.streams.sumOf { it.nv }, ms, cachedVerts, first, change / 10 / 1e6)
+            }
+            val frame = GpuFrame()
+            r.draw(Canvas(overlay), w, h, frame)
+            dump("store_$type", frame, overlay, overlay)
+            val line = "%-12s models: %s | boxes: %s".format(type, cost(true), cost(false))
+            com.hustlecity.game.render.Models.enabled = true
+            println(line); report.appendLine(line)
+        }
+        File("build").mkdirs()
+        File("build/products_perf.txt").writeText(report.toString())
     }
 
     @Test

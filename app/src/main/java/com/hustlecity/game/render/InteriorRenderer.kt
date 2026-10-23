@@ -54,6 +54,18 @@ class InteriorRenderer(private val e: GameEngine) {
         private const val WALL_KEY = 5e5f
     }
 
+    // the product models on full displays rarely change, so the HD renderer keeps them in a cached layer the GPU holds
+    // on to (two, so one can be rebuilt while the other is in use). Each display's models are kept apart, so when a
+    // customer takes something only that display is drawn again before the layer is put back together.
+    private val stockFrames = arrayOf(com.hustlecity.game.render.gpu.GpuFrame(), com.hustlecity.game.render.gpu.GpuFrame())
+    private var stockShown = -1
+    private var stockKey = 0L
+    private var stockVersion = 0L
+    private var cached = BooleanArray(64)
+    private class StockChunk { var key = Long.MIN_VALUE; val geom = com.hustlecity.game.render.gpu.GpuFrame.Stream(256) }
+    private val chunks = HashMap<Int, StockChunk>()
+    private var scratch: com.hustlecity.game.render.gpu.GpuFrame? = null
+
     /** Film camera for trailers: target (x, y in tiles) and distance, and a pitch in radians, instead of the game's. */
     var cinemaTarget: FloatArray? = null
     var cinemaPitch = Float.NaN
@@ -151,6 +163,7 @@ class InteriorRenderer(private val e: GameEngine) {
         scene.material = Mat.PLAIN
         // only walls seen face on are dressed (one seen edge on would show the tops of its bookcases)
         if (!e.ui.designer) decor.draw(sc, backN && camY > sc.d * .25f, backW && camX > sc.w * .25f, backE && camX < sc.w * .75f)
+        if (gpu != null) cacheStock(sc, gpu)
         // drawables: items, people, cars (with a back room, whatever is beyond its wall goes first, then the wall)
         dCount = 0
         wallY = room?.depth?.toFloat() ?: -1f
@@ -193,7 +206,7 @@ class InteriorRenderer(private val e: GameEngine) {
                     }
                     val shelf = sc.shelf
                     val lay = shelf?.layoutOf(dIdx[i])
-                    if (shelf != null && lay != null) stock.draw(def, p, dIdx[i], shelf, lay, 1f)
+                    if (shelf != null && lay != null) stock.draw(def, p, dIdx[i], shelf, lay, 1f, cached = gpu != null && cached[dIdx[i]])
                     else drawItem(def, p.x.toFloat(), p.y.toFloat(), p.rot, 1f)
                 }
                 1 -> sc.visitors.getOrNull(dIdx[i])?.let { person(it, false); takes(sc, it) }
@@ -499,6 +512,58 @@ class InteriorRenderer(private val e: GameEngine) {
         scene.box(w - .04f, 0f, h - .12f, w, sc.d.toFloat(), h, scene.mix(color, 0xFFFFFFFF.toInt(), .3f), scene.mix(color, 0xFFFFFFFF.toInt(), .3f))
     }
 
+    /**
+     * Picks the displays whose product models come from the cached layer (see [StockPainter.cacheable]), rebuilds the
+     * layer when what they show has changed, and hands it to [gpu].
+     */
+    private fun cacheStock(sc: InteriorScene, gpu: com.hustlecity.game.render.gpu.GpuFrame) {
+        val items = sc.items
+        if (cached.size < items.size) cached = BooleanArray(items.size * 2)
+        java.util.Arrays.fill(cached, false)
+        val shelf = sc.shelf ?: return
+        val scr = scratch ?: com.hustlecity.game.render.gpu.GpuFrame().also { scratch = it }
+        var key = 17L
+        var any = false
+        for ((i, p) in items.withIndex()) {
+            if (i == sc.movingIndex) continue
+            val lay = shelf.layoutOf(i) ?: continue
+            val def = Catalog.item(p.itemId) ?: continue
+            if (!stock.cacheable(def, p, i, shelf, lay)) continue
+            cached[i] = true
+            any = true
+            // what this display shows, and where
+            var dk = System.identityHashCode(sc).toLong() * 31 + (if (Models.enabled) 1 else 0)
+            dk = dk * 31 + p.itemId.hashCode() + p.x * 1009 + p.y * 7919 + p.rot * 3 + (if (shelf.boxed(i)) 1 else 0)
+            val slots = shelf.slots(i)!!
+            for (s in 0 until lay.slots) dk = dk * 31 + (slots[s]?.hashCode() ?: 0)
+            val chunk = chunks.getOrPut(i) { StockChunk() }
+            if (chunk.key != dk) {
+                scr.clear()
+                scene.gpu = scr
+                stock.drawModels(def, p, i, shelf, lay)
+                scene.gpu = gpu
+                chunk.geom.clear()
+                chunk.geom.append(scr.streams[com.hustlecity.game.render.gpu.GpuFrame.OPAQUE])
+                chunk.key = dk
+            }
+            key = key * 31 + i * 7 + dk
+        }
+        if (!any) return
+        if (key != stockKey || stockShown < 0) {
+            val idx = if (stockShown == 0) 1 else 0
+            val f = stockFrames[idx]
+            synchronized(f) {
+                f.clear()
+                val out = f.streams[com.hustlecity.game.render.gpu.GpuFrame.OPAQUE]
+                for (i in items.indices) if (cached[i]) chunks[i]?.let { out.append(it.geom) }
+                f.version = ++stockVersion
+            }
+            stockShown = idx
+            stockKey = key
+        }
+        gpu.staticGeom = stockFrames[stockShown]
+    }
+
     /** Draws a furniture model at grid position (x, y) with rotation. */
     fun drawItem(def: FurnitureDef, x: Float, y: Float, rot: Int, alpha: Float) {
         // the HD renderer draws the modelled pieces; everything else (and the classic renderer) uses the box models
@@ -535,6 +600,14 @@ class InteriorRenderer(private val e: GameEngine) {
             val x = takeFrom[0] + (hx - takeFrom[0]) * u
             val y = takeFrom[1] + (hy - takeFrom[1]) * u
             val z = takeFrom[2] + (hz - takeFrom[2]) * u + sin(u * Math.PI.toFloat()) * .18f
+            val looks = if (scene.smooth) Models.product(t.pid) else null
+            if (looks != null) {
+                // the product itself, shrunk to something that fits in a hand
+                val m = looks[t.slot % looks.size]
+                val b = m.bounds
+                val k = minOf(1f, .14f / maxOf(b[3] - b[0], maxOf(b[4] - b[1], b[5] - b[2])))
+                if (scene.meshAt(m, x - (b[0] + b[3]) * .5f * k, y - (b[1] + b[4]) * .5f * k, z - (b[2] + b[5]) * .5f * k, 1f, 0f, 0f, 1f, k, k, k)) continue
+            }
             val col = Catalog.product(t.pid)?.color ?: c(0xFFC8A165)
             scene.box(x - .05f, y - .05f, z - .06f, x + .05f, y + .05f, z + .06f, scene.mix(col, 0xFFFFFFFF.toInt(), .2f), col)
         }

@@ -24,6 +24,16 @@ class GpuFrame {
             if (ni + addIdx > idx.size) idx = idx.copyOf(maxOf(idx.size * 2, ni + addIdx))
         }
 
+        /** Adds [o]'s vertices and triangles after this stream's own. */
+        fun append(o: Stream) {
+            ensure(o.nv, o.ni)
+            System.arraycopy(o.v, 0, v, nv * STRIDE, o.nv * STRIDE)
+            val base = nv
+            val src = o.idx
+            for (k in 0 until o.ni) idx[ni + k] = src[k] + base
+            nv += o.nv; ni += o.ni
+        }
+
         fun copyFrom(o: Stream) {
             if (v.size < o.nv * STRIDE) v = IntArray(o.v.size)
             if (idx.size < o.ni) idx = IntArray(o.idx.size)
@@ -413,9 +423,13 @@ class GpuFrame {
     /**
      * Appends a model mesh (see [com.hustlecity.game.render.Models]) placed by a 2D affine map of its own x, y:
      * world x = ox + x·ax + y·bx, world y = oy + x·ay + y·by (a quarter turn, its footprint offset and any frame),
-     * raised by [oz]. [alpha] below 255 fades it (for see-through previews).
+     * raised by [oz], after scaling it by [sx], [sy], [sz] (products fitted to a shelf). [alpha] below 255 fades it
+     * (for see-through previews).
      */
-    fun mesh(stream: Int, m: com.hustlecity.game.render.Models.Mesh, ox: Float, oy: Float, oz: Float, ax: Float, ay: Float, bx: Float, by: Float, alpha: Int = 255) {
+    fun mesh(
+        stream: Int, m: com.hustlecity.game.render.Models.Mesh, ox: Float, oy: Float, oz: Float, ax: Float, ay: Float, bx: Float, by: Float,
+        alpha: Int = 255, sx: Float = 1f, sy: Float = 1f, sz: Float = 1f,
+    ) {
         val s = streams[stream]
         s.ensure(m.vertices, m.idx.size)
         val base = s.nv
@@ -423,11 +437,12 @@ class GpuFrame {
         var o = base * STRIDE
         val p = m.pos; val n = m.nrm
         val fade = alpha < 255
+        val kax = ax * sx; val kay = ay * sx; val kbx = bx * sy; val kby = by * sy
         for (i in 0 until m.vertices) {
             val x = p[i * 3]; val y = p[i * 3 + 1]
-            v[o] = java.lang.Float.floatToRawIntBits(ox + x * ax + y * bx)
-            v[o + 1] = java.lang.Float.floatToRawIntBits(oy + x * ay + y * by)
-            v[o + 2] = java.lang.Float.floatToRawIntBits(oz + p[i * 3 + 2])
+            v[o] = java.lang.Float.floatToRawIntBits(ox + x * kax + y * kbx)
+            v[o + 1] = java.lang.Float.floatToRawIntBits(oy + x * kay + y * kby)
+            v[o + 2] = java.lang.Float.floatToRawIntBits(oz + p[i * 3 + 2] * sz)
             val nx = n[i * 3]; val ny = n[i * 3 + 1]
             v[o + 3] = java.lang.Float.floatToRawIntBits(nx * ax + ny * bx)
             v[o + 4] = java.lang.Float.floatToRawIntBits(nx * ay + ny * by)

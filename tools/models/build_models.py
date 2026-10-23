@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Builds the furniture models the HD renderer draws, from the glTF sources listed in manifest.py.
+"""Builds the furniture and product models the HD renderer draws, from manifest.py and products.py.
 
-usage: python3 tools/models/build_models.py [--preview out.png] [id ...]
+usage: python3 tools/models/build_models.py [--preview out.png] [--products | --furniture] [id ...]
 
-Each model is assembled from one or more source meshes, each turned to face a direction and fitted into a box in the
-item's own tile units (x across its footprint, y deep, z up in meters; the front faces +y unless the manifest says
-otherwise). Colors come from the source materials (palette textures are sampled per vertex), and material names pick
-the shader's surface (wood, cloth, glass...). Output: app/src/main/assets/models/<id>.hcm, read by render/Models.kt.
+Each model is assembled from one or more parts: a source mesh (glTF) turned to face a direction and fitted into a box,
+or a shape modelled with shapes.py. Furniture is in the item's own tile units (x across its footprint, y deep, z up in
+meters; the front faces +y unless the manifest says otherwise); products are in meters at their real size. Colors come
+from the source materials (palette textures are sampled per vertex), and material names pick the shader's surface
+(wood, cloth, glass...). Output: app/src/main/assets/models/<id>.hcm and models/products/<id>[.<look>].hcm, read by
+render/Models.kt.
 
 HCM1 layout (little endian): "HCM1", u32 vertex count, u32 index count, 6 x f32 bounds (min xyz, max xyz), then per
 vertex f32 x, y, z, i8 nx, ny, nz, u8 flags (material * 2 + emissive), u8 r, g, b, a; then u16 indices.
@@ -22,9 +24,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import gltf  # noqa: E402
 from manifest import MODELS, SOURCES  # noqa: E402
+from products import PRODUCTS, Variants  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..'))
 OUT = os.path.join(ROOT, 'app', 'src', 'main', 'assets', 'models')
+# product models go in their own folder: products/<product id>.hcm
+PRODUCT_OUT = os.path.join(OUT, 'products')
 
 # shader surfaces (render/Scene3D.kt Mat)
 PLAIN, GLASS, WOOD, FOLIAGE, FABRIC, PAINT = 0, 3, 7, 13, 15, 16
@@ -48,28 +53,61 @@ def surface(name):
 FACE_TURNS = {'+y': 0, '-x': 1, '-y': 2, '+x': 3}
 
 
-def load_part(part):
-    t = gltf.read(os.path.join(SOURCES, part['src']))
+_cache = {}
+
+
+def source(part):
+    """The part's triangles in the game's frame: a model file (glTF, Y-up) or a shape from shapes.py (already Z-up)."""
+    if 'gen' in part:
+        s = part['gen']
+        return s.pos.astype(np.float64), s.nrm.astype(np.float64), s.col.astype(np.float64), s.mat, s.emit
+    path = os.path.join(SOURCES, part['src'])
+    if path not in _cache:
+        _cache[path] = gltf.read(path)
+    t = _cache[path]
     # glTF is Y-up with the front toward +Z; the game is Z-up with the front toward +Y (the swap also flips the
     # handedness, which the game's x-east / y-south frame needs)
-    pos = t.pos[:, [0, 2, 1]].astype(np.float64)
-    nrm = t.nrm[:, [0, 2, 1]].astype(np.float64)
+    return t.pos[:, [0, 2, 1]].astype(np.float64), t.nrm[:, [0, 2, 1]].astype(np.float64), t.col.astype(np.float64), t.mat, t.emit
+
+
+def _turn(pos, axis, deg):
+    a = np.radians(deg); c, s = np.cos(a), np.sin(a)
+    m = {'x': [[1, 0, 0], [0, c, -s], [0, s, c]], 'y': [[c, 0, s], [0, 1, 0], [-s, 0, c]], 'z': [[c, -s, 0], [s, c, 0], [0, 0, 1]]}[axis]
+    return pos @ np.array(m).T
+
+
+def load_part(part):
+    pos, nrm, col, tmat, temit = source(part)
     turns = FACE_TURNS[part.get('face', '+y')]
     for _ in range(turns):
         # a quarter turn counterclockwise seen from above (+y front ends up facing -x)
         pos = np.stack([-pos[:, 1], pos[:, 0], pos[:, 2]], axis=1)
         nrm = np.stack([-nrm[:, 1], nrm[:, 0], nrm[:, 2]], axis=1)
-    col = t.col.copy()
+    for axis, deg in part.get('rot', []):
+        pos = _turn(pos, axis, deg)
+        nrm = _turn(nrm, axis, deg)
+    col = col.copy()
+    for rc in part.get('recolor', []):
+        # palette-textured models have one material: swap colors near [src] for [dst]
+        src, dst = np.array(rc[0][:3]) / 255.0, np.array(rc[1][:3]) / 255.0
+        tol = rc[2] if len(rc) > 2 else .08
+        near = np.linalg.norm(col[:, :3] - src, axis=1) < tol
+        col[near, :3] = dst
     if 'tint' in part:
         for mname, rgb in part['tint'].items():
-            sel = np.repeat(np.array([m == mname for m in t.mat]), 3)
+            sel = np.repeat(np.array([m == mname for m in tmat]), 3)
             col[sel, :3] = np.array(rgb, dtype=np.float64) / 255.0
     named = {'plain': PLAIN, 'wood': WOOD, 'fabric': FABRIC, 'paint': PAINT, 'glass': GLASS, 'foliage': FOLIAGE}
     over = part.get('surface', {})
-    mats = np.repeat(np.array([named[over[m]] if m in over else surface(m) for m in t.mat], dtype=np.int64), 3)
-    emit = np.repeat(np.array(t.emit, dtype=bool), 3)
+    if isinstance(over, str):
+        over = {m: over for m in set(tmat)}
+    mats = np.repeat(np.array([named[over[m]] if m in over else surface(m) for m in tmat], dtype=np.int64), 3)
+    emit = np.repeat(np.array(temit, dtype=bool), 3)
     for mname in part.get('glow', []):
-        emit |= np.repeat(np.array([m == mname for m in t.mat]), 3)
+        emit |= np.repeat(np.array([m == mname for m in tmat]), 3)
+    if 'box' not in part:
+        # a shape modelled in place (meters, the item's own frame), just moved by [at]
+        return pos + np.array(part.get('at', (0, 0, 0))), nrm, col, mats, emit
     # fit into the part's box
     lo, hi = pos.min(0), pos.max(0)
     size = np.maximum(hi - lo, 1e-6)
@@ -94,15 +132,19 @@ def load_part(part):
     return pos, nrm, col, mats, emit
 
 
-def build(mid):
-    parts = MODELS[mid]
+def build(mid, parts=None):
+    parts = parts if parts is not None else MODELS[mid]
     P, N, C, M, E = [], [], [], [], []
     for part in parts:
         for rep in range(part.get('repeat', 1)):
             p = dict(part)
             dx, dy, dz = part.get('step', (0, 0, 0))
-            bx = p['box']
-            p['box'] = (bx[0] + dx * rep, bx[1] + dy * rep, bx[2] + dz * rep, bx[3] + dx * rep, bx[4] + dy * rep, None if bx[5] is None else bx[5] + dz * rep)
+            if 'box' in p:
+                bx = p['box']
+                p['box'] = (bx[0] + dx * rep, bx[1] + dy * rep, bx[2] + dz * rep, bx[3] + dx * rep, bx[4] + dy * rep, None if bx[5] is None else bx[5] + dz * rep)
+            else:
+                at = p.get('at', (0, 0, 0))
+                p['at'] = (at[0] + dx * rep, at[1] + dy * rep, at[2] + dz * rep)
             pos, nrm, col, mats, emit = load_part(p)
             P.append(pos); N.append(nrm); C.append(col); M.append(mats); E.append(emit)
     pos = np.concatenate(P); nrm = np.concatenate(N); col = np.concatenate(C); mats = np.concatenate(M); emit = np.concatenate(E)
@@ -118,7 +160,7 @@ def build(mid):
     return vpos, vnrm, vcol, vmat, vem, idx
 
 
-def write(mid, mesh):
+def write(mid, mesh, out_dir=OUT):
     vpos, vnrm, vcol, vmat, vem, idx = mesh
     lo, hi = vpos.min(0), vpos.max(0)
     out = bytearray(b'HCM1')
@@ -132,8 +174,8 @@ def write(mid, mesh):
         out += struct.pack('<3bB', int(n8[i, 0]), int(n8[i, 1]), int(n8[i, 2]), int(flags[i]))
         out += struct.pack('<4B', *(int(v) for v in c8[i]))
     out += struct.pack('<%dH' % len(idx), *idx)
-    os.makedirs(OUT, exist_ok=True)
-    with open(os.path.join(OUT, mid + '.hcm'), 'wb') as f:
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, mid + '.hcm'), 'wb') as f:
         f.write(out)
     return len(out)
 
@@ -178,19 +220,30 @@ def preview(meshes, path, cell=220):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('ids', nargs='*')
+    ap.add_argument('ids', nargs='*', help='furniture or product ids (default: all)')
     ap.add_argument('--preview')
+    ap.add_argument('--products', action='store_true', help='only the products')
+    ap.add_argument('--furniture', action='store_true', help='only the furniture')
     a = ap.parse_args()
-    ids = a.ids or sorted(MODELS)
+    ids = a.ids or ([] if a.products else sorted(MODELS)) + ([] if a.furniture else sorted(PRODUCTS))
     meshes = []
     total = 0
+    jobs = []
     for mid in ids:
-        mesh = build(mid)
-        size = write(mid, mesh)
+        if mid in PRODUCTS:
+            entry = PRODUCTS[mid]
+            # variants: <id>.hcm, then <id>.1.hcm, <id>.2.hcm...
+            looks = entry if isinstance(entry, Variants) else [entry]
+            jobs += [(mid if k == 0 else f'{mid}.{k}', parts, PRODUCT_OUT) for k, parts in enumerate(looks)]
+        else:
+            jobs.append((mid, MODELS[mid], OUT))
+    for name, parts, out in jobs:
+        mesh = build(name, parts)
+        size = write(name, mesh, out)
         total += size
-        meshes.append((mid, mesh))
-        print(f'{mid:20s} {len(mesh[0]):5d} verts {len(mesh[5]) // 3:5d} tris {size / 1024:6.1f} KB')
-    print(f'{len(ids)} models, {total / 1024:.0f} KB')
+        meshes.append((name, mesh))
+        print(f'{name:20s} {len(mesh[0]):5d} verts {len(mesh[5]) // 3:5d} tris {size / 1024:6.1f} KB')
+    print(f'{len(jobs)} models, {total / 1024:.0f} KB')
     if a.preview:
         preview(meshes, a.preview)
 

@@ -12,8 +12,9 @@ import kotlin.math.min
 
 /**
  * Draws a display of your store with what it holds: the model (without its placeholder goods, hollowed out where
- * you need to see inside), one small shape per filled product slot, and see-through glass over them. New items
- * drop into place; far away, each run of the same product becomes a single block so it stays cheap.
+ * you need to see inside), what each filled product slot shows, and see-through glass over them. The HD renderer
+ * shows real product models (see [Models.product]); the classic renderer, and products without one, a few small
+ * shapes. New items drop into place; far away, each run of the same product becomes a single block so it stays cheap.
  */
 class StockPainter(private val scene: Scene3D, private val parts: PartSorter) {
     companion object {
@@ -30,15 +31,27 @@ class StockPainter(private val scene: Scene3D, private val parts: PartSorter) {
         private val RED = c(0xFFD0392B)
         private val WHITE = c(0xFFF5F5F5)
         private const val DROP = .3f
+        /** The model of an unopened box of stock. */
+        private const val BOX = "_box"
+        // what a pass draws: everything, only the product models (into the cache), or everything but them
+        private const val ALL = 0
+        private const val MODELS_ONLY = 1
+        private const val NO_MODELS = 2
     }
 
     private val pt = FloatArray(3)
     private var def: FurnitureDef? = null
     private var px = 0f; private var py = 0f; private var rot = 0
+    private var alpha = 1f
+    private var pass = ALL
 
-    /** Draws placed display [p] (item [index] of the scene) with the stock [shelf] says it shows. */
-    fun draw(def: FurnitureDef, p: PlacedItem, index: Int, shelf: ShelfStock, lay: StockLayout, alpha: Float) {
-        this.def = def; px = p.x.toFloat(); py = p.y.toFloat(); rot = p.rot
+    /**
+     * Draws placed display [p] (item [index] of the scene) with the stock [shelf] says it shows. With [cached], its
+     * product models are already in the renderer's cache (see [drawModels]) and are left out.
+     */
+    fun draw(def: FurnitureDef, p: PlacedItem, index: Int, shelf: ShelfStock, lay: StockLayout, alpha: Float, cached: Boolean = false) {
+        this.def = def; px = p.x.toFloat(); py = p.y.toFloat(); rot = p.rot; this.alpha = alpha
+        pass = if (cached) NO_MODELS else ALL
         parts.begin()
         val model = def.parts
         for (k in model.indices) {
@@ -60,6 +73,36 @@ class StockPainter(private val scene: Scene3D, private val parts: PartSorter) {
         val glass = lay.glass
         for (k in glass.indices) { val g = glass[k]; box(g.x0, g.y0, g.z0, g.x1, g.y1, g.z1, scene.withAlpha(StockLayouts.GLASS, .26f)) }
         parts.end(alpha)
+        pass = ALL
+    }
+
+    /**
+     * Only the product models display [p] shows, for the renderer's cache: drawn once into a frame the GPU keeps, they
+     * don't have to be rebuilt every frame (see [cacheable]).
+     */
+    fun drawModels(def: FurnitureDef, p: PlacedItem, index: Int, shelf: ShelfStock, lay: StockLayout) {
+        this.def = def; px = p.x.toFloat(); py = p.y.toFloat(); rot = p.rot; alpha = 1f
+        val slots = shelf.slots(index) ?: return
+        val ages = shelf.ages(index) ?: return
+        val boxed = shelf.boxed(index)
+        pass = MODELS_ONLY
+        for (s in 0 until lay.slots) {
+            val pid = slots[s] ?: continue
+            item(lay, s, pid, ages[s], boxed)
+        }
+        pass = ALL
+    }
+
+    /**
+     * Whether display [p]'s product models can come from the cache: near enough to show single products, and none of
+     * them dropping into place right now.
+     */
+    fun cacheable(def: FurnitureDef, p: PlacedItem, index: Int, shelf: ShelfStock, lay: StockLayout): Boolean {
+        if (!scene.smooth || far(p, def)) return false
+        val slots = shelf.slots(index) ?: return false
+        val ages = shelf.ages(index) ?: return false
+        for (s in 0 until lay.slots) if (slots[s] != null && ages[s] < DROP) return false
+        return true
     }
 
     /**
@@ -93,6 +136,39 @@ class StockPainter(private val scene: Scene3D, private val parts: PartSorter) {
     private fun cbox(cx: Float, cy: Float, w: Float, d: Float, z0: Float, z1: Float, color: Int, top: Int = color) =
         box(cx - w / 2, cy - d / 2, z0, cx + w / 2, cy + d / 2, z1, color, top)
 
+    /** The model slot [slot] shows of product [pid] in the HD renderer (neighboring slots take turns between its looks), or null. */
+    private fun model(pid: String, slot: Int): Models.Mesh? {
+        if (!scene.smooth) return null
+        val looks = Models.product(pid) ?: return null
+        return looks[slot % looks.size]
+    }
+
+    /**
+     * Draws model [m] in the display's own units: its middle at (cx, cy) and its bottom at [z] (or, [hang]ing from a
+     * rail, its top), shrunk if need be to fit [cw] x [cd] x [h]. Hanging clothes only squeeze in where they must, and
+     * a [stretch]ed model fills the space exactly (boxes of stock).
+     */
+    private fun place(m: Models.Mesh, cx: Float, cy: Float, z: Float, cw: Float, cd: Float, h: Float, hang: Boolean = false, stretch: Boolean = false): Boolean {
+        val b = m.bounds
+        val mw = b[3] - b[0]; val md = b[4] - b[1]; val mh = b[5] - b[2]
+        val sx: Float; val sy: Float; val sz: Float
+        if (stretch) { sx = cw / mw; sy = cd / md; sz = h / mh }
+        else if (hang) { sx = min(1f, cw / mw); sy = min(1f, cd / md); sz = min(1f, h / mh) }
+        else { val k = min(1f, min(cw / mw, min(cd / md, h / mh))); sx = k; sy = k; sz = k }
+        // where the model's own origin goes, in the display's units
+        val lx = cx - (b[0] + b[3]) * .5f * sx
+        val ly = cy - (b[1] + b[4]) * .5f * sy
+        val lz = if (hang) z - b[5] * sz else z - b[2] * sz
+        val w = def!!.w.toFloat(); val d = def!!.d.toFloat()
+        // turned with the display, like PartSorter.add
+        return when (rot and 3) {
+            0 -> scene.meshAt(m, px + lx, py + ly, lz, 1f, 0f, 0f, 1f, sx, sy, sz, alpha)
+            1 -> scene.meshAt(m, px + d - ly, py + lx, lz, 0f, 1f, -1f, 0f, sx, sy, sz, alpha)
+            2 -> scene.meshAt(m, px + w - lx, py + d - ly, lz, -1f, 0f, 0f, -1f, sx, sy, sz, alpha)
+            else -> scene.meshAt(m, px + ly, py + w - lx, lz, 0f, -1f, 1f, 0f, sx, sy, sz, alpha)
+        }
+    }
+
     /** Neighboring items of the same product alternate a little in shade so they read as separate things. */
     private fun shade(color: Int, s: Int) = if (s % 2 == 0) color else scene.mix(color, 0xFF000000.toInt(), .1f)
 
@@ -110,10 +186,18 @@ class StockPainter(private val scene: Scene3D, private val parts: PartSorter) {
         if (boxed) {
             // a cardboard box of stock with the product's label on the front
             val bw = cw * .9f; val bd = cd * .9f; val bh = h * .92f
-            cbox(cx, cy, bw, bd, z, z + bh, if (s % 2 == 0) KRAFT else KRAFT_DARK, KRAFT_TOP)
-            cbox(cx, cy + bd / 2 + .006f, bw * .5f, .012f, z + bh * .35f, z + bh * .75f, prod?.color ?: RED)
+            val m = model(BOX, 0)
+            if (m != null) { if (pass != NO_MODELS) place(m, cx, cy, z, bw, bd, bh, stretch = true) }
+            else if (pass != MODELS_ONLY) cbox(cx, cy, bw, bd, z, z + bh, if (s % 2 == 0) KRAFT else KRAFT_DARK, KRAFT_TOP)
+            if (pass != MODELS_ONLY) cbox(cx, cy + bd / 2 + .006f, bw * .5f, .012f, z + bh * .35f, z + bh * .75f, prod?.color ?: RED)
             return
         }
+        val m = model(pid, s)
+        if (m != null) {
+            if (pass != NO_MODELS) place(m, cx, cy, z, cw * .94f, cd * .94f, if (row.hang) h else h * .95f, hang = row.hang)
+            return
+        }
+        if (pass == MODELS_ONLY) return
         if (row.hang) {
             // clothes on hangers: thin across the rail, hanging down from it
             val len = min(h, if (s % 3 == 1) .7f else .55f)
