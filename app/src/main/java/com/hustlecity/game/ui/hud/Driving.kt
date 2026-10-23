@@ -85,7 +85,7 @@ fun BoxScope.DrivingControls(e: GameEngine) {
     Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 6.dp)) {
             if (e.atGasStation) HButton("Refuel ${e.money((1 - v.fuel) * 45 * 1.4)}", color = HC.Orange, small = true) { e.refuel(v) }
-            if (v.fuel <= 0.0) HButton("Roadside \$150", color = HC.Red, small = true) { e.roadside(v) }
+            if (v.fuel <= 0.0) HButton("Roadside ${e.moneyWhole(150.0)}", color = HC.Red, small = true) { e.roadside(v) }
             HButton("Park", color = HC.Green, small = true) { if (e.parkVehicle()) e.ui.phoneOpen = true }
             HButton("Get out", color = HC.Blue, small = true) { if (e.getOutOfCar()) e.ui.phoneOpen = true }
         }

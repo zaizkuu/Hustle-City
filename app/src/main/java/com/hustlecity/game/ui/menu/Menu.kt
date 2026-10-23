@@ -52,6 +52,10 @@ import com.hustlecity.game.data.Catalog
 import com.hustlecity.game.engine.GameEngine
 import com.hustlecity.game.engine.SHIRT_COLORS
 import com.hustlecity.game.engine.SKIN_TONES
+import com.hustlecity.game.engine.SaveManager
+import com.hustlecity.game.engine.SlotInfo
+import com.hustlecity.game.engine.Currency
+import com.hustlecity.game.engine.Confirm
 import com.hustlecity.game.engine.Screen
 import com.hustlecity.game.model.GameRules
 import com.hustlecity.game.model.PlayerState
@@ -84,6 +88,7 @@ fun HustleCityApp(e: GameEngine, onExit: () -> Unit) {
             Screen.GAME -> if (e.hasGame) GameScreen(e) else MainMenu(e)
             Screen.MENU -> MainMenu(e)
             Screen.NEW_GAME -> NewGameScreen(e)
+            Screen.LOAD -> LoadScreen(e)
         }
     }
 }
@@ -91,7 +96,7 @@ fun HustleCityApp(e: GameEngine, onExit: () -> Unit) {
 private fun handleBack(e: GameEngine, onExit: () -> Unit) {
     val ui = e.ui
     when {
-        ui.screen == Screen.NEW_GAME -> ui.screen = Screen.MENU
+        ui.screen == Screen.NEW_GAME || ui.screen == Screen.LOAD -> if (ui.confirm != null) ui.confirm = null else ui.screen = Screen.MENU
         ui.screen == Screen.MENU -> if (ui.info != null) ui.info = null else if (ui.panel != null) { e.settings.save(); ui.panel = null } else onExit()
         e.skip != null -> e.cancelSkip()
         ui.confirm != null -> ui.confirm = null
@@ -125,10 +130,11 @@ fun MainMenu(e: GameEngine) {
                 HButton("Continue", Modifier.fillMaxWidth().padding(bottom = 8.dp), color = HC.Green) {
                     if (!e.loadGame()) {
                         e.ui.info = "Couldn't load your save" to
-                            "The save file is damaged or from an incompatible version. It was kept as save-damaged.json. Start a new game to keep playing."
+                            "The save file is damaged or from an incompatible version. It was kept as a damaged copy. Load another slot or start a new game to keep playing."
                     }
                 }
             }
+            if (hasSave) HButton("Load game", Modifier.fillMaxWidth().padding(bottom = 8.dp), color = HC.Teal) { e.ui.screen = Screen.LOAD }
             HButton("New game", Modifier.fillMaxWidth().padding(bottom = 8.dp)) { e.ui.screen = Screen.NEW_GAME }
             HButton("Settings", Modifier.fillMaxWidth(), color = HC.GlassLight) { e.ui.panel = com.hustlecity.game.engine.Panel.Settings }
             Text("v1.7.0 beta · A business life sim for Android", color = Color.White.copy(alpha = .5f), fontSize = 11.sp, modifier = Modifier.padding(top = 18.dp))
@@ -147,6 +153,12 @@ fun NewGameScreen(e: GameEngine) {
     var seed by remember { mutableIntStateOf(1337) }
     var mapId by remember { mutableStateOf(Maps.CLASSIC) }
     var rules by remember { mutableStateOf(GameRules.NORMAL) }
+    // a new game goes into the first empty slot, or else over the one played longest ago (never the game in play)
+    val slots = remember { (1..SaveManager.SLOTS).map { e.saves.info(it) } }
+    var slot by remember {
+        mutableIntStateOf(slots.indexOfFirst { it == null }.takeIf { it >= 0 }?.plus(1)
+            ?: slots.filterNotNull().filter { !e.hasGame || it.slot != e.saves.slot }.minByOrNull { it.savedAt }?.slot ?: 1)
+    }
     val renderers = remember { Renderers(e) }
     Box(Modifier.fillMaxSize()) {
         WorldCanvas(e, renderers, interactive = false)
@@ -188,11 +200,22 @@ fun NewGameScreen(e: GameEngine) {
                             Chip("Classic layout", seed == 1337) { seed = 1337 }
                             Chip("Random city", seed != 1337) { seed = (1000..999_999).random() }
                         }
+                        Text("SAVE SLOT", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 10.dp))
+                        Row(Modifier.padding(vertical = 6.dp).horizontalScroll(rememberScrollState())) {
+                            for (i in 1..SaveManager.SLOTS) {
+                                val info = slots[i - 1]
+                                Chip(if (info == null) "$i · Empty" else "$i · ${info.name.ifBlank { "Game" }}", slot == i, if (info == null) HC.Green else HC.Blue) { slot = i }
+                            }
+                        }
+                        slots[slot - 1]?.let { info ->
+                            Text("Starting here replaces ${slotTitle(info)}.", style = HT.small, color = HC.Red)
+                        }
                         Text("DIFFICULTY", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 10.dp))
                         Row(Modifier.padding(vertical = 6.dp)) {
-                            Chip("Easy · \$20,000", difficulty == 0, HC.Green) { difficulty = 0; rules = GameRules.EASY }
-                            Chip("Normal · \$5,000", difficulty == 1) { difficulty = 1; rules = GameRules.NORMAL }
-                            Chip("Hard · \$1,500", difficulty == 2, HC.Red) { difficulty = 2; rules = GameRules.HARD }
+                            val cur = com.hustlecity.game.engine.Currency.forMap(mapId)
+                            Chip("Easy · ${cur.whole(20000.0)}", difficulty == 0, HC.Green) { difficulty = 0; rules = GameRules.EASY }
+                            Chip("Normal · ${cur.whole(5000.0)}", difficulty == 1) { difficulty = 1; rules = GameRules.NORMAL }
+                            Chip("Hard · ${cur.whole(1500.0)}", difficulty == 2, HC.Red) { difficulty = 2; rules = GameRules.HARD }
                             Chip("Custom", difficulty == 3, HC.Purple) { difficulty = 3 }
                         }
                         Text(when (difficulty) {
@@ -202,7 +225,7 @@ fun NewGameScreen(e: GameEngine) {
                             else -> "The city as it is."
                         }, style = HT.small, color = HC.InkSoft)
                         if (difficulty == 3) Column(Modifier.padding(top = 4.dp)) {
-                            RuleSlider("Starting cash", rules.startMoney, 0.0..50000.0, { "\$" + "%,d".format(it.toInt()) }) { rules = rules.copy(startMoney = Math.round(it / 500) * 500.0) }
+                            RuleSlider("Starting cash", rules.startMoney, 0.0..50000.0, { com.hustlecity.game.engine.Currency.forMap(mapId).whole(it) }) { rules = rules.copy(startMoney = Math.round(it / 500) * 500.0) }
                             RuleSlider("Customers", rules.demand, .5..1.5, ::pct) { rules = rules.copy(demand = snap(it)) }
                             RuleSlider("Rent", rules.rent, .5..1.5, ::pct) { rules = rules.copy(rent = snap(it)) }
                             RuleSlider("Wages", rules.wages, .5..1.5, ::pct) { rules = rules.copy(wages = snap(it)) }
@@ -214,12 +237,76 @@ fun NewGameScreen(e: GameEngine) {
                     Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         HButton("Back", color = HC.GlassLight) { e.ui.screen = Screen.MENU }
                         HButton("Start your hustle", color = HC.Green, modifier = Modifier.weight(1f)) {
-                            e.newGame(name, skin, shirt, difficulty, if (mapId == Maps.CLASSIC) seed.toLong() else 1337L, mapId, rules)
+                            // the game in play is kept in its own slot before the new one starts
+                            if (e.hasGame && e.saves.slot != slot) e.save()
+                            e.newGame(name, skin, shirt, difficulty, if (mapId == Maps.CLASSIC) seed.toLong() else 1337L, mapId, rules, slot)
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/** "Alex's game in Manila (day 12)". */
+private fun slotTitle(info: SlotInfo) = "${info.name.ifBlank { "your" }}'s game in ${Maps.byId(info.mapId).title} (day ${info.day})"
+
+/** Every save slot: load a game, or delete one. */
+@Composable
+fun LoadScreen(e: GameEngine) {
+    if (!e.hasGame) e.prepareMenuBackground()
+    val renderers = remember { Renderers(e) }
+    var version by remember { mutableIntStateOf(0) }
+    val slots = remember(version) { (1..SaveManager.SLOTS).map { e.saves.info(it) } }
+    Box(Modifier.fillMaxSize()) {
+        WorldCanvas(e, renderers, interactive = false)
+        Box(Modifier.fillMaxSize().background(Color(0x99101318)), contentAlignment = Alignment.Center) {
+            Column(
+                Modifier.padding(12.dp).width(640.dp).shadow(10.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp)).background(Color(0xFFF7F8FA)).padding(16.dp),
+            ) {
+                Text("LOAD GAME", style = HT.label, color = HC.InkSoft)
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (i in 1..SaveManager.SLOTS) {
+                        val info = slots[i - 1]
+                        val playing = e.hasGame && e.saves.slot == i
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(if (playing) Color(0xFFE3EEFF) else Color(0xFFECEEF1)).padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("$i", style = HT.title, color = HC.InkSoft, modifier = Modifier.width(26.dp))
+                            if (info == null) {
+                                Text("Empty slot", style = HT.body, color = HC.InkSoft, modifier = Modifier.weight(1f))
+                            } else {
+                                val cur = Currency.forMap(info.mapId)
+                                Column(Modifier.weight(1f)) {
+                                    Text("${info.name.ifBlank { "Game" }} · ${Maps.byId(info.mapId).title}" + if (playing) " (playing)" else "", style = HT.bodyBold, color = HC.Ink)
+                                    Text("Day ${info.day} · cash ${cur.short(info.money)} · net worth ${cur.short(info.netWorth)} · ${info.businesses} business${if (info.businesses == 1) "" else "es"}",
+                                        style = HT.small, color = HC.InkSoft)
+                                    if (info.savedAt > 0) Text("Saved " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(info.savedAt)),
+                                        style = HT.small, color = HC.InkSoft)
+                                }
+                                if (!playing) HButton("Delete", small = true, color = HC.Red, modifier = Modifier.padding(end = 6.dp)) {
+                                    e.ui.confirm = Confirm("Delete ${slotTitle(info)}?", "The save is gone for good.", "Delete") { e.saves.delete(i); version++ }
+                                }
+                                HButton(if (playing) "Resume" else "Load", small = true, color = HC.Green) {
+                                    if (playing) { e.ui.screen = Screen.GAME; return@HButton }
+                                    if (e.hasGame) e.save()
+                                    if (!e.loadGame(i)) {
+                                        e.ui.info = "Couldn't load this save" to
+                                            "The save file is damaged or from an incompatible version. It was kept as save_$i-damaged.json."
+                                        version++
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(Modifier.padding(top = 10.dp)) {
+                    HButton("Back", color = HC.GlassLight) { e.ui.screen = Screen.MENU }
+                }
+            }
+        }
+        Dialogs(e)
     }
 }
 

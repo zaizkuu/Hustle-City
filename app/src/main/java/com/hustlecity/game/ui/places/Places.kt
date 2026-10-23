@@ -346,7 +346,7 @@ private fun Dealer(e: GameEngine, buildingId: Int, place: PlaceDef) {
                         HButton("Repair ${e.money((1 - v.condition) * v.def.price * .2)}", small = true, enabled = v.condition < .99) { e.repairVehicle(v) }
                         Spacer(Modifier.width(6.dp))
                         HButton("Sell", small = true, color = HC.Red) {
-                            e.ui.confirm = Confirm("Sell your ${v.def.name}?", "You'll get ${e.money(e.vehicleValue(v))}. Cargo inside is lost.", "Sell") { e.sellVehicle(v) }
+                            e.ui.confirm = Confirm("Sell your ${v.def.name}?", "You'll get ${e.money(e.vehicleValue(v))}." + (if (v.cargo.isNotEmpty()) " Its cargo is sold off at half price." else ""), "Sell") { e.sellVehicle(v) }
                         }
                     }
                 }
@@ -372,8 +372,8 @@ private fun GasStation(e: GameEngine, buildingId: Int, place: PlaceDef) {
         }
         Text("SHOP", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HButton("Snack \$3", small = true) { e.eat(3.0, 12.0, label = "a snack") }
-            HButton("Coffee \$3", small = true) { e.eat(3.0, 3.0, energy = 8.0, label = "a coffee") }
+            HButton("Snack ${e.moneyWhole(3.0)}", small = true) { e.eat(3.0, 12.0, label = "a snack") }
+            HButton("Coffee ${e.moneyWhole(3.0)}", small = true) { e.eat(3.0, 3.0, energy = 8.0, label = "a coffee") }
         }
     }
 }
@@ -414,7 +414,7 @@ private fun Recruiter(e: GameEngine, place: PlaceDef) {
             }
             return@Modal
         }
-        Text("Each search costs \$250 and delivers 3 candidates in about 2 hours. Check the Staff app to hire them.", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(bottom = 8.dp))
+        Text("Each search costs ${e.moneyWhole(250.0)} and delivers 3 candidates in about 2 hours. Check the Staff app to hire them.", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(bottom = 8.dp))
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             for (role in StaffRole.entries) {
                 val pending = e.state.recruits.any { it.role == role }
@@ -443,7 +443,7 @@ private fun Recruiter(e: GameEngine, place: PlaceDef) {
                                 } + " Typical wage ~${e.money(role.baseWage)}/h.", style = HT.small, color = HC.InkSoft,
                             )
                         }
-                        HButton(if (pending) "Searching…" else "Search \$250", small = true, enabled = !pending, color = HC.Purple) { e.requestCandidates(role) }
+                        HButton(if (pending) "Searching…" else "Search ${e.moneyWhole(250.0)}", small = true, enabled = !pending, color = HC.Purple) { e.requestCandidates(role) }
                     }
                 }
             }
@@ -526,7 +526,7 @@ private fun FlowRowChips(e: GameEngine, sel: Int, onSel: (Int) -> Unit) {
 private fun Hospital(e: GameEngine, place: PlaceDef) {
     Modal(place.name, { close(e) }, maxWidth = 520.dp) {
         Text("Feeling worn out? Rest in our recovery ward.", style = HT.body, color = HC.InkSoft)
-        HButton("Rest 2 hours — \$200 (+25 energy)", Modifier.padding(top = 10.dp)) {
+        HButton("Rest 2 hours — ${e.moneyWhole(200.0)} (+25 energy)", Modifier.padding(top = 10.dp)) {
             if (e.spend(200.0, "Medical")) {
                 close(e)
                 e.startSkip(com.hustlecity.game.model.SkipKind.REST, 120, "Resting at City Hospital…")
@@ -568,20 +568,20 @@ private fun RivalShop(e: GameEngine, buildingId: Int) {
             CardTitle("Buy", modifier = Modifier.padding(top = 10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (type.id) {
-                    "fastfood" -> { HButton("Burger meal \$9", small = true) { e.eat(9.0, 45.0, label = "a burger meal") }; HButton("Fries \$3", small = true) { e.eat(3.0, 15.0, label = "fries") } }
-                    "coffee" -> { HButton("Coffee & croissant \$6", small = true) { e.eat(6.0, 15.0, energy = 12.0, label = "coffee and a croissant") }; HButton("Espresso \$3", small = true) { e.eat(3.0, 2.0, energy = 8.0, label = "an espresso") } }
-                    "supermarket", "produce" -> { HButton("Groceries (4 meals) \$32", small = true) { e.buyGroceries() }; HButton("Snack \$3", small = true) { e.eat(3.0, 12.0, label = "a snack") } }
-                    "liquor" -> HButton("Drink \$8", small = true) { e.eat(8.0, 2.0, energy = -5.0, happiness = 6.0, label = "a drink") }
-                    "bookstore" -> HButton("A good book \$15", small = true) { e.eat(15.0, 0.0, happiness = 5.0, label = "a new book") }
-                    "clothing" -> HButton("New outfit \$60", small = true) { e.eat(60.0, 0.0, happiness = 8.0, label = "a new outfit") }
-                    "jewelry" -> HButton("Watch \$520", small = true) { e.eat(520.0, 0.0, happiness = 15.0, label = "a fancy watch") }
-                    "electronics" -> HButton("Headphones \$79", small = true) { e.eat(79.0, 0.0, happiness = 6.0, label = "new headphones") }
-                    "florist" -> HButton("Bouquet \$22", small = true) { e.eat(22.0, 0.0, happiness = 4.0, label = "a bouquet") }
-                    "giftshop" -> HButton("Souvenir \$12", small = true) { e.eat(12.0, 0.0, happiness = 3.0, label = "a souvenir") }
-                    "gym" -> HButton("Workout \$12 (1h)", small = true) {
-                        if (e.spend(12.0, "Personal")) { close(e); e.startSkip(com.hustlecity.game.model.SkipKind.WORKOUT, 60, "Working out…") }
+                    "fastfood" -> { HButton("Burger meal ${e.moneyWhole(9.0)}", small = true) { e.eat(9.0, 45.0, label = "a burger meal") }; HButton("Fries ${e.moneyWhole(3.0)}", small = true) { e.eat(3.0, 15.0, label = "fries") } }
+                    "coffee" -> { HButton("Coffee & croissant ${e.moneyWhole(6.0)}", small = true) { e.eat(6.0, 15.0, energy = 12.0, label = "coffee and a croissant") }; HButton("Espresso ${e.moneyWhole(3.0)}", small = true) { e.eat(3.0, 2.0, energy = 8.0, label = "an espresso") } }
+                    "supermarket", "produce" -> { HButton("Groceries (4 meals) ${e.moneyWhole(32.0)}", small = true) { e.buyGroceries() }; HButton("Snack ${e.moneyWhole(3.0)}", small = true) { e.eat(3.0, 12.0, label = "a snack") } }
+                    "liquor" -> HButton("Drink ${e.moneyWhole(8.0)}", small = true) { e.eat(8.0, 2.0, energy = -5.0, happiness = 6.0, label = "a drink") }
+                    "bookstore" -> HButton("A good book ${e.moneyWhole(15.0)}", small = true) { e.eat(15.0, 0.0, happiness = 5.0, label = "a new book") }
+                    "clothing" -> HButton("New outfit ${e.moneyWhole(60.0)}", small = true) { e.eat(60.0, 0.0, happiness = 8.0, label = "a new outfit") }
+                    "jewelry" -> HButton("Watch ${e.moneyWhole(520.0)}", small = true) { e.eat(520.0, 0.0, happiness = 15.0, label = "a fancy watch") }
+                    "electronics" -> HButton("Headphones ${e.moneyWhole(59.0)}", small = true) { e.eat(59.0, 0.0, happiness = 6.0, label = "new headphones") }
+                    "florist" -> HButton("Bouquet ${e.moneyWhole(22.0)}", small = true) { e.eat(22.0, 0.0, happiness = 4.0, label = "a bouquet") }
+                    "giftshop" -> HButton("Souvenir ${e.moneyWhole(12.0)}", small = true) { e.eat(12.0, 0.0, happiness = 3.0, label = "a souvenir") }
+                    "gym" -> HButton("Workout ${e.moneyWhole(18.0)} (1h)", small = true) {
+                        if (e.spend(18.0, "Personal")) { close(e); e.startSkip(com.hustlecity.game.model.SkipKind.WORKOUT, 60, "Working out…") }
                     }
-                    "hairdresser" -> HButton("Haircut \$28", small = true) { e.eat(28.0, 0.0, happiness = 6.0, label = "a fresh haircut") }
+                    "hairdresser" -> HButton("Haircut ${e.moneyWhole(28.0)}", small = true) { e.eat(28.0, 0.0, happiness = 6.0, label = "a fresh haircut") }
                 }
             }
             CardTitle("Side job", modifier = Modifier.padding(top = 14.dp))
@@ -806,7 +806,7 @@ fun HelpPanel(e: GameEngine) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
             for ((t, body) in HELP) {
                 Text(t, style = HT.bodyBold, color = HC.Ink, modifier = Modifier.padding(top = 8.dp))
-                Text(body, style = HT.body, color = HC.InkSoft)
+                Text(e.localize(body), style = HT.body, color = HC.InkSoft)
             }
         }
     }

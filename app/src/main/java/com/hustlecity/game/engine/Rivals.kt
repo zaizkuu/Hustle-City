@@ -94,7 +94,7 @@ class RivalAI(private val e: GameEngine) {
         return ((competition[key(b.typeId, hood)] ?: 0.0) - 1.0).coerceAtLeast(0.0)
     }
 
-    private fun competitionAround(typeId: String, hood: Int, self: RivalBusiness?): Double {
+    fun competitionAround(typeId: String, hood: Int, self: RivalBusiness?): Double {
         ensureCompetition()
         return ((competition[key(typeId, hood)] ?: 0.0) - (self?.let { weight(it) } ?: 0.0)).coerceAtLeast(0.0)
     }
@@ -104,7 +104,9 @@ class RivalAI(private val e: GameEngine) {
     private fun marketingCost(m: Double) = MARKETING_COST.entries.firstOrNull { kotlin.math.abs(it.key - m) < .01 }?.value ?: 0.0
 
     /** A day of trading for a rival store (or a store it is thinking about opening). */
-    fun project(t: BusinessTypeDef, bld: Building, level: Int, rep: Double, pf: Double, mkt: Double, comp: Double, owned: Boolean): Day {
+    fun project(t: BusinessTypeDef, bld: Building, level: Int, rep: Double, pf: Double, mkt: Double, comp: Double, owned: Boolean, tenantRent: Double = 0.0): Day {
+        // a store renting from you pays your rent, not the city's
+        val monthly = if (tenantRent > 0) tenantRent else bld.baseRent
         val hood = bld.hood
         val accept = BizCalc.buyProbability(pf)
         var spend = 0.0
@@ -128,7 +130,7 @@ class RivalAI(private val e: GameEngine) {
                 customers += min(d, cap); lost += max(0.0, d - cap)
             }
             val wages = openHours * staff * t.staffRole.baseWage
-            val rent = if (owned) 0.0 else bld.baseRent / 30.0
+            val rent = if (owned) 0.0 else monthly / 30.0
             return Day(customers * spend, 0.0, wages + rent + marketingCost(mkt), customers.toInt(), lost.toInt())
         }
         val promo = (bld.traffic + mkt * .5).coerceIn(0.0, 1.0)
@@ -152,7 +154,7 @@ class RivalAI(private val e: GameEngine) {
         }
         val staff = (if (t.id == "hairdresser") 2 * level else level) + (if (t.performer != null) 1 else 0)
         val wages = openHours * staff * t.staffRole.baseWage + 4 * 13.0
-        val rent = if (owned) 0.0 else bld.baseRent / 30.0
+        val rent = if (owned) 0.0 else monthly / 30.0
         return Day(customers * spend, customers * cogs, wages + rent + t.dailyFee + marketingCost(mkt), customers.toInt(), lost.toInt())
     }
 
@@ -187,10 +189,10 @@ class RivalAI(private val e: GameEngine) {
     private fun projectStore(rb: RivalBusiness): Day? {
         val bld = e.city.building(rb.buildingId) ?: return null
         val t = Catalog.type(rb.typeId)
-        return project(t, bld, rb.level, rb.reputation, rb.priceFactor, rb.marketing, competitionAround(rb.typeId, bld.neighborhood, rb), rb.owned)
+        return project(t, bld, rb.level, rb.reputation, rb.priceFactor, rb.marketing, competitionAround(rb.typeId, bld.neighborhood, rb), rb.owned, rb.tenantRent)
     }
 
-    private fun basePrice(r: Rival) = when (r.strategy) { 2 -> 1.08; 3 -> .92; else -> 1.0 }
+    fun basePrice(r: Rival) = when (r.strategy) { 2 -> 1.08; 3 -> .92; else -> 1.0 }
 
     // ------------------------------------------------------------------ setup
 
@@ -353,7 +355,7 @@ class RivalAI(private val e: GameEngine) {
 
         // 7. buy the building of a profitable store instead of paying rent
         if (r.cash > 1_200_000 && rnd.nextDouble() < .25) {
-            val rented = storesOf(r).filter { !it.owned && it.profit > 200 }.maxByOrNull { e.city.building(it.buildingId)?.baseRent ?: 0.0 }
+            val rented = storesOf(r).filter { !it.owned && it.tenantRent <= 0.0 && it.profit > 200 }.maxByOrNull { e.city.building(it.buildingId)?.baseRent ?: 0.0 }
             val bld = rented?.let { e.city.building(it.buildingId) }
             if (rented != null && bld != null && r.cash - bld.value > reserve * 2) {
                 r.cash -= bld.value

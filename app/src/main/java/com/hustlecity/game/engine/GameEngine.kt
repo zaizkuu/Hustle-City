@@ -24,8 +24,6 @@ import com.hustlecity.game.world.Maps
 import com.hustlecity.game.world.RoadHit
 import com.hustlecity.game.world.Traffic
 import com.hustlecity.game.world.dist
-import java.text.NumberFormat
-import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -140,12 +138,13 @@ class GameEngine(context: Context?) {
     var atGasStation = false
 
     private val tmp = FloatArray(2)
-    private val moneyFmt: NumberFormat = NumberFormat.getCurrencyInstance(Locale.US)
 
     // ------------------------------------------------------------------ lifecycle
 
     fun newGame(name: String, skin: Int, shirt: Int, difficulty: Int, seed: Long = 1337L, mapId: String = Maps.CLASSIC,
-                rules: com.hustlecity.game.model.GameRules = com.hustlecity.game.model.GameRules.preset(difficulty)) {
+                rules: com.hustlecity.game.model.GameRules = com.hustlecity.game.model.GameRules.preset(difficulty),
+                slot: Int = saves.freeSlot() ?: saves.slot) {
+        saves.slot = slot
         city = City(seed, mapId)
         traffic.attach(city)
         val s = GameState(seed = seed, minute = 8L * 60, mapId = city.mapId)
@@ -192,8 +191,8 @@ class GameEngine(context: Context?) {
         save()
     }
 
-    fun loadGame(): Boolean {
-        val s = saves.load() ?: return false
+    fun loadGame(slot: Int = saves.latestSlot() ?: saves.slot): Boolean {
+        val s = saves.load(slot) ?: return false
         state = s
         city = City(s.seed, s.mapId)
         traffic.attach(city)
@@ -244,23 +243,25 @@ class GameEngine(context: Context?) {
 
     fun save(showToast: Boolean = false) {
         if (!hasGame) return
-        val ok = saves.save(state)
+        val info = SlotInfo(saves.slot, state.player.name, state.mapId, state.day, state.player.money, netWorth(), state.businesses.size, System.currentTimeMillis())
+        val ok = saves.save(state, info)
         if (showToast) toast(if (ok) "Game saved" else "Saving failed", if (ok) ToastKind.SAVE else ToastKind.BAD)
     }
 
     // ------------------------------------------------------------------ helpers
 
-    fun money(v: Double): String = moneyFmt.format(v)
+    /** Money as this city shows it: dollars, or pesos, yen and won in Manila, Tokyo and Seoul. */
+    val currency: Currency get() = if (::state.isInitialized) Currency.forMap(state.mapId) else Currency.USD
 
-    fun moneyShort(v: Double): String {
-        val a = abs(v)
-        val sign = if (v < 0) "-" else ""
-        return when {
-            a >= 1_000_000 -> "$sign$%.2fM".format(a / 1_000_000)
-            a >= 10_000 -> "$sign$%.1fK".format(a / 1000)
-            else -> "$sign$" + "%,.0f".format(a)
-        }
-    }
+    fun money(v: Double): String = currency.format(v)
+
+    fun moneyShort(v: Double): String = currency.short(v)
+
+    /** Money without cents: "$150", "₩202,500". */
+    fun moneyWhole(v: Double): String = currency.whole(v)
+
+    /** A fixed text with its dollar amounts in this city's money. */
+    fun localize(text: String): String = currency.localize(text)
 
     fun bump() { ui.tick++ }
 
@@ -623,7 +624,7 @@ class GameEngine(context: Context?) {
             if (s.player.money < -5000) {
                 s.debtDays++
                 when (s.debtDays) {
-                    1 -> message("Hudson Bank", "Your account is ${money(s.player.money)} overdrawn. Bring it above -\$5,000 within two days or we will close your accounts.")
+                    1 -> message("Hudson Bank", "Your account is ${money(s.player.money)} overdrawn. Bring it above ${moneyWhole(-5000.0)} within two days or we will close your accounts.")
                     2 -> message("Hudson Bank", "FINAL NOTICE: your account is still ${money(s.player.money)} overdrawn. Tomorrow at midnight we start bankruptcy proceedings.")
                     else -> {
                         s.gameOver = true
@@ -673,7 +674,7 @@ class GameEngine(context: Context?) {
         carSpeed = 0f
         spend(400.0, "Medical", allowDebt = true, silent = true)
         p.happiness = (p.happiness - 15).coerceAtLeast(0.0)
-        message("City Hospital", "You collapsed from exhaustion and were brought to City Hospital. Bill: \$400. Remember to sleep!")
+        message("City Hospital", "You collapsed from exhaustion and were brought to City Hospital. Bill: ${money(400.0)}. Remember to sleep!")
         startSkip(SkipKind.HOSPITAL, 6 * 60, "Recovering at City Hospital…", cancellable = false)
     }
 

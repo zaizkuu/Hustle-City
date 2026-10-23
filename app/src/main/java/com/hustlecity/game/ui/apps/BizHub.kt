@@ -72,6 +72,10 @@ import com.hustlecity.game.engine.closeBusiness
 import com.hustlecity.game.engine.setDelivery
 import com.hustlecity.game.engine.setOpen
 import com.hustlecity.game.engine.setPrice
+import com.hustlecity.game.engine.saleOffer
+import com.hustlecity.game.engine.sellBusiness
+import com.hustlecity.game.engine.weekProfit
+import com.hustlecity.game.engine.rentOf
 import com.hustlecity.game.model.Business
 import com.hustlecity.game.model.DeliveryContract
 import com.hustlecity.game.ui.Bar
@@ -377,7 +381,7 @@ private fun InventoryTab(e: GameEngine, biz: Business) {
                         Text("Market ${e.money(market)}", style = HT.small, color = HC.InkSoft)
                         Text("Buy chance ${(prob * 100).roundToInt()}%", style = HT.small, color = if (prob < .5) HC.Red else HC.Green, fontWeight = FontWeight.Bold)
                     }
-                    Stepper(e.money(price), onMinus = { e.setPrice(biz, pid, max(.1, price - priceStep(price))) }, onPlus = { e.setPrice(biz, pid, price + priceStep(price)) })
+                    Stepper(if (e.currency.local(price) >= 100_000) e.moneyShort(price) else e.money(price), onMinus = { e.setPrice(biz, pid, max(.1, price - e.currency.priceStep(price))) }, onPlus = { e.setPrice(biz, pid, price + e.currency.priceStep(price)) })
                 }
             }
         }
@@ -385,7 +389,6 @@ private fun InventoryTab(e: GameEngine, biz: Business) {
     }
 }
 
-private fun priceStep(price: Double) = when { price < 5 -> .1; price < 20 -> .5; price < 100 -> 1.0; else -> 10.0 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -563,7 +566,7 @@ private fun DeliveriesTab(e: GameEngine, biz: Business) {
                         }
                     }
                 }
-                Text("Estimated cost right now: ${e.money(est)} + \$60 delivery fee. Wholesale price +12%." +
+                Text("Estimated cost right now: ${e.money(est)} + ${e.moneyWhole(60.0)} delivery fee. Wholesale price +12%." +
                     (if (contract.auto) " With reorder on, an extra delivery goes out when anything drops below its threshold (at most every 3 hours)." else ""),
                     style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
             } else Text("Turn on to set up daily deliveries.", style = HT.small, color = HC.InkSoft)
@@ -599,6 +602,31 @@ private fun SettingsTab(e: GameEngine, biz: Business) {
                     modifier = Modifier.weight(1f).clip(RoundedCornerShape(4.dp)).background(HC.CardAlt).padding(10.dp))
                 Spacer(Modifier.width(8.dp))
                 HButton("Rename", small = true) { if (name.isNotBlank()) { biz.name = name.trim(); e.bump() } }
+            }
+        }
+        if (!biz.type.facility) WhiteCard(Modifier.fillMaxWidth()) {
+            CardTitle("Sell business")
+            val owned = e.state.rentalFor(biz.buildingId)?.owned == true
+            val offer = e.saleOffer(biz, withBuilding = false)
+            Text("A rival company buys it as it stands: name, staff, furniture and stock. You get the fit-out and stock at a discount " +
+                "plus about two months of its recent profit (${e.money(biz.weekProfit())}/day this week)." +
+                if (owned) " You own the building: keep it and they rent it from you, or sell it with the business." else " The lease goes with it.",
+                style = HT.small, color = HC.InkSoft)
+            if (offer == null) Text("No company has the cash to buy it right now.", style = HT.small, color = HC.Red, modifier = Modifier.padding(top = 6.dp))
+            else {
+                KeyValue("Best offer (${offer.buyer.name})", e.money(offer.price))
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HButton(if (owned) "Sell, keep building" else "Sell business", color = HC.Purple, small = true) {
+                        e.ui.confirm = Confirm("Sell ${biz.name} to ${offer.buyer.name}?", "You get ${e.money(offer.price)}." +
+                            if (owned) " They rent the building from you at ${e.money(e.rentOf(e.city.building(biz.buildingId)!!))} a month." else "", "Sell") { e.sellBusiness(biz, withBuilding = false) }
+                    }
+                    if (owned) {
+                        val both = e.saleOffer(biz, withBuilding = true)
+                        if (both != null) HButton("Sell with building ${e.moneyShort(both.price + both.buildingPrice)}", color = HC.Purple, small = true) {
+                            e.ui.confirm = Confirm("Sell ${biz.name} and its building to ${both.buyer.name}?", "You get ${e.money(both.price + both.buildingPrice)}.", "Sell") { e.sellBusiness(biz, withBuilding = true) }
+                        }
+                    }
+                }
             }
         }
         WhiteCard(Modifier.fillMaxWidth()) {

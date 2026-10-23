@@ -75,7 +75,11 @@ fun GameEngine.cancelLease(buildingId: Int): Boolean {
         if (other == null) { toast("You can't cancel the lease on your only home"); return false }
         city.building(other.buildingId)?.let { moveHomeTo(it) }
     }
-    if (r.owned) earn(city.building(buildingId)?.value?.times(.9) ?: 0.0, "Sold assets")
+    if (r.owned) {
+        earn(city.building(buildingId)?.let { buildingSalePrice(it) } ?: 0.0, "Sold assets")
+        // a tenant stays on, renting from the new owner
+        state.rivalBusinessAt(buildingId)?.let { it.tenantRent = 0.0; economy.rivals.touch() }
+    }
     state.rentals.remove(r)
     if (state.player.waypoint == buildingId) state.player.waypoint = -1
     toast(if (r.owned) "Building sold" else "Lease cancelled")
@@ -87,7 +91,7 @@ fun GameEngine.cancelLease(buildingId: Int): Boolean {
 
 fun GameEngine.startBusiness(buildingId: Int, typeId: String, name: String): Business? {
     val b = city.building(buildingId) ?: return null
-    if (state.rentalFor(buildingId) == null || state.businessAt(buildingId) != null) return null
+    if (state.rentalFor(buildingId) == null || state.businessAt(buildingId) != null || state.rivalBusinessAt(buildingId) != null) return null
     val type = Catalog.type(typeId)
     if (type.buildingKind != b.kind.name) { toast("${type.name} can't open in a ${b.kind.label.lowercase()} building"); return null }
     if (type.sources.contains(Source.IMPORT) && Catalog.COURSE_IMPORT !in state.player.courses) {
@@ -143,7 +147,7 @@ fun GameEngine.closeBusiness(biz: Business) {
 }
 
 fun GameEngine.setPrice(biz: Business, pid: String, price: Double) {
-    biz.prices[pid] = (price * 100).roundToInt() / 100.0
+    biz.prices[pid] = currency.roundPrice(price)
     bump()
 }
 
@@ -580,11 +584,18 @@ fun GameEngine.buyVehicle(defId: String, dealerBuildingId: Int, paint: Int = 0) 
 }
 
 fun GameEngine.sellVehicle(v: OwnedVehicle) {
-    val value = vehicleValue(v)
+    // what's in the trunk is sold off at half price with it
+    val cargo = v.cargo.filter { !it.unpaid }.sumOf { if (it.isProduct) (Catalog.product(it.id)?.cost ?: 0.0) * it.qty * .5 else (Catalog.item(it.id)?.price ?: 0.0) * .5 }
+    val value = vehicleValue(v) + cargo
     if (state.player.driving == v.id) exitVehicle()
     state.vehicles.remove(v)
+    for (r in state.fleet) if (r.vehicleId == v.id && r.enabled) {
+        r.enabled = false
+        message("Fleet", "Route ${ops.routeName(r)} is paused: its van was sold.", notify = false)
+    }
     earn(value, "Sold assets")
     toast("Sold ${v.def.name} for ${money(value)}")
+    bump()
 }
 
 fun GameEngine.repairVehicle(v: OwnedVehicle) {

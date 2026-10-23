@@ -286,7 +286,7 @@ class InteriorRenderer(private val e: GameEngine) {
             when {
                 sale != null -> {
                     val def = Catalog.item(sale) ?: continue
-                    val price = "$" + "%,d".format(def.price.toLong())
+                    val price = e.moneyWhole(def.price)
                     text = if (i == sc.inspect) "${def.name} · $price" else price
                     bg = if (i == sc.inspect) c(0xFF2F80ED) else c(0xFFF2C94C)
                 }

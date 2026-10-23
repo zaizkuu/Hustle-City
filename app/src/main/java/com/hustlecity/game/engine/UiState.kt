@@ -8,7 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.hustlecity.game.model.DayRecord
 
-enum class Screen { MENU, NEW_GAME, GAME }
+enum class Screen { MENU, NEW_GAME, LOAD, GAME }
 
 enum class AppId(val title: String) {
     PERSONA("Persona"), CONTACTS("Contacts"), RIVALS("Rivals"), STAFF("Staff"),

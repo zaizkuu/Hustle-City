@@ -675,6 +675,8 @@ class Economy(private val e: GameEngine) {
         }
         // rent
         for (r in s.rentals) if (!r.owned) e.spend(r.rentPerMonth / 30.0, "Rent", allowDebt = true, silent = true)
+        // and the rent your own tenants pay you
+        e.landlordDaily()
         // loans
         val paidOff = ArrayList<Int>()
         for (loan in s.loans) {

@@ -292,6 +292,14 @@ data class Rental(
     /** Day the lease is up for renewal, when the landlord may raise the rent (0: not set yet, older saves). */
     var leaseEnd: Int = 0,
     var renewals: Int = 0,
+    /** An owned building offered to tenants, at [askPct] of the market rent. */
+    var listed: Boolean = false,
+    var askPct: Double = 1.0,
+    /** Who rents it from you ("" for nobody), what they pay a month, since when and until when their lease runs. */
+    var tenant: String = "",
+    var tenantRent: Double = 0.0,
+    var tenantSince: Int = 0,
+    var tenantLeaseEnd: Int = 0,
 )
 
 /** Leases run for this many days before they renew. */
@@ -363,6 +371,8 @@ data class RivalBusiness(
     var losingDays: Int = 0,
     /** Player business this store is fighting on price (-1 none). */
     var targetBiz: Int = -1,
+    /** Monthly rent this store pays you as its landlord (0 when it doesn't rent from you). */
+    var tenantRent: Double = 0.0,
 )
 
 @Serializable

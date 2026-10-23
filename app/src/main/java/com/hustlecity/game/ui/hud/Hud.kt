@@ -278,7 +278,7 @@ fun ObjectivesPanel(e: GameEngine, modifier: Modifier = Modifier) {
                 ) {
                     CheckBox(done)
                     Text(
-                        o.text, color = if (done) Color.White.copy(alpha = .55f) else Color.White, fontSize = 11.sp, lineHeight = 14.sp,
+                        e.localize(o.text), color = if (done) Color.White.copy(alpha = .55f) else Color.White, fontSize = 11.sp, lineHeight = 14.sp,
                         textDecoration = if (done) TextDecoration.LineThrough else null, modifier = Modifier.padding(start = 7.dp),
                     )
                 }
@@ -547,6 +547,7 @@ fun BuildingCard(e: GameEngine, modifier: Modifier = Modifier, avoidPhone: Boole
             }
             val status: Pair<String, Color>? = when {
                 b.id == s.player.home -> "YOUR HOME" to HC.Orange
+                rental?.owned == true && rental.tenant.isNotEmpty() -> "YOURS · LET TO ${rental.tenant.uppercase()} (${e.money(rental.tenantRent)}/MO)" to HC.Orange
                 rental?.owned == true -> "OWNED BY YOU" to HC.Orange
                 rental != null -> "RENTED BY YOU" to HC.Orange
                 biz != null -> null

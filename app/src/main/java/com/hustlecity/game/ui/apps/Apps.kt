@@ -66,6 +66,14 @@ import com.hustlecity.game.engine.raise
 import com.hustlecity.game.engine.rentBuilding
 import com.hustlecity.game.engine.repayLoan
 import com.hustlecity.game.engine.train
+import com.hustlecity.game.engine.buildingSalePrice
+import com.hustlecity.game.engine.canLet
+import com.hustlecity.game.engine.evictTenant
+import com.hustlecity.game.engine.listForTenants
+import com.hustlecity.game.engine.sellAndLeaseBack
+import com.hustlecity.game.engine.sellVehicle
+import com.hustlecity.game.engine.tenantRentAt
+import com.hustlecity.game.engine.unlist
 import com.hustlecity.game.model.Employee
 import com.hustlecity.game.ui.AppIconTile
 import com.hustlecity.game.ui.Bar
@@ -74,6 +82,7 @@ import com.hustlecity.game.ui.Chip
 import com.hustlecity.game.ui.Dot
 import com.hustlecity.game.ui.EmptyNote
 import com.hustlecity.game.ui.HButton
+import com.hustlecity.game.ui.Stepper
 import com.hustlecity.game.ui.KeyValue
 import com.hustlecity.game.ui.LabeledBar
 import com.hustlecity.game.ui.VehicleThumb
@@ -210,6 +219,14 @@ fun PersonaApp(e: GameEngine) {
                         HButton("Locate", small = true) {
                             e.ui.app = AppId.MAPS
                             e.camera.mapX = v.x; e.camera.mapY = v.y; e.camera.mapDist = 350f
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        // sold through a dealer's app: the buyer collects it wherever it's parked
+                        HButton("Sell ${e.moneyShort(e.vehicleValue(v))}", small = true, color = HC.Red, enabled = v.awayUntil <= s.minute) {
+                            val routes = s.fleet.count { it.vehicleId == v.id }
+                            e.ui.confirm = Confirm("Sell your ${v.def.name}?", "You get ${e.money(e.vehicleValue(v))}." +
+                                (if (v.cargo.isNotEmpty()) " Its cargo is sold off at half price." else "") +
+                                (if (routes > 0) " Its delivery route${if (routes > 1) "s" else ""} will pause." else ""), "Sell") { e.sellVehicle(v) }
                         }
                     }
                 }
@@ -673,9 +690,11 @@ fun RealtyApp(e: GameEngine) {
                                     when {
                                         b.id == s.player.home -> "Your home"
                                         biz != null -> biz.name
+                                        r.tenant.isNotEmpty() -> "Let to ${r.tenant} · ${e.money(r.tenantRent)}/mo until day ${r.tenantLeaseEnd}"
+                                        r.listed -> "Looking for a tenant at ${e.money(e.tenantRentAt(b, r.askPct))}/mo"
                                         b.kind == BKind.RETAIL -> "Empty — go inside to start a business"
-                                        else -> "Residential"
-                                    }, style = HT.small, color = HC.Ink,
+                                        else -> b.kind.label
+                                    }, style = HT.small, color = if (r.tenant.isNotEmpty()) HC.Green else HC.Ink,
                                 )
                             }
                             Column(Modifier.padding(horizontal = 10.dp), horizontalAlignment = Alignment.End) {
@@ -688,9 +707,30 @@ fun RealtyApp(e: GameEngine) {
                                 HButton("Buy", small = true, color = HC.Purple) { e.buyBuilding(b.id) }
                                 Spacer(Modifier.width(6.dp))
                             }
-                            HButton(if (r.owned) "Sell" else "End lease", small = true, color = HC.Red) {
-                                e.ui.confirm = Confirm(if (r.owned) "Sell ${b.address}?" else "End lease at ${b.address}?", "This can't be undone.", "Confirm") { e.cancelLease(b.id) }
+                            if (r.owned && (biz != null || b.id == s.player.home)) {
+                                // sell it but stay: your business or home rents it back from the buyer
+                                HButton("Lease back", small = true, color = HC.Purple) {
+                                    e.ui.confirm = Confirm("Sell ${b.address} and lease it back?", "You get ${e.money(e.buildingSalePrice(b))} and pay ${e.money(e.rentOf(b))} a month to stay.", "Sell") { e.sellAndLeaseBack(b.id) }
+                                }
+                                Spacer(Modifier.width(6.dp))
                             }
+                            if (!r.owned || biz == null) HButton(if (r.owned) "Sell" else "End lease", small = true, color = HC.Red) {
+                                e.ui.confirm = Confirm(if (r.owned) "Sell ${b.address}?" else "End lease at ${b.address}?",
+                                    if (r.owned) "You get ${e.money(e.buildingSalePrice(b))}." + (if (r.tenant.isNotEmpty()) " ${r.tenant} stays on with the new owner." else "") else "This can't be undone.", "Confirm") { e.cancelLease(b.id) }
+                            }
+                        }
+                        if (e.canLet(r)) Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Rent it out at", style = HT.small, color = HC.InkSoft)
+                            Stepper("${(r.askPct * 100).roundToInt()}%", { r.askPct = (r.askPct - .05).coerceAtLeast(.6); e.bump() }, { r.askPct = (r.askPct + .05).coerceAtMost(1.6); e.bump() },
+                                Modifier.padding(horizontal = 6.dp))
+                            Text("of market · ${e.money(e.tenantRentAt(b, r.askPct))}/mo", style = HT.small, color = HC.InkSoft, modifier = Modifier.weight(1f))
+                            if (r.tenant.isNotEmpty()) {
+                                HButton("End tenancy", small = true, color = HC.Orange) {
+                                    e.ui.confirm = Confirm("Ask ${r.tenant} to leave?", "They move out now and you pay a month's rent (${e.money(r.tenantRent)}) in compensation." +
+                                        if (b.kind != BKind.RESIDENTIAL) " Their store closes." else "", "End tenancy") { e.evictTenant(b.id) }
+                                }
+                            } else if (r.listed) HButton("Stop listing", small = true, color = HC.GlassLight) { e.unlist(b.id) }
+                            else HButton("Find tenant", small = true, color = HC.Green) { e.listForTenants(b.id, r.askPct) }
                         }
                     }
                 }
