@@ -311,6 +311,69 @@ def center_wash(k):
     return Image.fromarray(np.dstack([np.zeros((H, W, 3)), _center[..., None] * 255 * k]).astype(np.uint8), 'RGBA')
 
 
+# ---------------------------------------------------------------- the phone
+SCREEN_W, SCREEN_H = 1120, 630
+BEZEL = 20
+
+
+def device_image(screen):
+    """The screen inside a landscape phone with a thin bezel, rounded corners and a glass sheen."""
+    dw, dh = SCREEN_W + BEZEL * 2, SCREEN_H + BEZEL * 2
+    im = Image.new('RGBA', (dw, dh), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle((0, 0, dw - 1, dh - 1), radius=58, fill=(16, 17, 20, 255), outline=(86, 90, 98, 255), width=3)
+    d.rounded_rectangle((4, 4, dw - 5, dh - 5), radius=55, outline=(40, 42, 47, 255), width=2)
+    scr = screen.convert('RGB').resize((SCREEN_W, SCREEN_H), Image.LANCZOS)
+    m = Image.new('L', (SCREEN_W, SCREEN_H), 0)
+    ImageDraw.Draw(m).rounded_rectangle((0, 0, SCREEN_W - 1, SCREEN_H - 1), radius=38, fill=255)
+    im.paste(scr, (BEZEL, BEZEL), m)
+    # a faint diagonal sheen across the glass
+    sheen = Image.new('L', (SCREEN_W, SCREEN_H), 0)
+    sd = ImageDraw.Draw(sheen)
+    sd.polygon([(SCREEN_W * .55, 0), (SCREEN_W * .8, 0), (SCREEN_W * .45, SCREEN_H), (SCREEN_W * .2, SCREEN_H)], fill=16)
+    sheen = Image.fromarray((np.asarray(sheen, np.float32) * (np.asarray(m, np.float32) / 255)).astype(np.uint8))
+    im.alpha_composite(Image.merge('RGBA', [Image.new('L', sheen.size, 255)] * 3 + [sheen]), (BEZEL, BEZEL))
+    d.ellipse((7, dh / 2 - 5, 17, dh / 2 + 5), fill=(30, 32, 38, 255))  # the front camera, on the left in landscape
+    return im
+
+
+def homography(src_pts, dst_pts):
+    """Coefficients for PIL's PERSPECTIVE transform: maps output points (dst) back to input points (src)."""
+    A, b = [], []
+    for (x, y), (u, v) in zip(dst_pts, src_pts):
+        A.append([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.append(u)
+        A.append([0, 0, 0, x, y, 1, -v * x, -v * y]); b.append(v)
+    return np.linalg.solve(np.array(A, float), np.array(b, float)).tolist()
+
+
+def place_device(frame, dev, t, dur):
+    """The phone floats in on the right, turning gently toward the viewer."""
+    p = ease_out(t / .6)
+    yaw = math.radians(-12 + 7 * ease_in_out(t / dur))
+    pitch = math.radians(4 - 2.5 * ease_in_out(t / dur))
+    scale = .94 + .06 * p
+    cx, cy = W * .655, H * .5 + 40 * (1 - p)
+    dw, dh = dev.size
+    F = 2600.0
+    pts = []
+    for x, y in ((-dw / 2, -dh / 2), (dw / 2, -dh / 2), (dw / 2, dh / 2), (-dw / 2, dh / 2)):
+        x, y = x * scale, y * scale
+        # turn about the vertical axis, then tip about the horizontal one
+        X, Z = x * math.cos(yaw), x * math.sin(yaw)
+        Y, Z = y * math.cos(pitch) - Z * math.sin(pitch), y * math.sin(pitch) + Z * math.cos(pitch)
+        k = F / (F + Z)
+        pts.append((cx + X * k, cy + Y * k))
+    co = homography([(0, 0), (dw, 0), (dw, dh), (0, dh)], pts)
+    warped = dev.transform((W, H), Image.PERSPECTIVE, co, Image.BICUBIC)
+    a = warped.split()[3]
+    sh = a.resize((W // 4, H // 4), Image.BILINEAR).filter(ImageFilter.GaussianBlur(9)).resize((W, H), Image.BILINEAR)
+    shadow = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+    shadow.putalpha(sh.point(lambda v: int(v * .7 * p)))
+    frame.alpha_composite(shadow, (0, 36))
+    if p < 1: warped.putalpha(a.point(lambda v: int(v * p)))
+    frame.alpha_composite(warped)
+
+
 # ---------------------------------------------------------------- output
 def stills(frame_at, out, picks):
     """Single frames as JPG to check the look: picks are frame numbers, or seconds when they have a point."""

@@ -21,6 +21,8 @@ import com.hustlecity.game.render.gpu.GpuCapture
 import com.hustlecity.game.render.gpu.GpuFrame
 import com.hustlecity.game.ui.menu.HustleCityApp
 import com.hustlecity.game.world.BKind
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -243,5 +245,57 @@ class CinematicUiTest {
         e.ops.buyBond(100_000.0, 180)
         e.ui.app = AppId.MARKETS
         still(e, "app_markets")
+    }
+
+    // ------------------------------------------------------------------ the 1.8 update trailer
+
+    /** Selling a café in Manila to a rival company, the offer in pesos. */
+    @Test
+    fun v1() {
+        if (!on("v1")) { assumeTrue(false); return }
+        val e = game("manila", 15f)
+        val biz = cafe(e, "Kapihan sa Kanto")
+        for (r in e.state.rivals) r.cash = maxOf(r.cash, 4_000_000.0)
+        e.ui.app = AppId.BIZHUB; e.ui.bizHubSel = biz.id; e.ui.bizHubTab = 6
+        still(e, "v_sell")
+    }
+
+    /** A landlord in Tokyo: a shop let to a ramen chain, a flat looking for a tenant, all in yen. */
+    @Test
+    fun v2() {
+        if (!on("v2")) { assumeTrue(false); return }
+        val e = game("tokyo", 15f)
+        val biz = cafe(e, "Kissa Hoshi")
+        e.state.rentals.replaceAll { if (it.buildingId == biz.buildingId) it.copy(owned = true) else it }
+        val shops = e.city.buildings.filter { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.placeId == null }.sortedByDescending { it.area }
+        val homes = e.city.buildings.filter { e.isVacant(it.id) && it.kind == BKind.RESIDENTIAL && it.placeId == null }.sortedByDescending { it.area }
+        val day = e.state.day
+        e.state.rentals += Rental(shops[0].id, shops[0].baseRent, day - 30, owned = true, tenant = "Menya Kintaro", tenantRent = shops[0].baseRent * 1.1, tenantSince = day - 30, tenantLeaseEnd = day + 30)
+        e.state.rentals += Rental(shops[1].id, shops[1].baseRent, day - 12, owned = true, tenant = "Sakura Drugstore", tenantRent = shops[1].baseRent * .95, tenantSince = day - 12, tenantLeaseEnd = day + 48)
+        e.state.rentals += Rental(homes[0].id, homes[0].baseRent, day - 3, owned = true, listed = true, askPct = 1.05)
+        e.ui.app = AppId.REALTY
+        still(e, "v_landlord") { rule.onNodeWithText("My properties", substring = true).performClick() }
+    }
+
+    /** Six save slots: an empire in every city, each in its own money. */
+    @Test
+    fun v3() {
+        if (!on("v3")) { assumeTrue(false); return }
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val e = GameEngine(ctx)
+        for (i in 1..6) e.saves.delete(i)
+        val games = listOf(Triple("nyc", "Alex Rivera", 48), Triple("manila", "Maria Santos", 31), Triple("tokyo", "Kenji Mori", 22),
+            Triple("seoul", "Ji-woo Han", 15), Triple(com.hustlecity.game.world.Maps.CLASSIC, "Sam Carter", 64))
+        for ((k, g) in games.withIndex()) {
+            e.newGame(g.second, 1, 2, 1, mapId = g.first, slot = k + 1)
+            e.ui.tip = null
+            e.state.minute = (g.third - 1) * 1440L + 15 * 60
+            e.state.player.money = 18_500.0 + k * 96_250.0 + g.third * 4_100.0
+            repeat(k % 3 + 1) { cafe(e, "Cafe $it") }
+            e.save()
+        }
+        e.ui.screen = com.hustlecity.game.engine.Screen.LOAD
+        still(e, "v_slots")
+        for (i in 1..6) e.saves.delete(i)
     }
 }

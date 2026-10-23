@@ -68,6 +68,7 @@ class CinematicTest {
     }
 
     private fun engine(mapId: String, hour: Float, sky: Sky = Sky.CLEAR): GameEngine {
+        com.hustlecity.game.render.Models.assets = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().assets
         val e = GameEngine(null)
         e.newGame("Alex Rivera", 1, 2, 1, mapId = mapId)
         e.ui.tip = null; e.ui.phoneOpen = false
@@ -795,6 +796,226 @@ class CinematicTest {
             val k = Key(v[0], v[1], v[2], v[3], v[4])
             fly(e, "x3_$n", .05f, listOf(k, k), easing = .2f, warm = 1f) { _, _ -> clearWeather(e) }
         }
+    }
+
+    // ------------------------------------------------------------------ the 1.8 update trailer (v01 .. v13)
+
+    /**
+     * A comparison: the same moment drawn twice, once as the game looked before 1.8 (furniture, products and street
+     * furniture as simple shapes) into <[name]>_before and once with the 3D models into <[name]>_after.
+     */
+    private inner class Pair2(name: String) {
+        val before = Out("${name}_before")
+        val after = Out("${name}_after")
+        fun frame(drawCanvas: (Canvas) -> Unit, drawBefore: (Canvas, GpuFrame) -> Unit, drawAfter: (Canvas, GpuFrame) -> Unit, weather: Boolean) {
+            com.hustlecity.game.render.Models.enabled = false
+            before.frame(drawCanvas, drawBefore, weather)
+            com.hustlecity.game.render.Models.enabled = true
+            after.frame(drawCanvas, drawAfter, weather)
+        }
+    }
+
+    /** [inside], drawn before and after (see [Pair2]). */
+    private fun insideCompare(e: GameEngine, name: String, seconds: Float, cam: (Float) -> FloatArray, warm: Float = 12f) {
+        val sc = e.interior!!
+        val out = Pair2(name)
+        // a renderer each, so each keeps its own cached shelves
+        val ra = InteriorRenderer(e); val rb = InteriorRenderer(e)
+        val frames = (seconds * fps).toInt()
+        repeat((warm * fps).toInt()) { sc.update(1f / fps, true) }
+        for (f in 0 until frames) {
+            val u = ease(f / (frames - 1f).coerceAtLeast(1f), .6f)
+            sc.update(1f / fps, true)
+            val c = cam(u)
+            for (r in listOf(ra, rb)) { r.cinemaTarget = floatArrayOf(c[0], c[1], c[2]); r.cinemaPitch = Math.toRadians(c[4].toDouble()).toFloat() }
+            sc.yaw = c[3]
+            out.frame({ cv -> rb.draw(cv, w, h) }, { cv, g -> ra.draw(cv, w, h, g, 3f) }, { cv, g -> rb.draw(cv, w, h, g, 3f) }, false)
+        }
+        com.hustlecity.game.render.Models.enabled = true
+        println("$name: ${out.after.n} frames, before and after")
+    }
+
+    /** [fly], drawn before and after (see [Pair2]). */
+    private fun flyCompare(e: GameEngine, name: String, seconds: Float, keys: List<Key>, easing: Float = .6f, warm: Float = 3f, haze: Float = .3f,
+                           crowd: Float = 90f, each: (Int, Float) -> Unit = { _, _ -> }) {
+        val out = Pair2(name)
+        val ra = WorldRenderer(e).apply { cinematic = true; cinemaHaze = haze }
+        val rb = WorldRenderer(e).apply { cinematic = true; cinemaHaze = haze }
+        val frames = (seconds * fps).toInt()
+        fun place(u: Float) {
+            val v = ease(u, easing)
+            val c = e.camera
+            c.tx = at(keys, v) { it.x }; c.ty = at(keys, v) { it.y }
+            c.dist = at(keys, v) { it.dist }; c.zoom = c.dist
+            c.yaw = at(keys, v) { it.yaw }
+            val pitch = Math.toRadians(at(keys, v) { it.pitch }.toDouble()).toFloat()
+            ra.cinemaPitch = pitch; rb.cinemaPitch = pitch
+            if (e.state.player.driving < 0) { e.state.player.x = c.tx; e.state.player.y = c.ty }
+        }
+        place(0f)
+        e.traffic.update(0f, e.camera.tx, e.camera.ty, 230f, -9999f, -9999f, initial = true)
+        e.traffic.scatter(e.camera.tx, e.camera.ty, crowd, .65f)
+        repeat((warm * fps).toInt()) { each(-1, 0f); e.frame(1f / fps); place(0f) }
+        for (f in 0 until frames) {
+            val u = f / (frames - 1f).coerceAtLeast(1f)
+            each(f, u)
+            e.frame(1f / fps)
+            place(u)
+            out.frame({ c -> rb.draw(c, w, h, 2f) }, { c, g -> ra.draw(c, w, h, 3f, g) }, { c, g -> rb.draw(c, w, h, 3f, g) }, false)
+            checkCamera(e, rb, name, f)
+        }
+        com.hustlecity.game.render.Models.enabled = true
+        println("$name: ${out.after.n} frames, before and after")
+    }
+
+    /**
+     * Opens a [type] store in a big enough shop, its [items] placed (id, x, y, turn), every display full and customers
+     * and staff about.
+     */
+    private fun store(e: GameEngine, type: String, name: String, items: List<PlacedItem>, minW: Int = 12, minD: Int = 11) {
+        e.state.player.courses += Catalog.COURSE_IMPORT
+        val b = e.city.buildings.filter { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.placeId == null && it.gridW >= minW && it.gridD >= minD }
+            .minByOrNull { it.gridW * it.gridD }!!
+        e.state.rentals += Rental(b.id, b.baseRent, 1)
+        val biz = e.startBusiness(b.id, type, name)!!
+        biz.tempClosed = false
+        val room = biz.backRoom.coerceAtLeast(0)
+        for (it in items) biz.furniture += PlacedItem(it.itemId, it.x, it.y + room, it.rot)
+        for ((pid, _) in biz.type.products) if (Catalog.product(pid)?.service == false) biz.stock[pid] = 4000
+        for (k in 0..1) e.state.employees += Employee(e.state.newId(), "Kai", biz.type.staffRole, .7, 15.0, 15.0, 26, businessId = biz.id, shiftStart = 0, shiftEnd = 23, days = 127)
+        e.state.player.inBuilding = b.id
+        e.interior = InteriorScene(e, b, InteriorMode.BUSINESS)
+        e.economy.servedRate[biz.id] = 120.0
+    }
+
+    /** The opening: New York at golden hour, high over the park toward Midtown. */
+    @Test
+    fun v01() {
+        if (!on("v01")) { assumeTrue(false); return }
+        val e = engine("nyc", 17.55f)
+        fly(e, "v01_open", 4.2f, listOf(Key(880f, 520f, 330f, look(-150f, 260f) + .3f, 13f), Key(835f, 610f, 280f, look(-150f, 260f) + .02f, 17f)),
+            easing = .2f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Before and after: the supermarket's aisles, from colored blocks to cans, bottles, crates of fruit and frozen pizzas. */
+    @Test
+    fun v03() {
+        if (!on("v03")) { assumeTrue(false); return }
+        val e = engine("nyc", 13.5f)
+        supermarket(e)
+        val sc = e.interior!!
+        insideCompare(e, "v03_market", 6.4f, { u ->
+            floatArrayOf(sc.w * (.3f + .14f * u), sc.d * (.5f - .04f * u), 9.5f - 1.5f * u, -.62f + .3f * u, 40f - 3f * u)
+        })
+    }
+
+    /** Before and after: a café full of customers, its boxes turned into sofas, tables, lamps and plants. */
+    @Test
+    fun v04() {
+        if (!on("v04")) { assumeTrue(false); return }
+        val e = engine("seoul", 10.2f)
+        store(e, "coffee", "Morning Ritual", listOf(
+            PlacedItem("coffee_machine", 1, 0, 0), PlacedItem("coffee_machine", 3, 0, 0), PlacedItem("pastry_case", 5, 0, 0), PlacedItem("pastry_case", 6, 0, 0),
+            PlacedItem("cash_register", 8, 0, 0), PlacedItem("trash_can", 10, 0, 0),
+            PlacedItem("table_set", 1, 3, 0), PlacedItem("table_set", 4, 3, 0), PlacedItem("rug", 7, 3, 0), PlacedItem("lounge_sofa", 7, 3, 0),
+            PlacedItem("table_set", 1, 6, 0), PlacedItem("table_set", 4, 6, 0), PlacedItem("sofa", 7, 6, 2), PlacedItem("floor_lamp", 9, 5, 0),
+            PlacedItem("plant_large", 0, 5, 0), PlacedItem("plant_large", 10, 3, 0), PlacedItem("speaker_medium", 10, 6, 0), PlacedItem("plant_small", 6, 5, 0),
+        ))
+        val sc = e.interior!!
+        insideCompare(e, "v04_cafe", 6.4f, { u -> floatArrayOf(sc.w * (.42f + .06f * u), sc.d * (.6f - .04f * u), 9f - 1.2f * u, .45f - .25f * u, 38f) }, warm = 20f)
+    }
+
+    /** A New York sidewalk with a bus shelter, a bench or bike rack and newspaper boxes near it: where the furniture is busiest. */
+    private fun busyCorner(e: GameEngine): Int {
+        val pr = StreetProps.of(e.city)
+        fun near(i: Int, k: Int, r: Float) = (0 until pr.count).count { pr.kind[it] == k && hypot(pr.x[it] - pr.x[i], pr.y[it] - pr.y[i]) < r }
+        return (0 until pr.count).filter { pr.kind[it] == StreetProps.BUS_STOP }
+            .maxByOrNull { near(it, StreetProps.NEWS, 30f) * 3 + near(it, StreetProps.BENCH, 30f) * 2 + near(it, StreetProps.BIKE_RACK, 30f) * 2 + near(it, StreetProps.LAMP, 30f) + near(it, StreetProps.HYDRANT, 30f) }!!
+    }
+
+    /** Before and after: the street, its lamps, hydrants, shelters and bike racks from boxes to the real thing. */
+    @Test
+    fun v05() {
+        if (!on("v05")) { assumeTrue(false); return }
+        val e = engine("nyc", 15.2f)
+        val pr = StreetProps.of(e.city)
+        val i = busyCorner(e)
+        // from the curb, looking along the sidewalk at an angle, drifting down it
+        val ax = pr.dirY[i]; val ay = -pr.dirX[i]
+        val bx = pr.x[i] - pr.dirX[i] * 1.5f; val by = pr.y[i] - pr.dirY[i] * 1.5f
+        val yaw = look(-pr.dirX[i], -pr.dirY[i])
+        flyCompare(e, "v05_street", 6.4f, listOf(Key(bx - ax * 10f, by - ay * 10f, 13f, yaw + .8f, 27f), Key(bx - ax * 1f, by - ay * 1f, 12f, yaw + .65f, 25f)),
+            easing = .3f, warm = 4f, crowd = 45f) { _, _ -> clearWeather(e) }
+    }
+
+    private fun shop(name: String, type: String, map: String, hour: Float, items: List<PlacedItem>, cam: (GameEngine, Float) -> FloatArray) {
+        if (!on(name.substring(0, 3))) { assumeTrue(false); return }
+        val e = engine(map, hour)
+        store(e, type, "Shop", items)
+        inside(e, name, 1.8f, { u -> cam(e, u) })
+    }
+
+    @Test
+    fun v06() = shop("v06_fashion", "clothing", "nyc", 14f, listOf(
+        PlacedItem("clothing_rack", 1, 2, 0), PlacedItem("clothing_rack", 4, 2, 0), PlacedItem("round_rack", 7, 2, 0), PlacedItem("shoe_rack", 1, 5, 0),
+        PlacedItem("shoe_rack", 4, 5, 0), PlacedItem("plant_large", 10, 2, 0), PlacedItem("cash_register", 8, 6, 0),
+    )) { e, u -> floatArrayOf(4.6f + 1.2f * u, ((e.interior!!.backRoom?.depth ?: 0) + 3.8f), 8.2f - .8f * u, -.3f + .18f * u, 42f) }
+
+    @Test
+    fun v07() = shop("v07_jewelry", "jewelry", "seoul", 15f, listOf(
+        PlacedItem("jewelry_case", 1, 3, 0), PlacedItem("jewelry_case", 3, 3, 0), PlacedItem("jewelry_case", 5, 3, 0), PlacedItem("jewelry_case", 7, 3, 0),
+        PlacedItem("lounge_sofa", 2, 6, 2), PlacedItem("plant_large", 9, 3, 0), PlacedItem("floor_lamp", 0, 3, 0),
+    )) { e, u -> floatArrayOf(3.8f + 1.4f * u, ((e.interior!!.backRoom?.depth ?: 0) + 3.8f), 6.6f - .6f * u, -.2f + .12f * u, 46f) }
+
+    @Test
+    fun v08() = shop("v08_bakery", "coffee", "tokyo", 9f, listOf(
+        PlacedItem("pastry_case", 1, 1, 0), PlacedItem("pastry_case", 2, 1, 0), PlacedItem("pastry_case", 3, 1, 0), PlacedItem("coffee_machine", 5, 1, 0),
+        PlacedItem("cash_register", 7, 1, 0), PlacedItem("table_set", 2, 4, 0), PlacedItem("table_set", 5, 4, 0),
+    )) { e, u -> floatArrayOf(3.4f + 1.4f * u, ((e.interior!!.backRoom?.depth ?: 0) + 2.8f), 7.2f - .6f * u, .2f - .12f * u, 40f) }
+
+    @Test
+    fun v09() = shop("v09_florist", "florist", "classic", 11f, listOf(
+        PlacedItem("flower_stand", 1, 2, 0), PlacedItem("flower_stand", 2, 2, 0), PlacedItem("flower_stand", 3, 2, 0), PlacedItem("flower_stand", 4, 2, 0),
+        PlacedItem("shelf", 6, 2, 0), PlacedItem("plant_large", 9, 2, 0), PlacedItem("cash_register", 6, 5, 0),
+    )) { e, u -> floatArrayOf(3.4f + 1.4f * u, ((e.interior!!.backRoom?.depth ?: 0) + 3.2f), 7.0f - .6f * u, -.22f + .15f * u, 40f) }
+
+    @Test
+    fun v10() = shop("v10_tech", "electronics", "tokyo", 16f, listOf(
+        PlacedItem("electronics_table", 1, 3, 0), PlacedItem("electronics_table", 4, 3, 0), PlacedItem("electronics_table", 7, 3, 0),
+        PlacedItem("cash_register", 8, 6, 0), PlacedItem("plant_large", 0, 6, 0),
+    )) { e, u -> floatArrayOf(3.8f + 1.8f * u, ((e.interior!!.backRoom?.depth ?: 0) + 3.8f), 7.4f - .6f * u, .15f - .1f * u, 42f) }
+
+    @Test
+    fun v11() = shop("v11_bar", "nightclub", "nyc", 23f, listOf(
+        PlacedItem("cocktail_bar", 2, 1, 0), PlacedItem("cocktail_bar", 6, 1, 0), PlacedItem("barstool", 3, 3, 0), PlacedItem("barstool", 4, 3, 0),
+        PlacedItem("barstool", 7, 3, 0), PlacedItem("speaker_large", 0, 1, 0), PlacedItem("speaker_large", 10, 1, 0), PlacedItem("lounge_sofa", 3, 6, 0),
+    )) { e, u -> floatArrayOf(4.2f + 2.0f * u, ((e.interior!!.backRoom?.depth ?: 0) + 2.8f), 8.0f - .7f * u, .1f - .1f * u, 36f) }
+
+    /** People on a busy New York sidewalk stepping round the shelter, the benches and the trees. */
+    @Test
+    fun v12() {
+        if (!on("v12")) { assumeTrue(false); return }
+        val e = engine("nyc", 12.5f)
+        val pr = StreetProps.of(e.city)
+        val i = busyCorner(e)
+        val ax = pr.dirY[i]; val ay = -pr.dirX[i]
+        val bx = pr.x[i] - pr.dirX[i] * 1f; val by = pr.y[i] - pr.dirY[i] * 1f
+        val yaw = look(-pr.dirX[i], -pr.dirY[i])
+        fly(e, "v12_crowd", 4.2f, listOf(Key(bx - ax * 4f, by - ay * 4f, 21f, yaw - .55f, 30f), Key(bx + ax * 4f, by + ay * 4f, 19f, yaw - .3f, 27f)),
+            easing = .3f, warm = 6f, crowd = 50f) { _, _ -> clearWeather(e) }
+    }
+
+    /** New York after dark: the street lights and signals on a corner. */
+    @Test
+    fun v13() {
+        if (!on("v13")) { assumeTrue(false); return }
+        val e = engine("nyc", 21.4f)
+        val pr = StreetProps.of(e.city)
+        val i = busyCorner(e)
+        val ax = pr.dirY[i]; val ay = -pr.dirX[i]
+        val yaw = look(-pr.dirX[i], -pr.dirY[i])
+        fly(e, "v13_night", 2.6f, listOf(Key(pr.x[i] - ax * 10f, pr.y[i] - ay * 10f, 34f, yaw + .9f, 22f), Key(pr.x[i] + ax * 2f, pr.y[i] + ay * 2f, 30f, yaw + .7f, 20f)),
+            easing = .2f, warm = 4f, haze = .3f, crowd = 60f) { _, _ -> clearWeather(e) }
     }
 
     /** The finale: Midtown at night, pulling back as the city lights up. */
