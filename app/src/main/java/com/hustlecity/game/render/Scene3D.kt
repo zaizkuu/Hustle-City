@@ -582,6 +582,34 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         g.ellipsoidAxes(streamFor(color), wx, wy, cz, wfx, wfy, fz, rf, wrx, wry, rz, rr, ru, color, mat, detail, isEmissive(color))
     }
 
+    /**
+     * Draws a model mesh for furniture of footprint [w] x [d] tiles at grid position (x, y), turned [rot] quarter
+     * turns the way box models turn (GPU only). Returns false when it wasn't drawn.
+     */
+    fun mesh(m: Models.Mesh, x: Float, y: Float, rot: Int, w: Float, d: Float, alpha: Float = 1f): Boolean {
+        val g = gpu ?: return false
+        // the quarter turn and footprint offset of PartSorter.add, as an affine map of the model's own x, y
+        var ax: Float; var ay: Float; var bx: Float; var by: Float; var ox: Float; var oy: Float
+        when (rot and 3) {
+            0 -> { ax = 1f; ay = 0f; bx = 0f; by = 1f; ox = x; oy = y }
+            1 -> { ax = 0f; ay = 1f; bx = -1f; by = 0f; ox = x + d; oy = y }
+            2 -> { ax = -1f; ay = 0f; bx = 0f; by = -1f; ox = x + w; oy = y + d }
+            else -> { ax = 0f; ay = -1f; bx = 1f; by = 0f; ox = x; oy = y + w }
+        }
+        if (fOn) {
+            val nax = ax * fc - ay * fs; val nay = ax * fs + ay * fc
+            val nbx = bx * fc - by * fs; val nby = bx * fs + by * fc
+            val nox = fx0 + ox * fc - oy * fs; val noy = fy0 + ox * fs + oy * fc
+            ax = nax; ay = nay; bx = nbx; by = nby; ox = nox; oy = noy
+        }
+        // skip it when it's wholly behind the camera
+        val cx = ox + (ax * w + bx * d) * .5f; val cy = oy + (ay * w + by * d) * .5f
+        if (proj.camZOf(cx, cy, m.bounds[5] * .5f) < -(w + d + m.bounds[5])) return true
+        val a = (alpha.coerceIn(0f, 1f) * 255).toInt()
+        g.mesh(if (a < 250) com.hustlecity.game.render.gpu.GpuFrame.TRANSPARENT else com.hustlecity.game.render.gpu.GpuFrame.OPAQUE, m, ox, oy, 0f, ax, ay, bx, by, a)
+        return true
+    }
+
     /** A camera-facing billboard quad standing on the ground (used for people). */
     fun billboard(x: Float, y: Float, z0: Float, z1: Float, halfWidth: Float, color: Int) {
         // right vector of the camera in world space is (cos(yaw), -sin(yaw))

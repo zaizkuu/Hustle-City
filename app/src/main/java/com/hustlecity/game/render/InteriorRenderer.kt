@@ -500,7 +500,11 @@ class InteriorRenderer(private val e: GameEngine) {
     }
 
     /** Draws a furniture model at grid position (x, y) with rotation. */
-    fun drawItem(def: FurnitureDef, x: Float, y: Float, rot: Int, alpha: Float) = parts.draw(def, x, y, rot, alpha)
+    fun drawItem(def: FurnitureDef, x: Float, y: Float, rot: Int, alpha: Float) {
+        // the HD renderer draws the modelled pieces; everything else (and the classic renderer) uses the box models
+        val m = if (scene.smooth) Models.get(def.id) else null
+        if (m == null || !scene.mesh(m, x, y, rot, def.w.toFloat(), def.d.toFloat(), alpha)) parts.draw(def, x, y, rot, alpha)
+    }
 
     private fun person(v: com.hustlecity.game.engine.Person, staff: Boolean) {
         // shoppers hold what they picked (once it has reached their hands), then a paper bag after paying

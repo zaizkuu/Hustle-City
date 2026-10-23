@@ -58,6 +58,10 @@ class CameraRig {
 }
 
 class GameEngine(context: Context?) {
+    init {
+        // furniture models for the HD renderer
+        context?.assets?.let { com.hustlecity.game.render.Models.assets = it }
+    }
     val settings = Settings(context)
     val ui = UiState()
     val saves = SaveManager(context)

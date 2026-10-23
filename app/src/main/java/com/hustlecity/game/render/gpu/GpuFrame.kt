@@ -410,6 +410,40 @@ class GpuFrame {
         s.ni = k
     }
 
+    /**
+     * Appends a model mesh (see [com.hustlecity.game.render.Models]) placed by a 2D affine map of its own x, y:
+     * world x = ox + x·ax + y·bx, world y = oy + x·ay + y·by (a quarter turn, its footprint offset and any frame),
+     * raised by [oz]. [alpha] below 255 fades it (for see-through previews).
+     */
+    fun mesh(stream: Int, m: com.hustlecity.game.render.Models.Mesh, ox: Float, oy: Float, oz: Float, ax: Float, ay: Float, bx: Float, by: Float, alpha: Int = 255) {
+        val s = streams[stream]
+        s.ensure(m.vertices, m.idx.size)
+        val base = s.nv
+        val v = s.v
+        var o = base * STRIDE
+        val p = m.pos; val n = m.nrm
+        val fade = alpha < 255
+        for (i in 0 until m.vertices) {
+            val x = p[i * 3]; val y = p[i * 3 + 1]
+            v[o] = java.lang.Float.floatToRawIntBits(ox + x * ax + y * bx)
+            v[o + 1] = java.lang.Float.floatToRawIntBits(oy + x * ay + y * by)
+            v[o + 2] = java.lang.Float.floatToRawIntBits(oz + p[i * 3 + 2])
+            val nx = n[i * 3]; val ny = n[i * 3 + 1]
+            v[o + 3] = java.lang.Float.floatToRawIntBits(nx * ax + ny * bx)
+            v[o + 4] = java.lang.Float.floatToRawIntBits(nx * ay + ny * by)
+            v[o + 5] = java.lang.Float.floatToRawIntBits(n[i * 3 + 2])
+            val c = m.rgba[i]
+            v[o + 6] = if (fade) (c and 0xFFFFFF) or ((((c ushr 24) * alpha) / 255) shl 24) else c
+            v[o + 7] = m.flags[i]
+            o += STRIDE
+        }
+        s.nv += m.vertices
+        val idx = s.idx
+        var k = s.ni
+        for (j in m.idx) idx[k++] = base + j
+        s.ni = k
+    }
+
     private class Sphere(val rings: Int, val segs: Int) {
         val unit = FloatArray((rings + 1) * (segs + 1) * 3).also { u ->
             var k = 0

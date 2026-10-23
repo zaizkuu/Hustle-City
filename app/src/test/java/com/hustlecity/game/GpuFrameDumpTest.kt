@@ -38,7 +38,11 @@ class GpuFrameDumpTest {
     private val h = 760
     private val root = File("build/glframes").apply { mkdirs() }
 
-    private fun engine(): GameEngine = GameEngine(null).also { it.newGame("Tester", 1, 0, 1); it.ui.tip = null }
+    private fun engine(): GameEngine {
+        // HD frames draw the furniture models
+        com.hustlecity.game.render.Models.assets = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().assets
+        return GameEngine(null).also { it.newGame("Tester", 1, 0, 1); it.ui.tip = null }
+    }
 
     private fun dump(name: String, frame: GpuFrame, overlay: Bitmap, canvasRender: Bitmap) {
         val dir = File(root, name).apply { mkdirs() }
@@ -152,6 +156,63 @@ class GpuFrameDumpTest {
         city("snow", e)
     }
 
+    /**
+     * Every furniture model on a showroom floor: people sit on the seats (their seat heights come from the catalog),
+     * the sofa turns through its four quarter turns, and the box model of each stands beside it for comparison.
+     */
+    @Test
+    fun models() {
+        com.hustlecity.game.render.Models.assets = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().assets
+        com.hustlecity.game.render.Models.clear()
+        val ids = com.hustlecity.game.render.Models.ids().sorted()
+        assertTrue("models are packaged", ids.size >= 20)
+        val cols = 6
+        val rows = (ids.size + cols - 1) / cols
+        // a shot of the whole floor, then one per row up close
+        modelShot("models", ids, cols * 4f / 2, rows * 3.5f / 2 + 2f, 30f)
+        for (r in 0 until rows) modelShot("models_row$r", ids, cols * 4f / 2 - 1f, r * 3.5f + .3f, 13f)
+        modelShot("models_turns", ids, 6f, rows * 3.5f + 2f, 11f)
+    }
+
+    private fun modelShot(name: String, ids: List<String>, tx: Float, ty: Float, dist: Float) {
+        val cols = 6
+        val rows = (ids.size + cols - 1) / cols
+        val proj = com.hustlecity.game.render.Projector()
+        proj.tx = tx; proj.ty = ty; proj.dist = dist; proj.pitch = Math.toRadians(42.0).toFloat(); proj.yaw = .25f; proj.near = .3f
+        proj.update(w.toFloat(), h.toFloat(), .5f)
+        val frame = GpuFrame()
+        frame.setCamera(proj)
+        frame.mode = GpuFrame.MODE_INTERIOR
+        com.hustlecity.game.render.gpu.GpuLighting.interior(frame, 0xFF16181D.toInt())
+        frame.setShadow(-2f, -2f, cols * 4f + 2f, rows * 3.5f + 6f, 3f, 2048, .5f)
+        val scene = com.hustlecity.game.render.Scene3D(proj, com.hustlecity.game.render.RenderBatch())
+        scene.gpu = frame
+        scene.material = com.hustlecity.game.render.Mat.TILE
+        scene.groundRect(-2f, -2f, cols * 4f + 2f, rows * 3.5f + 6f, 0f, 0xFFD9D4CC.toInt())
+        scene.material = com.hustlecity.game.render.Mat.PLAIN
+        val parts = com.hustlecity.game.render.PartSorter(scene)
+        val people = com.hustlecity.game.render.PersonPainter(scene)
+        for ((k, id) in ids.withIndex()) {
+            val def = com.hustlecity.game.data.Catalog.item(id) ?: continue
+            val x = (k % cols) * 4f; val y = (k / cols) * 3.5f
+            val m = com.hustlecity.game.render.Models.get(id)!!
+            assertTrue("$id fits its ${def.w}x${def.d} footprint", m.bounds[0] > -.05f && m.bounds[1] > -.05f && m.bounds[3] < def.w + .05f && m.bounds[4] < def.d + .05f)
+            scene.mesh(m, x, y, 0, def.w.toFloat(), def.d.toFloat())
+            // the box model it replaces, behind it
+            parts.draw(def, x, y - def.d - .3f, 0, .55f)
+            for (spot in com.hustlecity.game.data.Catalog.sitSpots[id].orEmpty()) {
+                val face = when (spot.face) { 0 -> 0f; 1 -> 1.5708f; 2 -> 3.14159f; else -> -1.5708f }
+                people.draw(x + spot.x, y + spot.y, spot.z, face, 0f, 0f, 0xFF2F80ED.toInt(), com.hustlecity.game.render.PersonPainter.PANTS[1], 0xFFE0AC69.toInt(),
+                    com.hustlecity.game.render.PersonPainter.HAIR[0], pose = if (spot.pose == 3) com.hustlecity.game.render.Pose.RUN else com.hustlecity.game.render.Pose.SIT, look = 11 + k)
+            }
+        }
+        // the sofa through its four quarter turns
+        val sofa = com.hustlecity.game.render.Models.get("sofa")!!
+        for (r in 0..3) scene.mesh(sofa, r * 3.5f, rows * 3.5f + 1.5f, r, 2f, 1f)
+        val blank = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        dump(name, frame, blank, blank)
+    }
+
     /** Close-up of the HD people: looks, outfits, poses and the things they carry. */
     @Test
     fun people() {
@@ -211,6 +272,15 @@ class GpuFrameDumpTest {
                 biz.furniture += PlacedItem(id, x, 3, 0)
                 x += (com.hustlecity.game.data.Catalog.item(id)?.w ?: 1) + 1
             }
+            // seating and extras where the trade has them
+            val extras = when (type) {
+                "coffee" -> listOf(Triple("table_set", 3, 6), Triple("table_set", 7, 6), Triple("plant_large", 11, 6), Triple("trash_can", 1, 6))
+                "fastfood" -> listOf(Triple("table_set", 3, 6), Triple("table_set", 7, 6), Triple("trash_can", 1, 6))
+                "lawfirm" -> listOf(Triple("meeting_table", 3, 6), Triple("filing_cabinet", 8, 6), Triple("plant_large", 9, 6), Triple("lounge_sofa", 11, 6))
+                "clothing", "electronics", "liquor" -> listOf(Triple("shopping_baskets", 1, 6), Triple("trash_can", 2, 6), Triple("plant_large", 9, 6))
+                else -> listOf(Triple("plant_large", 9, 6))
+            }
+            for ((id, ex, ey) in extras) biz.furniture += PlacedItem(id, ex, ey, 0)
             for ((pid, _) in t.products) if (com.hustlecity.game.data.Catalog.product(pid)?.service == false) biz.stock[pid] = 40
             biz.tempClosed = false
             e.state.minute = 13L * 60
@@ -223,8 +293,10 @@ class GpuFrameDumpTest {
             r.draw(Canvas(overlay), w, h, frame)
             dump("interior_$type", frame, overlay, overlay)
         }
-        // and a home
+        // and a home, furnished
         val e = engine()
+        for ((id, hx, hy, rot) in listOf(listOf<Any>("sofa", 2, 2, 0), listOf<Any>("tv", 2, 5, 2), listOf<Any>("rug", 2, 3, 0), listOf<Any>("floor_lamp", 5, 3, 0), listOf<Any>("plant_large", 6, 0, 0)))
+            e.state.homeFurniture += PlacedItem(id as String, hx as Int, hy as Int, rot as Int)
         e.state.player.inBuilding = e.state.player.home
         e.interior = InteriorScene(e, e.city.building(e.state.player.home)!!, InteriorMode.HOME)
         repeat(30) { e.frame(1 / 30f) }
@@ -245,6 +317,10 @@ class GpuFrameDumpTest {
         for (x in 0..3) biz.furniture += PlacedItem("shelf", 1 + x * 3, 4, 0)
         biz.furniture += PlacedItem("plant_large", 0, 0, 0)
         biz.furniture += PlacedItem("painting", 4, 0, 0)
+        biz.furniture += PlacedItem("shopping_baskets", 4, 1, 0)
+        biz.furniture += PlacedItem("trash_can", 5, 1, 0)
+        biz.furniture += PlacedItem("cart_rack", 1, 7, 0)
+        biz.furniture += PlacedItem("lounge_sofa", 9, 7, 2)
         biz.stock["gift_cheap"] = 100
         e.state.player.inBuilding = b.id
         e.interior = InteriorScene(e, b, InteriorMode.BUSINESS)
