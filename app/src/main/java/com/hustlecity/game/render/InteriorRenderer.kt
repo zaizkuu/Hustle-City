@@ -496,7 +496,8 @@ class InteriorRenderer(private val e: GameEngine) {
         val held = if (!staff && v.heldIn <= 0f && !v.bagged) v.held else 0
         people.draw(v.x, v.y, v.z, v.heading, v.phase, v.moving, v.shirt, PersonPainter.PANTS[v.pants % PersonPainter.PANTS.size], v.skin,
             PersonPainter.HAIR[v.hair % PersonPainter.HAIR.size], pose = v.pose, apron = if (staff) c(0xFF2C3E50) else 0,
-            carry = v.carry, load = if (v.carry > 0) 1 else 0, held = held, bag = !staff && v.bagged)
+            carry = v.carry, load = if (v.carry > 0) 1 else 0, held = held, bag = !staff && v.bagged, look = v.look,
+            warm = !staff && e.hasGame && e.weather.temperature() < 9.0)
     }
 
     private val takeFrom = FloatArray(3)

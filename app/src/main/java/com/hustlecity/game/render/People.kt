@@ -21,6 +21,9 @@ object Pose {
  * No allocations per call, and parts are drawn back to front so the figure looks solid from any side.
  */
 class PersonPainter(private val scene: Scene3D) {
+    /** The smooth, jointed people the GPU renderer draws instead of boxes. */
+    private val human = HumanPainter(scene)
+
     companion object {
         val PANTS = intArrayOf(c(0xFF34383F), c(0xFF1F3A5F), c(0xFF4A3B2A), c(0xFF5B6770), c(0xFF2E4A3A), c(0xFF22252A), c(0xFF6B4F3A))
         val HAIR = intArrayOf(c(0xFF2B1D14), c(0xFF4A3220), c(0xFF0F0F10), c(0xFF8A5A2B), c(0xFFD9B26A), c(0xFF7A7A7A), c(0xFFA0522D))
@@ -65,7 +68,14 @@ class PersonPainter(private val scene: Scene3D) {
         x: Float, y: Float, z: Float, heading: Float, phase: Float, moving: Float,
         shirt: Int, pants: Int, skin: Int, hair: Int, scale: Float = 1f, pose: Int = Pose.STAND,
         apron: Int = 0, umbrella: Int = 0, alpha: Float = 1f, carry: Int = 0, load: Int = 0, held: Int = 0, bag: Boolean = false,
+        look: Int = 0, warm: Boolean = false, activity: Int = 0,
     ) {
+        if (scene.smooth) {
+            // without a seed, the colors pick a look so the same person always looks the same
+            val seed = if (look != 0) look else shirt * 31 + hair * 17 + skin * 7 + pants
+            human.draw(x, y, z, heading, phase, moving, shirt, pants, skin, hair, scale, pose, apron, umbrella, alpha, carry, load, held, bag, seed, warm, activity)
+            return
+        }
         n = 0
         val s = scale
         // far away people get a cheap three-box version

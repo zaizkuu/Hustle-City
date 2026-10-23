@@ -61,6 +61,17 @@ class Agent {
     var lastHeading = 0f
     /** Set down by hand for a shot ([Traffic.placeCar]): others placed after it make room elsewhere, not here. */
     var staged = false
+    /** A pedestrian's appearance seed (see [com.hustlecity.game.render.Look]). */
+    var look = 1
+    /** What a pedestrian is doing while stopped: 1 checking their phone, 2 looking in a shop window. */
+    var activity = 0
+    /** Out for a run. */
+    var jog = false
+    /** Who walks with them: 1 a dog on a leash, 2 a child. */
+    var companion = 0
+    /** Seconds left of a stop on the sidewalk, and the heading to walk on with afterwards. */
+    var pause = 0f
+    var walkHeading = 0f
 }
 
 /** Eases a car's body [a] toward the lean its braking, accelerating and turning would give it. */
@@ -340,9 +351,17 @@ class Traffic(private val rnd: Random = Random(7)) {
 
     private fun pedOffset(e: RoadEdge, a: Agent) = e.cls.halfWidth + e.cls.sidewalk * (.5f + a.jitter * .28f)
 
+    private val lookTmp = com.hustlecity.game.render.Look()
+
     private fun spawnPed(g: RoadGraph, a: Agent, fx: Float, fy: Float, radius: Float, initial: Boolean) {
         a.color = shirtColors[rnd.nextInt(shirtColors.size)]
-        a.cruise = 1.1f + rnd.nextFloat() * .6f
+        a.look = rnd.nextInt() or 1
+        val lk = lookTmp.decode(a.look, false)
+        // a few people are out for a run; some walk a dog or a child; seniors take their time
+        a.jog = lk.age != 2 && !lk.shoulderBag && rnd.nextFloat() < .06f
+        a.companion = if (a.jog) 0 else rnd.nextFloat().let { if (it < .05f) 1 else if (it < .09f && lk.age == 0) 2 else 0 }
+        a.activity = 0; a.pause = 0f
+        a.cruise = if (a.jog) 2.6f + rnd.nextFloat() * .6f else (1.1f + rnd.nextFloat() * .6f) * lk.pace * (if (a.companion != 0) .85f else 1f)
         a.speed = a.cruise
         a.phase = rnd.nextFloat() * 6f
         a.jitter = rnd.nextFloat() * 2f - 1f
@@ -658,6 +677,13 @@ class Traffic(private val rnd: Random = Random(7)) {
                 return
             }
             1, 2 -> { crossing(g, a, dt); return }
+            6 -> { // stopped on the sidewalk: reading a message, or looking at a shop window
+                a.speed = 0f
+                a.pause -= dt
+                if (a.activity == 2) a.heading = a.walkHeading + a.side * 1.5708f
+                if (a.pause <= 0f) { a.state = 0; a.activity = 0; a.heading = a.walkHeading }
+                return
+            }
         }
         val e = g.edges[a.edge]
         val to = g.nodes[e.other(a.from)]
@@ -685,7 +711,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             a.timer = .5f
             for (k in 0 until doorCount) {
                 val dx = doors[k * 5]; val dy = doors[k * 5 + 1]
-                if (abs(dx - a.x) < 3f && abs(dy - a.y) < 3f && rnd.nextFloat() < doors[k * 5 + 2]) {
+                if (abs(dx - a.x) < 3f && abs(dy - a.y) < 3f && !a.jog && a.companion != 1 && rnd.nextFloat() < doors[k * 5 + 2]) {
                     a.state = 3
                     // a couple of meters past the door step is inside the building
                     a.tx = dx + doors[k * 5 + 3] * 2.4f; a.ty = dy + doors[k * 5 + 4] * 2.4f
@@ -693,8 +719,16 @@ class Traffic(private val rnd: Random = Random(7)) {
                 }
             }
         }
+        // now and then someone stops to check their phone or look in a window (never mid-run)
+        if (!a.jog && nearest > 2f && rnd.nextFloat() < dt * .012f) {
+            a.state = 6
+            a.activity = if (rnd.nextFloat() < .6f) 1 else 2
+            a.pause = 3f + rnd.nextFloat() * 6f
+            a.walkHeading = a.heading
+            return
+        }
         a.speed += (speed - a.speed).coerceIn(-4f * dt, 3f * dt)
-        a.phase += dt * a.speed * 3f
+        a.phase += dt * a.speed * (if (a.jog) 2.4f else 3f)
         a.s += a.speed * dt
         if (a.s >= sEnd) {
             planCorner(g, a, e, to)

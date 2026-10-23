@@ -152,6 +152,46 @@ class GpuFrameDumpTest {
         city("snow", e)
     }
 
+    /** Close-up of the HD people: looks, outfits, poses and the things they carry. */
+    @Test
+    fun people() {
+        peopleShot("people", 0f, 0f, 7.5f, 28.0)
+        peopleShot("people_faces", .3f, -.2f, 3.4f, 30.0, .97f)
+    }
+
+    private fun peopleShot(name: String, tx: Float, ty: Float, dist: Float, pitch: Double, center: Float = .55f) {
+        val proj = com.hustlecity.game.render.Projector()
+        proj.tx = tx; proj.ty = ty; proj.dist = dist; proj.pitch = Math.toRadians(pitch).toFloat(); proj.yaw = .35f; proj.near = .3f
+        proj.update(w.toFloat(), h.toFloat(), center)
+        val frame = GpuFrame()
+        frame.setCamera(proj)
+        frame.setShadow(-12f, -12f, 12f, 12f, 3f, 2048, .6f)
+        val scene = com.hustlecity.game.render.Scene3D(proj, com.hustlecity.game.render.RenderBatch())
+        scene.gpu = frame
+        scene.material = com.hustlecity.game.render.Mat.SIDEWALK
+        scene.groundRect(-14f, -14f, 14f, 14f, 0f, 0xFFB9BCC1.toInt())
+        scene.material = com.hustlecity.game.render.Mat.PLAIN
+        val p = com.hustlecity.game.render.PersonPainter(scene)
+        val shirts = intArrayOf(0xFF2F80ED.toInt(), 0xFFEB5757.toInt(), 0xFF27AE60.toInt(), 0xFFF2C94C.toInt(), 0xFF9B51E0.toInt(), 0xFFF5F5F5.toInt(), 0xFF333333.toInt(), 0xFFFF8A65.toInt())
+        val skins = com.hustlecity.game.engine.SKIN_TONES
+        // two rows of walkers in different looks, then the poses
+        for (i in 0 until 8) {
+            val x = -3.5f + i * 1.0f
+            p.draw(x, -1.2f, 0f, 3.14159f + .3f, i * .8f, 1f, shirts[i], com.hustlecity.game.render.PersonPainter.PANTS[i % 7], skins[i % skins.size],
+                com.hustlecity.game.render.PersonPainter.HAIR[i % 7], look = 101 + i * 7919)
+            p.draw(x + .5f, 0f, 0f, 3.14159f - .2f, i * 1.1f + 2f, .3f, shirts[(i + 3) % 8], com.hustlecity.game.render.PersonPainter.PANTS[(i + 2) % 7], skins[(i + 2) % skins.size],
+                com.hustlecity.game.render.PersonPainter.HAIR[(i + 3) % 7], look = 5003 + i * 104729, warm = i % 2 == 0)
+        }
+        p.draw(-3f, 1.6f, .45f, 3.14159f, 0f, 0f, shirts[2], com.hustlecity.game.render.PersonPainter.PANTS[0], skins[1], com.hustlecity.game.render.PersonPainter.HAIR[4], pose = com.hustlecity.game.render.Pose.SIT, look = 77)
+        p.draw(-1.6f, 1.6f, 0f, 3.14159f, 2.5f, 0f, shirts[4], com.hustlecity.game.render.PersonPainter.PANTS[3], skins[3], com.hustlecity.game.render.PersonPainter.HAIR[2], pose = com.hustlecity.game.render.Pose.DANCE, look = 91)
+        p.draw(-.2f, 1.6f, 0f, 3.14159f + .5f, 1.2f, 1f, shirts[1], com.hustlecity.game.render.PersonPainter.PANTS[1], skins[2], com.hustlecity.game.render.PersonPainter.HAIR[1], umbrella = 0xFFF2C94C.toInt(), look = 1234)
+        p.draw(1.2f, 1.6f, 0f, 3.14159f - .4f, 0f, 0f, shirts[0], com.hustlecity.game.render.PersonPainter.PANTS[2], skins[0], com.hustlecity.game.render.PersonPainter.HAIR[0], activity = 1, look = 4321)
+        p.draw(2.6f, 1.6f, 0f, 3.14159f - 1.2f, 1f, 1f, shirts[5], com.hustlecity.game.render.PersonPainter.PANTS[1], skins[4 % skins.size], com.hustlecity.game.render.PersonPainter.HAIR[3], carry = 2, load = 3, look = 555)
+        p.draw(4.2f, 1.6f, 0f, 3.14159f, 2f, 1f, shirts[6], com.hustlecity.game.render.PersonPainter.PANTS[0], skins[1], com.hustlecity.game.render.PersonPainter.HAIR[0], pose = com.hustlecity.game.render.Pose.RUN, look = 999)
+        val blank = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        dump(name, frame, blank, blank)
+    }
+
     @Test
     fun interior() {
         val e = engine()

@@ -198,6 +198,14 @@ void main() {
     } else if (mat == 16) {            // glossy car paint
         spec = 0.7; gloss = 90.0;
         reflectAmt = 0.08 + 0.3 * pow(1.0 - max(dot(N, V), 0.0), 4.0);
+    } else if (mat == 15) {            // cloth: a fine weave, no shine
+        albedo *= 0.94 + 0.08 * noise(vPos.xy * 90.0 + vPos.z * 70.0) * fadeFor(vPos.xy * 90.0);
+        spec = 0.02; gloss = 8.0;
+    } else if (mat == 17) {            // skin: a soft sheen
+        spec = 0.09; gloss = 18.0;
+    } else if (mat == 18) {            // hair: strands catch the light
+        albedo *= 0.88 + 0.22 * noise(vec2((vPos.x + vPos.y) * 160.0, vPos.z * 12.0));
+        spec = 0.22; gloss = 36.0;
     } else if (mat == 14) {            // concrete panels
         vec2 b = uv / vec2(3.0, 3.3);
         vec2 f = fract(b);
@@ -218,11 +226,13 @@ void main() {
         vec3 amb = mix(uGroundAmb, uSkyAmb, N.z * 0.5 + 0.5);
         // ambient occlusion: walls darken toward the ground
         float vertical = 1.0 - abs(N.z);
-        float ao = mix(1.0, mix(0.55, 1.0, smoothstep(0.0, 3.5, vPos.z)), vertical);
+        // (people are lit as they are: the darkening is for walls)
+        float ao = (mat == 15 || mat >= 17) ? 1.0 : mix(1.0, mix(0.55, 1.0, smoothstep(0.0, 3.5, vPos.z)), vertical);
         vec3 H = normalize(uSunDir + V);
         float wetSpec = uMisc.y * step(0.9, N.z);
         float s = pow(max(dot(N, H), 0.0), gloss + 120.0 * wetSpec) * (spec + 0.6 * wetSpec);
-        vec3 direct = uSunColor * mix(ndl, wrap, 0.25) * sh;
+        // skin and cloth wrap the light further round, like soft materials do
+        vec3 direct = uSunColor * mix(ndl, wrap, (mat == 17 || mat == 15) ? 0.55 : 0.25) * sh;
         col = albedo * (amb * ao + direct) + uSunColor * s * ndl * sh;
         if (reflectAmt > 0.0) {
             vec3 R = reflect(-V, N);

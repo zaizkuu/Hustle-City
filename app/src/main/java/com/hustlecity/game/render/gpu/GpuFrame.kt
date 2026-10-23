@@ -286,6 +286,130 @@ class GpuFrame {
         s.ni = k
     }
 
+    /**
+     * A smooth tapered tube from a (radius [ra]) to b (radius [rb]) with [segs] sides, its cross-section an ellipse
+     * [flat] times as deep as it is wide across the direction (sx, sy, sz). Normals run smoothly around it (limbs,
+     * torsos, necks); [caps] closes the ends with flat discs.
+     */
+    fun tube(stream: Int, ax: Float, ay: Float, az: Float, ra: Float, bx: Float, by: Float, bz: Float, rb: Float, segs: Int, argb: Int,
+             material: Int, flat: Float = 1f, sx: Float = 1f, sy: Float = 0f, sz: Float = 0f, caps: Boolean = false) {
+        var dx = bx - ax; var dy = by - ay; var dz = bz - az
+        val len = sqrt(dx * dx + dy * dy + dz * dz)
+        if (len < 1e-5f) return
+        dx /= len; dy /= len; dz /= len
+        // u: the side direction made square to the axis; w = d × u
+        var ux = sx; var uy = sy; var uz = sz
+        var k = ux * dx + uy * dy + uz * dz
+        ux -= k * dx; uy -= k * dy; uz -= k * dz
+        var ul = sqrt(ux * ux + uy * uy + uz * uz)
+        if (ul < 1e-4f) {
+            ux = if (abs(dz) < .9f) -dy else 1f; uy = if (abs(dz) < .9f) dx else 0f; uz = 0f
+            k = ux * dx + uy * dy; ux -= k * dx; uy -= k * dy; uz -= k * dz
+            ul = sqrt(ux * ux + uy * uy + uz * uz)
+        }
+        ux /= ul; uy /= ul; uz /= ul
+        val wx = dy * uz - dz * uy; val wy = dz * ux - dx * uz; val wz = dx * uy - dy * ux
+        val n = segs.coerceIn(3, 16)
+        val st = streams[stream]
+        val capVerts = if (caps) (n + 1) * 2 else 0
+        st.ensure((n + 1) * 2 + capVerts, n * 6 + (if (caps) n * 6 else 0))
+        val base = st.nv
+        val col = rgba(argb)
+        val fl = java.lang.Float.floatToRawIntBits(flags(false, material))
+        // the surface leans in (or out) along a taper; damped so pieces joined end to end shade without a crease
+        val slope = (ra - rb) / len * .3f
+        val v = st.v
+        var o = base * STRIDE
+        for (end in 0..1) {
+            val cx = if (end == 0) ax else bx; val cy = if (end == 0) ay else by; val cz = if (end == 0) az else bz
+            val r = if (end == 0) ra else rb
+            for (i in 0..n) {
+                val t = (i % n) * 6.2831855f / n
+                val c = kotlin.math.cos(t); val sn = kotlin.math.sin(t)
+                v[o] = java.lang.Float.floatToRawIntBits(cx + (ux * c + wx * sn * flat) * r)
+                v[o + 1] = java.lang.Float.floatToRawIntBits(cy + (uy * c + wy * sn * flat) * r)
+                v[o + 2] = java.lang.Float.floatToRawIntBits(cz + (uz * c + wz * sn * flat) * r)
+                var nx = ux * c * flat + wx * sn + dx * slope * flat
+                var ny = uy * c * flat + wy * sn + dy * slope * flat
+                var nz = uz * c * flat + wz * sn + dz * slope * flat
+                val nl = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-6f)
+                nx /= nl; ny /= nl; nz /= nl
+                v[o + 3] = java.lang.Float.floatToRawIntBits(nx); v[o + 4] = java.lang.Float.floatToRawIntBits(ny); v[o + 5] = java.lang.Float.floatToRawIntBits(nz)
+                v[o + 6] = col; v[o + 7] = fl
+                o += STRIDE
+            }
+        }
+        var vi = (n + 1) * 2
+        val idx = st.idx
+        var q = st.ni
+        for (i in 0 until n) {
+            val a = base + i; val b = base + n + 1 + i
+            idx[q++] = a; idx[q++] = b; idx[q++] = a + 1
+            idx[q++] = a + 1; idx[q++] = b; idx[q++] = b + 1
+        }
+        if (caps) {
+            for (end in 0..1) {
+                val sign = if (end == 0) -1f else 1f
+                val start = base + vi
+                for (i in 0..n) {
+                    val src = (base + end * (n + 1) + i) * STRIDE
+                    System.arraycopy(v, src, v, o, STRIDE)
+                    v[o + 3] = java.lang.Float.floatToRawIntBits(dx * sign); v[o + 4] = java.lang.Float.floatToRawIntBits(dy * sign); v[o + 5] = java.lang.Float.floatToRawIntBits(dz * sign)
+                    o += STRIDE
+                }
+                for (i in 1 until n - 1) { idx[q++] = start; idx[q++] = start + i; idx[q++] = start + i + 1 }
+                vi += n + 1
+            }
+        }
+        st.nv = base + vi
+        st.ni = q
+    }
+
+    /**
+     * An ellipsoid with its own axes: radius [rf] along (fx, fy, fz), [rr] along (rx, ry, rz) and [ru] along their
+     * cross product (heads, hands, shoes, hair). [detail] picks the tessellation (0 coarse .. 3 fine).
+     */
+    fun ellipsoidAxes(stream: Int, cx: Float, cy: Float, cz: Float, fx: Float, fy: Float, fz: Float, rf: Float, rx: Float, ry: Float, rz: Float, rr: Float,
+                      ru: Float, argb: Int, material: Int, detail: Int, emissive: Boolean = false) {
+        val t = PEOPLE_SPHERES[detail.coerceIn(0, PEOPLE_SPHERES.size - 1)]
+        val ux = fy * rz - fz * ry; val uy = fz * rx - fx * rz; val uz = fx * ry - fy * rx
+        val rings = t.rings; val segs = t.segs
+        val s = streams[stream]
+        val nVerts = (rings + 1) * (segs + 1)
+        s.ensure(nVerts, rings * segs * 6)
+        val base = s.nv
+        val col = rgba(argb)
+        val fl = java.lang.Float.floatToRawIntBits(flags(emissive, material))
+        val v = s.v
+        var o = base * STRIDE
+        val u = t.unit
+        for (k in 0 until nVerts) {
+            // unit sphere: x forward, y right, z up
+            val a = u[k * 3]; val b = u[k * 3 + 1]; val c = u[k * 3 + 2]
+            v[o] = java.lang.Float.floatToRawIntBits(cx + fx * a * rf + rx * b * rr + ux * c * ru)
+            v[o + 1] = java.lang.Float.floatToRawIntBits(cy + fy * a * rf + ry * b * rr + uy * c * ru)
+            v[o + 2] = java.lang.Float.floatToRawIntBits(cz + fz * a * rf + rz * b * rr + uz * c * ru)
+            var nx = fx * a / rf + rx * b / rr + ux * c / ru
+            var ny = fy * a / rf + ry * b / rr + uy * c / ru
+            var nz = fz * a / rf + rz * b / rr + uz * c / ru
+            val l = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-6f)
+            nx /= l; ny /= l; nz /= l
+            v[o + 3] = java.lang.Float.floatToRawIntBits(nx); v[o + 4] = java.lang.Float.floatToRawIntBits(ny); v[o + 5] = java.lang.Float.floatToRawIntBits(nz)
+            v[o + 6] = col; v[o + 7] = fl
+            o += STRIDE
+        }
+        s.nv += nVerts
+        val idx = s.idx
+        var k = s.ni
+        for (ri in 0 until rings) for (si in 0 until segs) {
+            val a = base + ri * (segs + 1) + si
+            val b = a + segs + 1
+            idx[k++] = a; idx[k++] = b; idx[k++] = a + 1
+            idx[k++] = a + 1; idx[k++] = b; idx[k++] = b + 1
+        }
+        s.ni = k
+    }
+
     private class Sphere(val rings: Int, val segs: Int) {
         val unit = FloatArray((rings + 1) * (segs + 1) * 3).also { u ->
             var k = 0
@@ -302,6 +426,8 @@ class GpuFrame {
     }
 
     private val SPHERES = arrayOf(Sphere(4, 7), Sphere(5, 9), Sphere(7, 12))
+    /** Tessellations for the parts of people, from distant crowds to close-ups. */
+    private val PEOPLE_SPHERES = arrayOf(Sphere(3, 5), Sphere(4, 7), Sphere(6, 10), Sphere(8, 14))
 
     val triangleCount: Int get() = streams.sumOf { it.ni } / 3
 }

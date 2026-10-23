@@ -554,6 +554,34 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         }
     }
 
+    /** Smooth shapes (tubes and ellipsoids) can be drawn: the GPU renderer is on. */
+    val smooth: Boolean get() = gpu != null
+
+    /** A smooth tapered tube from a to b (GPU only; see [GpuFrame.tube]). Positions are in the current frame. */
+    fun tube(ax: Float, ay: Float, az: Float, ra: Float, bx: Float, by: Float, bz: Float, rb: Float, segs: Int, color: Int, mat: Int = material,
+             flat: Float = 1f, sx: Float = 1f, sy: Float = 0f, sz: Float = 0f, caps: Boolean = false) {
+        val g = gpu ?: return
+        val wax = toWorldX(ax, ay); val way = toWorldY(ax, ay); val wbx = toWorldX(bx, by); val wby = toWorldY(bx, by)
+        val r = max(ra, rb)
+        if (proj.camZOf(wax, way, az) < -r && proj.camZOf(wbx, wby, bz) < -r) return
+        val wsx = if (fOn) sx * fc - sy * fs else sx; val wsy = if (fOn) sx * fs + sy * fc else sy
+        g.tube(streamFor(color), wax, way, az, ra, wbx, wby, bz, rb, segs, color, mat, flat, wsx, wsy, sz, caps)
+    }
+
+    /**
+     * A smooth ellipsoid with its own axes: [rf] along (fx, fy, fz), [rr] along (rx, ry, rz) and [ru] up their cross
+     * product (GPU only). [detail] 0..3.
+     */
+    fun ellipsoid(cx: Float, cy: Float, cz: Float, fx: Float, fy: Float, fz: Float, rf: Float, rx: Float, ry: Float, rz: Float, rr: Float, ru: Float,
+                  color: Int, mat: Int = material, detail: Int = 1) {
+        val g = gpu ?: return
+        val wx = toWorldX(cx, cy); val wy = toWorldY(cx, cy)
+        if (proj.camZOf(wx, wy, cz) < -max(rf, max(rr, ru))) return
+        val wfx = if (fOn) fx * fc - fy * fs else fx; val wfy = if (fOn) fx * fs + fy * fc else fy
+        val wrx = if (fOn) rx * fc - ry * fs else rx; val wry = if (fOn) rx * fs + ry * fc else ry
+        g.ellipsoidAxes(streamFor(color), wx, wy, cz, wfx, wfy, fz, rf, wrx, wry, rz, rr, ru, color, mat, detail, isEmissive(color))
+    }
+
     /** A camera-facing billboard quad standing on the ground (used for people). */
     fun billboard(x: Float, y: Float, z0: Float, z1: Float, halfWidth: Float, color: Int) {
         // right vector of the camera in world space is (cos(yaw), -sin(yaw))
@@ -582,4 +610,7 @@ object Mat {
     const val CONCRETE = 14
     const val FABRIC = 15
     const val PAINT = 16
+    /** People: soft-lit skin, hair with a sheen along its strands. */
+    const val SKIN = 17
+    const val HAIR = 18
 }

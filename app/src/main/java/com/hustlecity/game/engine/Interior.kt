@@ -45,6 +45,8 @@ class Person(var x: Float, var y: Float, var shirt: Int, var skin: Int) {
     var z = 0f
     var pants = 0
     var hair = 0
+    /** Appearance seed for the HD renderer's people (see [com.hustlecity.game.render.Look]). */
+    var look = 1
     /** Seat or machine this person will use at the current stop. */
     var seat: SeatPos? = null
     var seated = false
@@ -665,6 +667,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         p.speed = 1.35f + r.nextFloat() * .5f
         p.pants = r.nextInt(16)
         p.hair = r.nextInt(16)
+        p.look = r.nextInt() or 1
         p.stops = list.toIntArray()
         p.seatTag = seat
         // food and tickets are paid for first; shops are paid on the way out
@@ -967,7 +970,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 // new shift: walk in from the door (or be at the post already when the scene opens)
                 val fresh = staff.isEmpty() && visitors.isEmpty()
                 Person(if (fresh) post.tile % w + .5f else doorX.toFloat(), if (fresh) post.tile / w + .5f else d - .5f, shirt, skin).also {
-                    it.speed = 1.8f; it.pants = key and 15; it.hair = (key * 7) and 15
+                    it.speed = 1.8f; it.pants = key and 15; it.hair = (key * 7) and 15; it.look = key * 7919 + 3
                 }
             }
             if (staffGoal[key] != post.tile || p.goal != post.tile) {
