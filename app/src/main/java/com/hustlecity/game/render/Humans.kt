@@ -417,10 +417,11 @@ class HumanPainter(private val scene: Scene3D) {
             for (k in 0..1) blob(hf - .005f, (if (k == 0) -1f else 1f) * .098f, headZ, .035f, .02f, .038f, c(0xFF1E1F22), Mat.PLAIN, 0)
             // the band arcs over the hair
             val bf = hf - .01f
-            limb(bf, -.1f, headZ + .03f, .011f, bf, -.08f, headZ + .118f, .011f, c(0xFF1E1F22), Mat.PLAIN)
-            limb(bf, -.08f, headZ + .118f, .011f, bf, 0f, headZ + .15f, .011f, c(0xFF1E1F22), Mat.PLAIN)
-            limb(bf, 0f, headZ + .15f, .011f, bf, .08f, headZ + .118f, .011f, c(0xFF1E1F22), Mat.PLAIN)
-            limb(bf, .08f, headZ + .118f, .011f, bf, .1f, headZ + .03f, .011f, c(0xFF1E1F22), Mat.PLAIN)
+            limb(bf, -.1f, headZ + .03f, .009f, bf, -.085f, headZ + .095f, .009f, c(0xFF1E1F22), Mat.PLAIN)
+            limb(bf, -.085f, headZ + .095f, .009f, bf, -.05f, headZ + .128f, .009f, c(0xFF1E1F22), Mat.PLAIN)
+            limb(bf, -.05f, headZ + .128f, .009f, bf, .05f, headZ + .128f, .009f, c(0xFF1E1F22), Mat.PLAIN)
+            limb(bf, .05f, headZ + .128f, .009f, bf, .085f, headZ + .095f, .009f, c(0xFF1E1F22), Mat.PLAIN)
+            limb(bf, .085f, headZ + .095f, .009f, bf, .1f, headZ + .03f, .009f, c(0xFF1E1F22), Mat.PLAIN)
         }
 
         // ---------------------------------------------------------------- things in hand
