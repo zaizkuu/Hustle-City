@@ -339,6 +339,57 @@ class GpuFrameDumpTest {
         }
     }
 
+    /**
+     * The phone's map at given spots: HC_MAPVIEW="<city>,<x>,<y>,<distance>;..." (frames go to build/glframes/map_<city>_<n>).
+     */
+    @Test
+    fun mapViews() {
+        val spots = System.getenv("HC_MAPVIEW")?.split(';')?.map { it.split(',') } ?: return
+        for ((n, s) in spots.withIndex()) {
+            val e = engine(s[0])
+            e.state.minute = 13L * 60
+            e.ui.app = com.hustlecity.game.engine.AppId.MAPS
+            e.camera.mapX = s[1].toFloat(); e.camera.mapY = s[2].toFloat(); e.camera.mapDist = s[3].toFloat()
+            city("map_${s[0]}_$n", e)
+        }
+    }
+
+    /**
+     * The street view with the player standing at given spots: HC_STREETVIEW="<city>,<x>,<y>,<yaw>,<distance>;..."
+     * (frames go to build/glframes/street_<city>_<n>).
+     */
+    @Test
+    fun streetViews() {
+        val spots = System.getenv("HC_STREETVIEW")?.split(';')?.map { it.split(',') } ?: return
+        for ((n, s) in spots.withIndex()) {
+            val e = engine(s[0])
+            e.ui.phoneOpen = false
+            e.state.minute = 14L * 60
+            e.state.player.x = s[1].toFloat(); e.state.player.y = s[2].toFloat()
+            e.camera.tx = e.state.player.x; e.camera.ty = e.state.player.y
+            e.camera.yaw = s[3].toFloat(); e.camera.zoom = s[4].toFloat(); e.camera.dist = s[4].toFloat()
+            city("street_${s[0]}_$n", e)
+        }
+    }
+
+    /**
+     * Driving down Taft Avenue under Manila's LRT: the viaduct over the car is see-through, so the road ahead shows.
+     * Runs with HC_UNDERRAIL=1; frames go to build/glframes/rail_under_<n>.
+     */
+    @Test
+    fun underRail() {
+        if (System.getenv("HC_UNDERRAIL") != "1") return
+        for ((n, at) in listOf(floatArrayOf(531f, 700f, 3.1416f), floatArrayOf(536f, 840f, 0f)).withIndex()) {
+            val e = engine("manila")
+            e.ui.phoneOpen = false
+            e.state.minute = 14L * 60
+            val v = e.state.vehicles.first()
+            v.x = at[0]; v.y = at[1]; v.heading = at[2]
+            e.enterVehicle(v)
+            city("rail_under_$n", e, warm = 40)
+        }
+    }
+
     /** The edges of the world: what lies past the last streets. Runs with HC_EDGES=1. */
     @Test
     fun edges() {

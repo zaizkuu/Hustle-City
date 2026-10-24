@@ -85,6 +85,55 @@ class CityFeatures(val city: City) {
         }
     }
 
+    /** How many parts there are (indices for [draw]). */
+    val count get() = n
+
+    /** The sort key [collect] gives part [i]. */
+    fun keyOf(i: Int, camX: Float, camY: Float) = key(i, camX, camY)
+
+    /**
+     * True when part [i] is a viaduct span standing between the camera at ([cx], [cy], [cz]) and the point ([px], [py],
+     * [pz]): the line of sight passes through its deck.
+     */
+    fun hides(i: Int, cx: Float, cy: Float, cz: Float, px: Float, py: Float, pz: Float): Boolean =
+        kind[i] == SPAN && sightCrosses(ax[i], ay[i], bx[i], by[i], 5.3f, 6.2f, Railways.PARAPET, cx, cy, cz, px, py, pz)
+
+    /** True when train car [car] stands between the camera and the point, like [hides]. */
+    fun carHides(car: Int, cx: Float, cy: Float, cz: Float, px: Float, py: Float, pz: Float): Boolean {
+        val h = rails.carHalf(car)
+        val x = rails.carX(car); val y = rails.carY(car); val fx = rails.carFx(car); val fy = rails.carFy(car)
+        return sightCrosses(x - fx * h, y - fy * h, x + fx * h, y + fy * h, 1.6f, Railways.DECK + .6f, Railways.DECK + 4f, cx, cy, cz, px, py, pz)
+    }
+
+    /**
+     * True when the sight line from ([cx], [cy], [cz]) to ([px], [py], [pz]) passes through the slab [hw] either side of
+     * a→b between heights [z0] and [z1] (short of the point itself).
+     */
+    private fun sightCrosses(ax: Float, ay: Float, bx: Float, by: Float, hw: Float, z0: Float, z1: Float,
+                             cx: Float, cy: Float, cz: Float, px: Float, py: Float, pz: Float): Boolean {
+        var t0 = 0f; var t1 = .98f
+        val dz = pz - cz
+        if (kotlin.math.abs(dz) < 1e-4f) { if (cz < z0 || cz > z1) return false }
+        else {
+            val ta = (z0 - cz) / dz; val tb = (z1 - cz) / dz
+            t0 = max(t0, min(ta, tb)); t1 = min(t1, max(ta, tb))
+            if (t0 > t1) return false
+        }
+        // where the sight line is at the slab's height, from above
+        val sx0 = cx + (px - cx) * t0; val sy0 = cy + (py - cy) * t0
+        val sx1 = cx + (px - cx) * t1; val sy1 = cy + (py - cy) * t1
+        return segDist(sx0, sy0, sx1, sy1, ax, ay, bx, by) < hw
+    }
+
+    private fun segDist(ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float, dx: Float, dy: Float): Float {
+        fun side(px: Float, py: Float, qx: Float, qy: Float, rx: Float, ry: Float) = (qx - px) * (ry - py) - (qy - py) * (rx - px)
+        val d1 = side(ax, ay, bx, by, cx, cy); val d2 = side(ax, ay, bx, by, dx, dy)
+        val d3 = side(cx, cy, dx, dy, ax, ay); val d4 = side(cx, cy, dx, dy, bx, by)
+        if ((d1 > 0f) != (d2 > 0f) && (d3 > 0f) != (d4 > 0f)) return 0f
+        return min(min(Geo.distToSeg(ax, ay, cx, cy, dx, dy), Geo.distToSeg(bx, by, cx, cy, dx, dy)),
+            min(Geo.distToSeg(cx, cy, ax, ay, bx, by), Geo.distToSeg(dx, dy, ax, ay, bx, by)))
+    }
+
     private fun key(i: Int, camX: Float, camY: Float): Float {
         val d = when (kind[i]) {
             LANDMARK, ROTOR -> {

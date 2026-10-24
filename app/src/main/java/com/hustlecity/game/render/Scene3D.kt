@@ -200,6 +200,9 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     var cacheBuild = false
     /** Where model meshes go when there's no GPU frame (the menus' previews); without either they aren't drawn. */
     var soft: SoftRaster? = null
+    /** Below 1, everything drawn is see-through by this much (a viaduct hiding the player). */
+    var fade = 1f
+    private fun faded(color: Int): Int = if (fade >= 1f) color else withAlpha(color, (color ushr 24) / 255f * fade)
     /** Level of detail for GPU spheres: 0 far .. 2 near. */
     var sphereDetail = 1
     /** Surface material for the GPU shaders (see [Mat]); [topMaterial] overrides it on box tops (roofs) when set. */
@@ -330,7 +333,8 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     }
 
     /** Screen-space circle centred on a projected world point; radius in meters. */
-    fun blob(lx: Float, ly: Float, z: Float, r: Float, color: Int, segments: Int = 10, dxFrac: Float = 0f, dyFrac: Float = 0f, squash: Float = .9f) {
+    fun blob(lx: Float, ly: Float, z: Float, r: Float, color0: Int, segments: Int = 10, dxFrac: Float = 0f, dyFrac: Float = 0f, squash: Float = .9f) {
+        val color = faded(color0)
         val x = toWorldX(lx, ly); val y = toWorldY(lx, ly)
         val g = gpu
         if (g != null) {
@@ -366,7 +370,8 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         else -> com.hustlecity.game.render.gpu.GpuFrame.OPAQUE
     }
 
-    fun poly(n: Int, lxs: FloatArray, lys: FloatArray, zs: FloatArray, color: Int) {
+    fun poly(n: Int, lxs: FloatArray, lys: FloatArray, zs: FloatArray, color0: Int) {
+        val color = faded(color0)
         var xs = lxs; var ys = lys
         if (fOn) {
             if (tfx.size < n) { tfx = FloatArray(n * 2); tfy = FloatArray(n * 2) }
@@ -560,9 +565,10 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     val smooth: Boolean get() = gpu != null
 
     /** A smooth tapered tube from a to b (GPU only; see [GpuFrame.tube]). Positions are in the current frame. */
-    fun tube(ax: Float, ay: Float, az: Float, ra: Float, bx: Float, by: Float, bz: Float, rb: Float, segs: Int, color: Int, mat: Int = material,
+    fun tube(ax: Float, ay: Float, az: Float, ra: Float, bx: Float, by: Float, bz: Float, rb: Float, segs: Int, color0: Int, mat: Int = material,
              flat: Float = 1f, sx: Float = 1f, sy: Float = 0f, sz: Float = 0f, caps: Boolean = false) {
         val g = gpu ?: return
+        val color = faded(color0)
         val wax = toWorldX(ax, ay); val way = toWorldY(ax, ay); val wbx = toWorldX(bx, by); val wby = toWorldY(bx, by)
         val r = max(ra, rb)
         if (proj.camZOf(wax, way, az) < -r && proj.camZOf(wbx, wby, bz) < -r) return
@@ -575,8 +581,9 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
      * product (GPU only). [detail] 0..3.
      */
     fun ellipsoid(cx: Float, cy: Float, cz: Float, fx: Float, fy: Float, fz: Float, rf: Float, rx: Float, ry: Float, rz: Float, rr: Float, ru: Float,
-                  color: Int, mat: Int = material, detail: Int = 1) {
+                  color0: Int, mat: Int = material, detail: Int = 1) {
         val g = gpu ?: return
+        val color = faded(color0)
         val wx = toWorldX(cx, cy); val wy = toWorldY(cx, cy)
         if (proj.camZOf(wx, wy, cz) < -max(rf, max(rr, ru))) return
         val wfx = if (fOn) fx * fc - fy * fs else fx; val wfy = if (fOn) fx * fs + fy * fc else fy
@@ -627,7 +634,7 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
             soft!!.mesh(proj, m, ox, oy, z, ax, ay, bx, by, sx, sy, sz, paint, lenses, accent, windowsLit)
             return true
         }
-        val a = (alpha.coerceIn(0f, 1f) * 255).toInt()
+        val a = (alpha.coerceIn(0f, 1f) * fade.coerceIn(0f, 1f) * 255).toInt()
         g.mesh(if (a < 250) com.hustlecity.game.render.gpu.GpuFrame.TRANSPARENT else com.hustlecity.game.render.gpu.GpuFrame.OPAQUE, m, ox, oy, z, ax, ay, bx, by, a, sx, sy, sz,
             paint, tiltF, tiltL, lenses, accent, windowsLit)
         return true

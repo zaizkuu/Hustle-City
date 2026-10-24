@@ -335,6 +335,10 @@ class Railways(private val city: City) {
 
     fun carX(i: Int) = carX[i]
     fun carY(i: Int) = carY[i]
+    fun carFx(i: Int) = carFx[i]
+    fun carFy(i: Int) = carFy[i]
+    /** Half the length of car [i]'s body. */
+    fun carHalf(i: Int) = (lines.firstOrNull { it.index == carLine[i] }?.carLen ?: 0f) * .5f
     /** Index (in the city's rails) of the line car [i] runs on. */
     fun carLine(i: Int) = carLine[i]
 

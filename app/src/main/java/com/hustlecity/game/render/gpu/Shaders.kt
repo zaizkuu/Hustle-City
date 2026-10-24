@@ -183,10 +183,18 @@ void main() {
     } else if (mat == 10) {            // roof gravel and membrane
         albedo *= 0.88 + 0.2 * fbm(vPos.xy * 0.9) + 0.08 * (hash(floor(vPos.xy * 6.0)) - 0.5) * fadeFor(vPos.xy * 6.0);
     } else if (mat == 11) {            // water: moving ripples that reflect the sky
+#ifdef FAST
+        // three crossing swells: the cheaper noise's square cells would show as blocks of light on the water
+        vec2 k1 = vec2(0.61, 0.33); vec2 k2 = vec2(-0.29, 0.83); vec2 k3 = vec2(1.37, -0.92);
+        vec2 grad = k1 * (0.2 * cos(dot(k1, vPos.xy) + uTime * 0.9)) + k2 * (0.18 * cos(dot(k2, vPos.xy) - uTime * 0.7))
+            + k3 * (0.07 * cos(dot(k3, vPos.xy) + uTime * 1.3));
+        N = normalize(vec3(-grad, 1.0));
+#else
         vec2 q = vPos.xy * 0.08 + vec2(uTime * 0.03, uTime * 0.02);
         float e = 0.5;
         vec2 grad = vec2(fbm(q + vec2(e, 0.0)) - fbm(q - vec2(e, 0.0)), fbm(q + vec2(0.0, e)) - fbm(q - vec2(0.0, e)));
         N = normalize(vec3(-grad * 0.9, 1.0));
+#endif
         reflectAmt = 0.25 + 0.55 * pow(1.0 - max(dot(N, V), 0.0), 3.0);
         spec = 1.2; gloss = 220.0;
     } else if (mat == 12 && wall) {    // painted plaster

@@ -123,6 +123,9 @@ class WorldRenderer(private val e: GameEngine) {
         val SIDEWALK = c(0xFFB9BCC1)
         val ASPHALT = c(0xFF4A4D53)
         val LOT = c(0xFF8E9297)
+        /** Bridge decks: warmer and darker than the paving, so they don't read as land across the water. */
+        val BRIDGE_DECK = c(0xFFA39D92)
+        val BRIDGE_EDGE = c(0xFF6B665E)
         val GRASS = c(0xFF6DA35C)
         val PATH = c(0xFFD8CFB8)
         val YELLOW = c(0xFFE8C547)
@@ -142,6 +145,8 @@ class WorldRenderer(private val e: GameEngine) {
         private const val STATIC = 1
         private const val DYNAMIC = 2
         const val PITCH_MAP = 62f
+        /** How far ahead of your car (meters) the road is kept in sight under a viaduct. */
+        private val AHEAD = floatArrayOf(10f, 20f, 30f)
         private const val TERMINAL = 31
     }
 
@@ -265,6 +270,11 @@ class WorldRenderer(private val e: GameEngine) {
     private val rangeEnd = arrayOf(IntArray(0), IntArray(0))
     private val drawnIds = arrayOf(IntArray(0), IntArray(0))
     private val drawnCount = IntArray(2)
+    // the same for the city's features (viaduct spans), so one hiding the player can be skipped too
+    private val featStart = arrayOf(IntArray(0), IntArray(0))
+    private val featEnd = arrayOf(IntArray(0), IntArray(0))
+    private val featDrawn = arrayOf(IntArray(0), IntArray(0))
+    private val featCount = IntArray(2)
     private var building = 0
     private var published = -1
     private var staticValid = false
@@ -275,6 +285,7 @@ class WorldRenderer(private val e: GameEngine) {
     private var sCamX = 0f; private var sCamY = 0f; private var sYaw = 0f; private var sDist = 1f
     private var staticVersion = 0L
     private val occl = ArrayList<Int>()
+    private val occlFeat = ArrayList<Int>()
     private val skipTmp = ArrayList<Long>()
 
     /** What static geometry depends on that the player changes on purpose: rebuilt right away when it changes. */
@@ -351,6 +362,9 @@ class WorldRenderer(private val e: GameEngine) {
         val n = e.city.buildings.size
         if (rangeStart[idx].size < n) { rangeStart[idx] = IntArray(n); rangeEnd[idx] = IntArray(n); drawnIds[idx] = IntArray(n) }
         drawnCount[idx] = 0
+        val nf = features.count
+        if (featStart[idx].size < nf) { featStart[idx] = IntArray(nf); featEnd[idx] = IntArray(nf); featDrawn[idx] = IntArray(nf) }
+        featCount[idx] = 0
         recycle(stageLabels)
         synchronized(sf) {
             sf.clear()
@@ -411,9 +425,13 @@ class WorldRenderer(private val e: GameEngine) {
         }
     }
 
-    /** Cached buildings standing between the camera and the player: skipped in the cache and drawn see-through. */
+    /**
+     * Cached buildings and viaduct spans standing between the camera and the player: skipped in the cache and drawn
+     * see-through.
+     */
     private fun findOccluders(gpu: GpuFrame) {
         occl.clear()
+        occlFeat.clear()
         gpu.skipCount = 0
         if (cinematic) return
         val p = e.state.player
@@ -430,10 +448,34 @@ class WorldRenderer(private val e: GameEngine) {
             val s0 = rangeStart[published][b.id]; val s1 = rangeEnd[published][b.id]
             if (s1 > s0) skipTmp += (s0.toLong() shl 32) or s1.toLong()
         }
+        val fs = featDrawn[published]
+        for (k in 0 until featCount[published]) {
+            val part = fs[k]
+            if (!featureHidesPlayer(part)) continue
+            occlFeat += part
+            val s0 = featStart[published][part]; val s1 = featEnd[published][part]
+            if (s1 > s0) skipTmp += (s0.toLong() shl 32) or s1.toLong()
+        }
         skipTmp.sort()
         if (gpu.skip.size < skipTmp.size * 2) gpu.skip = IntArray(skipTmp.size * 2 + 8)
         for ((k, v) in skipTmp.withIndex()) { gpu.skip[k * 2] = (v ushr 32).toInt(); gpu.skip[k * 2 + 1] = (v and 0xffffffffL).toInt() }
         gpu.skipCount = skipTmp.size
+    }
+
+    /** True when the player is out in the street view, where whatever stands in front of them is made see-through. */
+    private fun sightToPlayer(): Boolean = !mapMode && !cinematic && e.hasGame && e.state.player.inBuilding < 0
+
+    /**
+     * True when feature part [part] (a viaduct span) stands between the camera and the player, or, while driving, the
+     * road just ahead.
+     */
+    private fun featureHidesPlayer(part: Int): Boolean {
+        if (!sightToPlayer()) return false
+        if (features.hides(part, proj.camX, proj.camY, proj.camZ, focusX, focusY, 1.2f)) return true
+        val v = e.state.vehicle(e.state.player.driving) ?: return false
+        val fx = sin(v.heading); val fy = -cos(v.heading)
+        for (ahead in AHEAD) if (features.hides(part, proj.camX, proj.camY, proj.camZ, v.x + fx * ahead, v.y + fy * ahead, .5f)) return true
+        return false
     }
 
     private fun drawList() {
@@ -478,14 +520,32 @@ class WorldRenderer(private val e: GameEngine) {
                     props.draw(scene, dIdx[i], dKey[i] < 55f * 55f, e.realTime, modelled = dKey[i] < PROP_MODEL_DIST * PROP_MODEL_DIST)
                     if (props.kind[dIdx[i]] == StreetProps.VENDOR && dKey[i] < 120f * 120f) vendor(dIdx[i])
                 }
-                12 -> features.draw(scene, dIdx[i], e.realTime, scene.gpu == null, mapMode, if (e.hasGame) e.state.hour else 12)
+                12 -> {
+                    val part = dIdx[i]
+                    val hour = if (e.hasGame) e.state.hour else 12
+                    if (staticPass) {
+                        // as with buildings: where its solid geometry sits in the cache
+                        val st = scene.gpu!!.streams[GpuFrame.OPAQUE]
+                        featStart[building][part] = st.ni
+                        features.draw(scene, part, e.realTime, false, mapMode, hour)
+                        featEnd[building][part] = st.ni
+                        featDrawn[building][featCount[building]++] = part
+                    } else {
+                        // a viaduct over the street that hides you is see-through, so you can see where you're going
+                        if (featureHidesPlayer(part)) scene.fade = .3f
+                        try { features.draw(scene, part, e.realTime, scene.gpu == null, mapMode, hour) } finally { scene.fade = 1f }
+                    }
+                }
                 14 -> {
                     val cb = e.city.curb; val ci = dIdx[i]
                     val st = cb.style[ci]
                     drawCar(cb.x[ci], cb.y[ci], cb.heading[ci], com.hustlecity.game.world.Curbside.length(st), com.hustlecity.game.world.Curbside.width(st),
                         com.hustlecity.game.world.Curbside.height(st), cb.color[ci], st, false)
                 }
-                13 -> features.drawCar(scene, dIdx[i])
+                13 -> {
+                    if (sightToPlayer() && features.carHides(dIdx[i], proj.camX, proj.camY, proj.camZ, focusX, focusY, 1.2f)) scene.fade = .3f
+                    try { features.drawCar(scene, dIdx[i]) } finally { scene.fade = 1f }
+                }
             }
         }
     }
@@ -709,11 +769,31 @@ class WorldRenderer(private val e: GameEngine) {
                 scene.clearFrame()
             }
         }
-        // roads: bridge decks get their own sidewalks, then the asphalt, then the junctions
+        // roads: bridge decks get their own concrete with darker edges, and a band of shade on the water either side
+        // so the river reads as running on under them (in the paving's own color they looked like dams across it);
+        // then the asphalt, then the junctions
         val g = city.roads
         if (roadSeen.size < g.edges.size) roadSeen = IntArray(g.edges.size)
-        scene.material = Mat.SIDEWALK
-        for (ed in g.edges) if (ed.overWater && edgeVisible(ed, 20f)) strip(ed, 0f, ed.len, -ed.cls.outer, ed.cls.outer, .02f, sidewalk)
+        scene.material = Mat.PLAIN
+        val shade = scene.withAlpha(c(0xFF061420), .38f)
+        for (br in features.water.bridges) {
+            val ed = g.edges[br.edge]
+            if (!edgeVisible(ed, 20f)) continue
+            val o = ed.cls.outer
+            for (k in br.wetA.indices) {
+                strip(ed, br.wetA[k], br.wetB[k], -o - 2.6f, -o, .015f, shade)
+                strip(ed, br.wetA[k], br.wetB[k], o, o + 2.6f, .015f, shade)
+            }
+        }
+        scene.material = Mat.CONCRETE
+        val deck = scene.mix(scene.mix(scene.lit(BRIDGE_DECK, .97f), white, snow * .9f), dark, wet * .22f)
+        val deckEdge = scene.mix(scene.lit(BRIDGE_EDGE, 1f), white, snow * .5f)
+        for (ed in g.edges) if (ed.overWater && edgeVisible(ed, 20f)) {
+            val o = ed.cls.outer
+            strip(ed, 0f, ed.len, -o, o, .02f, deck)
+            strip(ed, 0f, ed.len, -o, -o + .7f, .022f, deckEdge)
+            strip(ed, 0f, ed.len, o - .7f, o, .022f, deckEdge)
+        }
         scene.material = Mat.ASPHALT
         g.forCells(bbox[0] - 20f, bbox[1] - 20f, bbox[2] + 20f, bbox[3] + 20f) { id -> roadSeen[id] = roadStamp }
         for (ed in g.edges) {
@@ -1261,6 +1341,7 @@ class WorldRenderer(private val e: GameEngine) {
         if (mode == DYNAMIC) {
             // only the buildings hiding the player, drawn see-through
             for (id in occl) { val b = city.buildings[id]; add(0, b.id, keyForRect(b)) }
+            for (part in occlFeat) add(12, part, features.keyOf(part, proj.camX, proj.camY))
         } else city.forBuildingsIn(bx0, by0, bx1, by1) { b ->
             if (b.kind == BKind.PARK) return@forBuildingsIn
             if (b.kind == BKind.PARKING) {
