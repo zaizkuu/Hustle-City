@@ -311,6 +311,34 @@ class GpuFrameDumpTest {
         }
     }
 
+    /**
+     * A junction with lights after a busy minute, from above: cars wait behind the stop lines and people cross on the
+     * crossings. Runs with HC_JUNCTION=1; frames go to build/glframes/junction_<city>_<n>.
+     */
+    @Test
+    fun junctions() {
+        if (System.getenv("HC_JUNCTION") != "1") return
+        for (map in listOf("nyc", "tokyo", "manila")) {
+            val e = engine(map)
+            e.settings.quality = 2; e.settings.busyRoads = 3f; e.settings.crowds = 3f
+            e.traffic.ensure(e.settings.carCount, e.settings.pedCount)
+            val b = e.city.bounds
+            val cx = (b[0] + b[2]) / 2; val cy = (b[1] + b[3]) / 2
+            val hub = e.city.roads.nodes.filter { it.signal && it.degree >= 4 && !it.scramble }
+                .minByOrNull { (it.x - cx) * (it.x - cx) + (it.y - cy) * (it.y - cy) }!!
+            e.state.player.x = hub.x + 14f; e.state.player.y = hub.y + 14f
+            e.camera.tx = hub.x; e.camera.ty = hub.y
+            e.camera.zoom = 34f; e.camera.dist = 34f; e.camera.yaw = .6f
+            e.state.minute = 15 * 60L
+            e.traffic.update(0f, hub.x, hub.y, 230f, -9999f, -9999f, initial = true)
+            e.traffic.scatter(hub.x, hub.y, 40f, .6f)
+            for (n in 0..2) {
+                repeat(30 * 14) { e.frame(1 / 30f) }
+                city("junction_${map}_$n", e, 48f)
+            }
+        }
+    }
+
     /** The edges of the world: what lies past the last streets. Runs with HC_EDGES=1. */
     @Test
     fun edges() {

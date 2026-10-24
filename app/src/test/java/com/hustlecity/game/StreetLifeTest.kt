@@ -65,7 +65,7 @@ class StreetLifeTest {
         t.attach(tokyo)
         t.ensure(40, 400)
         // the walk comes on twenty seconds in, after a red that gathers people at the corners
-        t.lightClock = ((34.5f - scramble.phase - 20f) % Traffic.SCRAMBLE_CYCLE + Traffic.SCRAMBLE_CYCLE) % Traffic.SCRAMBLE_CYCLE
+        t.lightClock = ((t.scrambleWalkClock(scramble) - 20f) % Traffic.SCRAMBLE_CYCLE + Traffic.SCRAMBLE_CYCLE) % Traffic.SCRAMBLE_CYCLE
         t.update(0f, scramble.x, scramble.y, 230f, -9999f, -9999f, initial = true)
         t.scatter(scramble.x, scramble.y, 45f, .7f)
         val placed = t.peds.take(280)

@@ -46,6 +46,18 @@ class Agent {
     /** Pedestrian state: 0 walking, 1 waiting at the curb, 2 crossing / walking to the next sidewalk, 3 entering a shop, 4 inside, 5 leaving the shop. */
     var state = 0
     var timer = 0f
+    /**
+     * A walker's way across a road at a corner: to the near end of its crossing ([wx0], [wy0]), over to the far end
+     * ([wx1], [wy1]), then on to the next sidewalk ([tx], [ty]); [leg] is which of those it's on (0, 1, 2).
+     */
+    var wx0 = 0f; var wy0 = 0f; var wx1 = 0f; var wy1 = 0f
+    var leg = 2
+    /** The pavement corner to go round on the way to the crossing ([c0x], [c0y]) and on from it ([c2x], [c2y]); NaN for none. */
+    var c0x = Float.NaN; var c0y = 0f; var c2x = Float.NaN; var c2y = 0f
+    /** Where a walker steps to, to get round the end of a car standing in the way (NaN when there's none), and how often they have this crossing. */
+    var roundX = Float.NaN; var roundY = 0f
+    var rounds = 0
+    var roundOf: Agent? = null
     /** Personal sideways spread on the sidewalk, and a temporary side-step to pass someone. */
     var jitter = 0f
     var dodge = 0f
@@ -54,6 +66,24 @@ class Agent {
     var hidden = false
     /** Seconds a car has been held up by cross traffic (used to untangle jams in junctions). */
     var blocked = 0f
+    /**
+     * The car a stopped car is waiting on (its index; -1 for none, or only a light or someone on foot), and seconds
+     * left of going regardless after it was found waiting in a circle of cars all waiting on each other.
+     */
+    var waitOn = -1
+    var unstick = 0f
+    /** The road a car came into its junction from, and the lane it was in (while [inJunction]). */
+    var jEdge = -1
+    var jLane = 0
+    /** A car's turn at the coming junction (radians, + to the right), and how far it still sits off its lane's middle while changing lanes. */
+    var turn = 0f
+    var shift = 0f
+    /**
+     * The junction (or group of junctions working as one, by its first node) a car is going through whatever the lights
+     * now say: it went on amber when it couldn't stop, or it's in it already; and the light group it came in on.
+     */
+    var through = -1
+    var jGroup = 0
     /** How the body leans on its springs: nose up (+) or down when braking, and rolled toward the outside of a turn. */
     var pitch = 0f
     var roll = 0f
@@ -150,7 +180,39 @@ class Traffic(private val rnd: Random = Random(7)) {
         walk = FloatArray(city.roads.edges.size * 4) { Float.NaN }
         for (a in cars) a.placed = false
         for (p in peds) p.placed = false
+        coordinateLights(city.roads)
     }
+
+    /**
+     * Junctions only a short link apart (the two halves of a crossing over a divided road) work as one: the same timing,
+     * and their light groups taken from the same direction, so traffic going straight on gets green at both.
+     */
+    private fun coordinateLights(g: RoadGraph) {
+        val root = IntArray(g.nodes.size) { it }
+        fun find(i: Int): Int { var k = i; while (root[k] != k) { root[k] = root[root[k]]; k = root[k] }; return k }
+        for (e in g.edges) {
+            val na = g.nodes[e.a]; val nb = g.nodes[e.b]
+            if (na.signal && nb.signal && na.degree >= 3 && nb.degree >= 3 && shortLink(e)) {
+                val ra = find(e.a); val rb = find(e.b)
+                if (ra != rb) root[max(ra, rb)] = min(ra, rb)
+            }
+        }
+        cluster = IntArray(g.nodes.size) { find(it) }
+        lightPhase = FloatArray(g.nodes.size) { g.nodes[find(it)].phase }
+        lightRef = FloatArray(g.nodes.size) { i ->
+            val n = g.nodes[find(i)]
+            if (n.edges.isEmpty()) 0f else g.edges[n.edges[0]].let { atan2(it.uy, it.ux) }
+        }
+    }
+
+    /** A road between two junctions with no room to wait on it: whoever crosses one carries on across the other. */
+    private fun shortLink(e: RoadEdge) = e.len - e.clearA - e.clearB < SHORT_LINK
+
+    private var lightPhase = FloatArray(0)
+    private var lightRef = FloatArray(0)
+    /** Each node's group of junctions working as one (its first node's id; its own where it's alone). */
+    private var cluster = IntArray(0)
+    private fun clusterOf(n: Int) = cluster.getOrElse(n) { n }
 
     /** Eases the number of pedestrians toward [n]: newcomers walk in from the edge, leavers vanish off-screen. */
     /** How far from the camera people walk (0: the update radius decides); closer in, the same crowd looks busier. */
@@ -207,37 +269,55 @@ class Traffic(private val rnd: Random = Random(7)) {
 
     // ------------------------------------------------------------------ lights
 
-    /** Which light group an approach belongs to at a junction: roads roughly parallel to the first one share a phase. */
-    private fun group(g: RoadGraph, n: RoadNode, e: RoadEdge): Int {
-        val ref = g.edges[n.edges[0]]
-        val a = atan2(ref.uy, ref.ux); val b = atan2(e.uy, e.ux)
+    /**
+     * Which light group an approach belongs to at a junction: roads roughly parallel to the first one (of the junctions
+     * working together, see [coordinateLights]) share a phase.
+     */
+    private fun group(n: RoadNode, e: RoadEdge): Int {
+        val a = lightRef.getOrElse(n.id) { 0f }; val b = atan2(e.uy, e.ux)
         var d = abs(a - b) % Math.PI.toFloat()
         if (d > Math.PI / 2) d = Math.PI.toFloat() - d
         return if (d < Math.PI / 4) 0 else 1
     }
 
-    /** Light for traffic on [edge] entering junction [node]: 0 green, 1 yellow, 2 red (always green without lights). */
+    private fun phaseOf(n: RoadNode) = lightPhase.getOrElse(n.id) { n.phase }
+
+    /**
+     * Light for traffic on [edge] entering junction [node]: 0 green, 1 yellow, 2 red (always green without lights).
+     * Between one direction's red and the other's green both are red a moment, while the junction clears.
+     */
     fun light(node: RoadNode, edge: RoadEdge): Int {
         if (!node.signal) return 0
-        val g = roads ?: return 0
+        if (roads == null) return 0
         if (node.scramble) {
             // two road phases, then every car waits while the crossing fills with people
-            val t = (lightClock + node.phase) % SCRAMBLE_CYCLE
-            return if (group(g, node, edge) == 0) when { t < 14f -> 0; t < 17f -> 1; else -> 2 }
-            else when { t in 17f..31f -> 0; t in 31f..34f -> 1; else -> 2 }
+            val t = (lightClock + phaseOf(node)) % SCRAMBLE_CYCLE
+            return if (group(node, edge) == 0) when { t < 14f -> 0; t < 17f -> 1; else -> 2 }
+            else when { t in 19f..31f -> 0; t in 31f..34f -> 1; else -> 2 }
         }
-        val t = (lightClock + node.phase) % 40f
-        return if (group(g, node, edge) == 0) when { t < 20f -> 0; t < 23f -> 1; else -> 2 }
-        else when { t in 23f..37f -> 0; t > 37f -> 1; else -> 2 }
+        val t = (lightClock + phaseOf(node)) % CYCLE
+        return if (group(node, edge) == 0) when { t < 18f -> 0; t < 21f -> 1; else -> 2 }
+        else when { t in 23f..36f -> 0; t in 36f..39f -> 1; else -> 2 }
+    }
+
+    /** Seconds before traffic on [edge] gets its green at [node] (0 while it's green or amber; scrambles aside). */
+    fun redLeft(node: RoadNode, edge: RoadEdge): Float {
+        if (!node.signal || node.scramble) return if (light(node, edge) == 2) 99f else 0f
+        val t = (lightClock + phaseOf(node)) % CYCLE
+        return if (group(node, edge) == 0) (if (t >= 21f) CYCLE - t else 0f)
+        else if (t >= 39f) CYCLE - t + 23f else if (t < 23f) 23f - t else 0f
     }
 
     /** True while a scramble crossing's walk signal is on: all its traffic is held and people cross any way they like. */
-    fun scrambleWalk(node: RoadNode): Boolean = node.scramble && node.signal && (lightClock + node.phase) % SCRAMBLE_CYCLE in 34.5f..45f
+    fun scrambleWalk(node: RoadNode): Boolean = node.scramble && node.signal && (lightClock + phaseOf(node)) % SCRAMBLE_CYCLE in WALK_START..WALK_END
+
+    /** The light clock reading (in its cycle) at which [node]'s scramble walk signal comes on. */
+    fun scrambleWalkClock(node: RoadNode): Float = ((WALK_START - phaseOf(node)) % SCRAMBLE_CYCLE + SCRAMBLE_CYCLE) % SCRAMBLE_CYCLE
 
     /** Seconds until [node]'s scramble walk signal next comes on (0 while it's on). */
     fun untilScrambleWalk(node: RoadNode): Float {
-        val t = (lightClock + node.phase) % SCRAMBLE_CYCLE
-        return if (t in 34.5f..45f) 0f else ((34.5f - t) % SCRAMBLE_CYCLE + SCRAMBLE_CYCLE) % SCRAMBLE_CYCLE
+        val t = (lightClock + phaseOf(node)) % SCRAMBLE_CYCLE
+        return if (t in WALK_START..WALK_END) 0f else ((WALK_START - t) % SCRAMBLE_CYCLE + SCRAMBLE_CYCLE) % SCRAMBLE_CYCLE
     }
 
     // ------------------------------------------------------------------ geometry
@@ -530,16 +610,35 @@ class Traffic(private val rnd: Random = Random(7)) {
         val g = roads ?: return
         if (g.edges.isEmpty()) return
         lightClock += dt
+        if (pedOnRoad.size != peds.size) pedOnRoad = BooleanArray(peds.size)
+        for (i in peds.indices) {
+            val p = peds[i]
+            pedOnRoad[i] = p.placed && !p.hidden && p.state != 1 && p.state != 4 && p.state != 6 && g.onAsphalt(p.x, p.y)
+        }
         for (i in cars.indices) {
             val a = cars[i]
             if (initial || !a.placed || dist(a.x, a.y, fx, fy) > radius) spawnCar(g, a, fx, fy, radius, initial || !a.placed)
             stepCar(g, a, i, dt, blockerX, blockerY)
             lean(a, a.speed, a.heading, dt)
         }
+        breakDeadlocks()
         val pr = if (pedRadius > 0f) min(pedRadius, radius * .7f) else radius * .7f
         for (p in peds) {
             if (initial || !p.placed || (dist(p.x, p.y, fx, fy) > pr && p.state != 4)) spawnPed(g, p, fx, fy, pr, initial || !p.placed)
             stepPed(g, p, dt)
+        }
+    }
+
+    /**
+     * Cars all stopped and each waiting on the next, round in a circle, would wait for ever: the first of them in the
+     * list goes regardless for a moment (a queue behind a red light ends at the light, so it's no circle).
+     */
+    private fun breakDeadlocks() {
+        for (i in cars.indices) {
+            if (cars[i].waitOn < 0) continue
+            var j = cars[i].waitOn; var k = 0; var first = i
+            while (j >= 0 && j != i && k++ < 16) { first = min(first, j); j = cars[j].waitOn }
+            if (j == i) cars[first].unstick = 2.5f
         }
     }
 
@@ -565,6 +664,8 @@ class Traffic(private val rnd: Random = Random(7)) {
 
     private fun weight(g: RoadGraph, node: RoadNode, inA: Float, e: RoadEdge, car: Boolean): Float {
         if (!car && e.under) return 0f
+        // (a stub between two junctions has no pavement of its own to speak of: walkers take a real street if there's one)
+        if (!car && shortLink(e)) return .02f
         val out = g.angleAway(e, node.id)
         val turn = angleDiff(inA, out)
         val straight = if (turn < .5f) 2.2f else 1f
@@ -598,21 +699,56 @@ class Traffic(private val rnd: Random = Random(7)) {
                 else -> min(a.lane, ne.cls.lanes - 1)
             }
             a.timer = abs(turn)
+            a.turn = turn
         }
+        // ease across into a new lane
+        if (a.shift != 0f) a.shift = if (abs(a.shift) < LANE_CHANGE * dt) 0f else a.shift - kotlin.math.sign(a.shift) * LANE_CHANGE * dt
+        if (!a.inJunction && a.shift == 0f && e.cls.lanes > 1) changeLanes(g, a, e, sEnd - a.s)
         var target = a.cruise * speedFactor
         val fwdX = sin(a.heading); val fwdY = -cos(a.heading)
+        var atLight = false
+        var blockedBy = -1
+        // how far to where it stops for the junction ahead, and to the junction itself (when there is one near)
+        var lineLeft = -1f; var junctionLeft = -1f
         if (!a.inJunction) {
             val toEnd = sEnd - a.s
+            // where the nose stops short of the junction: behind the stop line at lights, behind the crossing elsewhere
+            val toStop = toEnd - (if (toNode.signal) STOP_LINE else GIVE_WAY) - a.length * .5f
             // slow down for the turn ahead
             if (a.timer > .5f && toEnd < 22f) target = min(target, if (a.timer > 2.5f) 3.5f else if (a.timer > 1.2f) 5.5f else 7.5f)
-            // lights, and giving way where there are none
-            if (clearAt(e, toNode.id) > 0f && toNode.degree >= 3) {
-                val l = light(toNode, e)
-                if (toEnd in 0f..26f) {
-                    var stop = false
-                    if (l != 0) stop = l == 2 || toEnd > a.speed * a.speed / 16f
-                    else if (!toNode.signal && junctionBusy(a, toNode.id)) stop = a.blocked < 3f
-                    if (stop) target = min(target, (toEnd - 1.2f).coerceAtLeast(0f) * .9f)
+            // lights, and giving way where there are none (a junction just past a bend in the road counts as this one's)
+            approach(g, a, e, toNode, toEnd)
+            val jn = apNode; val je = apEdge!!
+            val toLine = apDist - (if (jn.signal) STOP_LINE else GIVE_WAY) - a.length * .5f
+            if (jn !== toNode || (clearAt(e, toNode.id) > 0f && toNode.degree >= 3)) {
+                if (apDist < 30f) {
+                    lineLeft = toLine; junctionLeft = apDist
+                    var hold = false
+                    val cl = clusterOf(jn.id)
+                    // held up short of the line after going for an amber: it waits for the next green after all
+                    if (a.through == cl && !a.inJunction && e.other(a.from) == jn.id && !shortLink(e) && a.speed < 1f && toLine > -.5f && light(jn, je) == 2) a.through = -1
+                    blocker = -1
+                    val yields = a.unstick <= 0f
+                    if (a.through == cl) {
+                        // on through (it went on amber, or it's already in among junctions working as one): lights
+                        // don't stop it now; between junctions of a group, it goes in turn with whoever's in the next
+                        hold = yields && shortLink(e) && junctionBusy(a, jn.id) && a.blocked < 3f
+                    } else when (light(jn, je)) {
+                        // amber: stop if there's room to, else go on through
+                        1 -> if (toLine < a.speed * a.speed / 16f) { a.through = cl; a.jGroup = group(jn, je) } else { hold = true; atLight = true }
+                        2 -> { hold = true; atLight = true }
+                        // green: let the cross traffic that went on amber get out of the way first
+                        else -> hold = yields && if (jn.signal) toLine < 4f && crossInBox(a, jn, je) && a.blocked < 6f
+                            else junctionBusy(a, jn.id) && a.blocked < 3f
+                    }
+                    // turning across the oncoming lanes: wait for a gap
+                    if (!hold && yields && jn === toNode && a.next >= 0 && farSide(a.turn) && toLine < 5f && a.blocked < 12f && oncomingInWay(g, a, e, toNode)) hold = true
+                    // nor across the way of a car from the next lane over, gone in ahead (it couldn't get into the right lane)
+                    if (!hold && yields && jn === toNode && a.next >= 0 && toLine < 3f && a.blocked < 8f && crossesNeighbour(a, e, toNode)) hold = true
+                    if (hold) {
+                        target = min(target, toLine.coerceAtLeast(0f) * .9f)
+                        if (!atLight && blocker >= 0) blockedBy = blocker
+                    }
                 }
             } else if (toNode.degree <= 1 && toEnd < 14f && turningAt(a, toNode.id)) {
                 // a dead end: one car turns round at a time
@@ -620,10 +756,12 @@ class Traffic(private val rnd: Random = Random(7)) {
             }
             // a car from another approach still turning into the lane we're about to take comes out first, and
             // nobody turns into a lane that's backed up to the junction
-            if (toEnd < 12f && mustWaitAt(g, a, e, toNode.id, sEnd)) target = min(target, (toEnd - 1.2f).coerceAtLeast(0f) * .9f)
+            if (toEnd < 12f + a.length && a.unstick <= 0f && mustWaitAt(g, a, e, toNode.id, sEnd, index)) {
+                target = min(target, toStop.coerceAtLeast(0f) * .9f)
+                if (blocker >= 0) blockedBy = blocker
+            }
         }
-        // keep distance to whatever is ahead; if two cars hold each other up in a junction for a while, the
-        // waiting one creeps through so nothing locks up
+        // keep distance to whatever is ahead
         var heldByCross = false
         for (j in cars.indices) {
             val o = cars[j]
@@ -633,28 +771,40 @@ class Traffic(private val rnd: Random = Random(7)) {
             var ahead = dx * fwdX + dy * fwdY
             val side = abs(-dx * fwdY + dy * fwdX)
             val align = fwdX * sin(o.heading) - fwdY * cos(o.heading)
+            // (let go from a jam, a car still keeps behind the one straight ahead of it: it's the others it gives up on)
+            if (a.unstick > 0f && !(align > .9f && side < 1f)) continue
             // two cars come out of a junction (a U-turn, a merge) on the same spot: the first in the list drives
             // on, the other waits for it, so they don't carry on as one
             if (abs(ahead) < 1.5f && side < 1.2f && align > .6f) {
                 if (j > index) continue
                 ahead = .01f
             }
-            if (ahead <= 0 || ahead >= 15f || side >= 1.7f + (o.width - 1.8f) * .5f + (a.width - 1.8f) * .5f) continue
-            if (align < .6f) {
-                if (a.blocked > 2.5f) continue
-                heldByCross = true
+            // (one moving across into this lane is in it already, as far as whoever's behind is concerned)
+            val merging = !a.inJunction && !o.inJunction && o.edge == a.edge && o.from == a.from && o.lane == a.lane && o.shift != 0f
+            if (ahead <= 0 || ahead >= 15f || (!merging && side >= (o.width + a.width) * .5f + .25f)) continue
+            // two that each have the other ahead (side by side across each other's way in a junction): the first in
+            // the list goes, the other waits for it
+            if (j > index) {
+                val ofx = sin(o.heading); val ofy = -cos(o.heading)
+                val back = -dx * ofx - dy * ofy
+                if (back > 0f && abs(dx * ofy - dy * ofx) < (o.width + a.width) * .5f + .25f) continue
             }
-            target = min(target, (ahead - (a.length + o.length) * .5f - 2f).coerceAtLeast(0f) * 1.3f)
+            // (held up by one at an angle: what used to let it creep through after a while, now [breakDeadlocks] does)
+            if (align < .6f) heldByCross = true
+            val keep = (ahead - (a.length + o.length) * .5f - 2f).coerceAtLeast(0f) * 1.3f
+            if (keep < target) { target = keep; blockedBy = j }
         }
-        a.blocked = if ((heldByCross || target < .3f) && a.speed < .5f) a.blocked + dt else if (a.blocked > 2.5f && a.blocked < 6f) a.blocked + dt else 0f
-        // pedestrians crossing in front
-        for (p in peds) {
-            if (p.hidden || !p.placed) continue
-            val dx = p.x - a.x; val dy = p.y - a.y
-            if (abs(dx) > 12f || abs(dy) > 12f) continue
-            val ahead = dx * fwdX + dy * fwdY
-            val side = abs(-dx * fwdY + dy * fwdX)
-            if (ahead > 0 && ahead < 10f && side < 1.6f) target = min(target, (ahead - a.length * .5f - 1.5f).coerceAtLeast(0f) * 1.2f)
+        // (waiting at a red light isn't being held up)
+        a.blocked = if (atLight) 0f
+            else if ((heldByCross || target < .3f) && a.speed < .5f) a.blocked + dt else if (a.blocked > 2.5f && a.blocked < 6f) a.blocked + dt else 0f
+        // people on foot anywhere along the way it's about to drive, round the corner too: stop short of them
+        val look = 7f + a.length * .5f + a.speed * a.speed / 10f
+        val person = personAhead(g, a, look)
+        if (person < look) {
+            var stopAt = person - a.length * .5f - 1.6f
+            // someone on the crossing just ahead: wait behind the line for them, not nosed up to them on the crossing
+            if (lineLeft >= 0f && person < junctionLeft + 1f) stopAt = min(stopAt, lineLeft)
+            target = min(target, stopAt.coerceAtLeast(0f) * 1.2f)
         }
         run {
             val dx = bx - a.x; val dy = by - a.y
@@ -669,16 +819,232 @@ class Traffic(private val rnd: Random = Random(7)) {
             val side = abs(-dx * fwdY + dy * fwdX)
             if (ahead > 0 && ahead < 12f && side < 2.2f) target = min(target, (ahead - 5.5f).coerceAtLeast(0f))
         }
+        if (a.unstick > 0f) a.unstick -= dt
         // gentle acceleration, firm braking
         val brake = if (target < a.speed - 4f) 16f else 9f
         a.speed += (target - a.speed).coerceIn(-brake * dt, 4.5f * dt)
         if (a.speed < .05f && target <= 0f) a.speed = 0f
+        a.waitOn = if (a.speed < .3f && target < .3f) blockedBy else -1
         move(g, a, a.speed * dt)
     }
 
+    private val cv = FloatArray(6)
+    private val cvA = FloatArray(2); private val cvB = FloatArray(2)
+
+    /**
+     * The curve through the junction at the end of [e] (driven from node [from] in lane [lane]) on to [ne] (from [nFrom])
+     * in [nextLane]: start, control point and end (x, y each) into [out].
+     */
+    private fun curve(g: RoadGraph, e: RoadEdge, from: Int, lane: Int, ne: RoadEdge, nFrom: Int, nextLane: Int, out: FloatArray, shift: Float = 0f) {
+        val to = e.other(from)
+        at(e, from, e.len - clearAt(e, to), laneOffset(e, lane) + shift, cvA)
+        at(ne, nFrom, clearAt(ne, nFrom), laneOffset(ne, nextLane), cvB)
+        val x0 = cvA[0]; val y0 = cvA[1]; val x1 = cvB[0]; val y1 = cvB[1]
+        out[0] = x0; out[1] = y0; out[4] = x1; out[5] = y1
+        val d0x = if (from == e.a) e.ux else -e.ux; val d0y = if (from == e.a) e.uy else -e.uy
+        val d1x = if (nFrom == ne.a) ne.ux else -ne.ux; val d1y = if (nFrom == ne.a) ne.uy else -ne.uy
+        // control point where the two lane lines meet (or half way for straight crossings)
+        val den = d0x * d1y - d0y * d1x
+        out[2] = (x0 + x1) * .5f; out[3] = (y0 + y1) * .5f
+        if (abs(den) > .15f) {
+            val t = ((x1 - x0) * d1y - (y1 - y0) * d1x) / den
+            if (t > 0f && t < 60f) { out[2] = x0 + d0x * t; out[3] = y0 + d0y * t }
+        } else if (ne.id == e.id) {
+            // U-turn at a dead end: swing out past the end
+            out[2] = g.nodes[to].x + d0x * 6f; out[3] = g.nodes[to].y + d0y * 6f
+        }
+    }
+
+    /** Which walkers are out on the road this step (crossing it, or straying on to it): only they're in a car's way. */
+    private var pedOnRoad = BooleanArray(0)
+    private val nearX = FloatArray(24); private val nearY = FloatArray(24); private val nearI = IntArray(24)
+    internal var lastPerson = -1
+    private val pathC = FloatArray(6); private val pathP = FloatArray(2)
+
+    /**
+     * How far along the way car [a] is about to drive (what's left of its lane, its curve through the junction, the
+     * start of the road after) someone on foot stands in it, within [look] meters; more than [look] if nobody does.
+     */
+    /** Which walker (by index) car [a] is waiting on, if any: for the street audit. */
+    internal fun personAheadOf(a: Agent): Int { lastPerson = -1; val g = roads ?: return -1; personAhead(g, a, 7f + a.length * .5f + 3f); return lastPerson }
+    private fun personAhead(g: RoadGraph, a: Agent, look: Float): Float {
+        var n = 0
+        for (i in peds.indices) {
+            if (!pedOnRoad.getOrElse(i) { false }) continue
+            val p = peds[i]
+            if (abs(p.x - a.x) > look + 3f || abs(p.y - a.y) > look + 3f) continue
+            if (n < nearX.size) { nearX[n] = p.x; nearY[n] = p.y; nearI[n] = i; n++ }
+        }
+        if (n == 0) return look + 1f
+        val r = a.width * .5f + .6f
+        // the stretches of the way: straight on in this lane, the curve, straight on in the next lane
+        val e = g.edges[a.edge]
+        val straight: Float; val curveT0: Float; val curveLen: Float; val nextEdge: RoadEdge?; val nextFrom: Int; val nextLane: Int
+        if (a.inJunction) {
+            straight = 0f; curveT0 = a.jt; curveLen = a.jLen
+            pathC[0] = a.jx0; pathC[1] = a.jy0; pathC[2] = a.jcx; pathC[3] = a.jcy; pathC[4] = a.jx1; pathC[5] = a.jy1
+            nextEdge = e; nextFrom = a.from; nextLane = a.lane
+        } else {
+            val to = e.other(a.from)
+            straight = e.len - clearAt(e, to) - a.s
+            val ne = if (a.next >= 0) g.edges[a.next] else null
+            if (ne != null && (clearAt(e, to) > 0f || clearAt(ne, to) > 0f || ne.id == e.id)) {
+                val lane = a.nextLane.coerceIn(0, ne.cls.lanes - 1)
+                curve(g, e, a.from, a.lane, ne, to, lane, pathC)
+                curveT0 = 0f
+                curveLen = (dist(pathC[0], pathC[1], pathC[2], pathC[3]) + dist(pathC[2], pathC[3], pathC[4], pathC[5])).coerceAtLeast(1f)
+                nextEdge = ne; nextFrom = to; nextLane = lane
+            } else { curveT0 = 1f; curveLen = 0f; nextEdge = null; nextFrom = -1; nextLane = 0 }
+        }
+        var d = .5f
+        while (d <= look) {
+            val c = d - straight
+            if (c <= 0f) at(e, a.from, a.s + d, laneOffset(e, a.lane), pathP)
+            else if (curveLen > 0f && curveT0 + c / curveLen <= 1f) {
+                val t = curveT0 + c / curveLen; val u = 1f - t
+                pathP[0] = u * u * pathC[0] + 2 * u * t * pathC[2] + t * t * pathC[4]
+                pathP[1] = u * u * pathC[1] + 2 * u * t * pathC[3] + t * t * pathC[5]
+            } else if (nextEdge != null) {
+                val past = c - (1f - curveT0) * curveLen
+                at(nextEdge, nextFrom, min(clearAt(nextEdge, nextFrom) + past, nextEdge.len), laneOffset(nextEdge, nextLane), pathP)
+            } else break
+            for (k in 0 until n) {
+                val dx = nearX[k] - pathP[0]; val dy = nearY[k] - pathP[1]
+                if (dx * dx + dy * dy < r * r) { lastPerson = nearI[k]; return d }
+            }
+            d += 1f
+        }
+        return look + 1f
+    }
+
+    /** How far a turn goes toward the far side: 0 across the oncoming lanes, 1 straight on, 2 toward the curb. */
+    private fun turnRank(turn: Float) = if (farSide(turn)) 0 else if (abs(turn) < .5f) 1 else 2
+
+    /**
+     * True when a car that came from the same road into [node] just before [a], from another lane, is still in the
+     * junction and the two ways cross (the one nearer the centre line turning toward the curb, or the other way round).
+     */
+    private fun crossesNeighbour(a: Agent, e: RoadEdge, node: RoadNode): Boolean {
+        val mine = turnRank(a.turn)
+        for (i in cars.indices) {
+            val o = cars[i]
+            if (o === a || !o.placed || !o.inJunction || o.jNode != node.id || o.jEdge != e.id || o.jt > .85f || o.jLane == a.lane) continue
+            val theirs = turnRank(o.turn)
+            if ((o.jLane < a.lane && theirs > mine) || (o.jLane > a.lane && theirs < mine)) { blocker = i; return true }
+        }
+        return false
+    }
+
+    /** A turn across the oncoming lanes (left where traffic keeps right). */
+    private fun farSide(turn: Float) = if (leftHand) turn > .5f else turn < -.5f
+
+    /** The junction a car on [e] comes to next, past any bends in the road: its node, the road into it and how far to its edge. */
+    private var apNode: RoadNode = RoadNode(-1, 0f, 0f)
+    private var apEdge: RoadEdge? = null
+    private var apDist = 0f
+
+    private fun approach(g: RoadGraph, a: Agent, e: RoadEdge, toNode: RoadNode, toEnd: Float) {
+        var n = toNode; var ed = e; var d = toEnd; var guard = 0
+        while (n.degree == 2 && clearAt(ed, n.id) <= 0f && d < 40f && guard++ < 6) {
+            val nx = g.edges[if (n.edges[0] == ed.id) n.edges[1] else n.edges[0]]
+            if (clearAt(nx, n.id) > 0f) break
+            val far = nx.other(n.id)
+            d += nx.len - clearAt(nx, far)
+            ed = nx; n = g.nodes[far]
+        }
+        apNode = n; apEdge = ed; apDist = d
+    }
+
+    /**
+     * True when a car turning across the oncoming lanes at [node] should wait: an oncoming car is in the junction, or is
+     * coming up to it and not about to stop.
+     */
+    private fun oncomingInWay(g: RoadGraph, a: Agent, e: RoadEdge, node: RoadNode): Boolean {
+        val ix = if (node.id == e.b) e.ux else -e.ux; val iy = if (node.id == e.b) e.uy else -e.uy
+        fun oncoming(oe: RoadEdge): Boolean {
+            val ox = if (node.id == oe.b) oe.ux else -oe.ux; val oy = if (node.id == oe.b) oe.uy else -oe.uy
+            return oe.id != e.id && ix * ox + iy * oy < -.85f
+        }
+        for (i in cars.indices) {
+            val o = cars[i]
+            if (o === a || !o.placed) continue
+            if (o.inJunction) {
+                if (o.jNode == node.id && o.jEdge >= 0 && o.jt < .8f && oncoming(g.edges[o.jEdge])) { blocker = i; return true }
+                continue
+            }
+            if (o.edge < 0) continue
+            val oe = g.edges[o.edge]
+            if (oe.other(o.from) != node.id || !oncoming(oe)) continue
+            val oTo = oe.len - clearAt(oe, node.id) - o.s
+            // one turning across too passes on the inside, and one at its own red light isn't coming
+            if (o.next >= 0 && farSide(o.turn)) continue
+            if (oTo < 5f + o.speed * 2.8f && o.speed > 1.5f && light(node, oe) != 2) { blocker = i; return true }
+        }
+        return false
+    }
+
+    /**
+     * On a road with more than one lane each way: moves into the lane its next turn needs, or out from behind a slow
+     * vehicle, when the lane alongside is clear and there's room before the junction.
+     */
+    private fun changeLanes(g: RoadGraph, a: Agent, e: RoadEdge, toEnd: Float) {
+        if (toEnd < 22f || a.next < 0) return
+        val lanes = e.cls.lanes
+        val want = when {
+            farSide(a.turn) -> 0
+            a.timer > .5f -> lanes - 1
+            else -> -1
+        }
+        var to = -1
+        if (want >= 0 && want != a.lane) to = a.lane + kotlin.math.sign((want - a.lane).toFloat()).toInt()
+        else if (want < 0 && toEnd > 45f) {
+            // stuck behind something slow (a tricycle, a bus pulling off): pass it in the next lane
+            for (o in cars) {
+                if (o === a || !o.placed || o.inJunction || o.edge != a.edge || o.from != a.from || o.lane != a.lane) continue
+                val gap = o.s - a.s - (a.length + o.length) * .5f
+                if (gap in 0f..10f && o.speed > 1f && o.speed < a.cruise * speedFactor - 2f) {
+                    to = if (a.lane > 0) a.lane - 1 else 1
+                    break
+                }
+            }
+        }
+        if (to < 0 || to >= lanes || to == a.lane) return
+        // the lane alongside has to be clear, a car's length or two either way
+        for (o in cars) {
+            if (o === a || !o.placed || o.inJunction || o.edge != a.edge || o.from != a.from) continue
+            if (o.lane != to && !(o.shift != 0f && o.lane == a.lane)) continue
+            val gap = abs(o.s - a.s) - (a.length + o.length) * .5f
+            if (gap < 4f + max(0f, (if (o.s < a.s) o.speed - a.speed else a.speed - o.speed)) * 1.5f) return
+        }
+        a.shift = laneOffset(e, a.lane) - laneOffset(e, to)
+        a.lane = to
+        if (want < 0) a.nextLane = min(a.lane, g.edges[a.next].cls.lanes - 1)
+    }
+
+    /**
+     * True when a car that came into junction [node] (or the group of junctions it works with) across [e]'s way, from
+     * the other light group, is still in this junction or about to cross it.
+     */
+    private fun crossInBox(a: Agent, node: RoadNode, e: RoadEdge): Boolean {
+        val cl = clusterOf(node.id)
+        val mine = group(node, e)
+        val g = roads ?: return false
+        for (i in cars.indices) {
+            val o = cars[i]
+            if (o === a || !o.placed || o.through != cl || o.jGroup == mine) continue
+            // in this junction (not just leaving it), or on a link from another of the group into it
+            if (o.inJunction) { if (o.jNode == node.id && o.jt < .9f) { blocker = i; return true } }
+            else if (o.edge >= 0 && shortLink(g.edges[o.edge]) && g.edges[o.edge].other(o.from) == node.id) { blocker = i; return true }
+        }
+        return false
+    }
+
+    /** The car the last of the checks below found in the way (its index), or -1. */
+    private var blocker = -1
+
     /** True when another car is crossing the junction now (unsignalled junctions are first come, first served). */
     private fun junctionBusy(a: Agent, node: Int): Boolean {
-        for (o in cars) if (o !== a && o.inJunction && o.jNode == node && o.edge != a.edge) return true
+        for (i in cars.indices) { val o = cars[i]; if (o !== a && o.inJunction && o.jNode == node && o.edge != a.edge) { blocker = i; return true } }
         return false
     }
 
@@ -692,7 +1058,7 @@ class Traffic(private val rnd: Random = Random(7)) {
      * True when [a] should hold at the line before turning at [node]: a car from another approach is still turning
      * into the lane it's heading for, or that lane is backed up right to the junction (don't block the box).
      */
-    private fun mustWaitAt(g: RoadGraph, a: Agent, e: RoadEdge, node: Int, sEnd: Float): Boolean {
+    private fun mustWaitAt(g: RoadGraph, a: Agent, e: RoadEdge, node: Int, sEnd: Float, index: Int): Boolean {
         if (a.next < 0) return false
         val ne = g.edges[a.next]
         val lane = a.nextLane.coerceIn(0, ne.cls.lanes - 1)
@@ -700,9 +1066,14 @@ class Traffic(private val rnd: Random = Random(7)) {
         var mine = false
         for (i in cars.indices) {
             val o = cars[i]
+            // one from another road (or another lane of this one) about to go into the same lane at the same moment:
+            // the first in the list goes
+            if (i < index && o.placed && !o.inJunction && o.edge >= 0 && (o.edge != a.edge || o.from != a.from || o.lane != a.lane) && o.next == a.next &&
+                o.nextLane.coerceIn(0, ne.cls.lanes - 1) == lane && g.edges[o.edge].other(o.from) == node &&
+                g.edges[o.edge].len - clearAt(g.edges[o.edge], node) - o.s < 3f + o.length * .5f && sEnd - a.s < 3f + a.length * .5f) { blocker = i; return true }
             if (o === a || o.edge != a.next || o.lane != lane) continue
             if (!o.inJunction) {
-                if (o.from == node && o.s < room + o.length * .5f && o.speed < 2f) return true
+                if (o.from == node && o.s < room + o.length * .5f && o.speed < 2f) { blocker = i; return true }
                 continue
             }
             if (o.jNode != node) continue
@@ -710,7 +1081,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             if (o.speed < .3f && o.blocked > 2f) continue
             // where our own curve would start: a car that started there is just ahead of us in the queue
             if (!mine) { at(e, a.from, sEnd, laneOffset(e, a.lane), tmp2); mine = true }
-            if (abs(o.jx0 - tmp2[0]) > 1f || abs(o.jy0 - tmp2[1]) > 1f) return true
+            if (abs(o.jx0 - tmp2[0]) > 1f || abs(o.jy0 - tmp2[1]) > 1f) { blocker = i; return true }
         }
         return false
     }
@@ -731,10 +1102,11 @@ class Traffic(private val rnd: Random = Random(7)) {
                     if (tx * tx + ty * ty > 1e-6f) a.heading = atan2(tx, -ty)
                     return
                 }
-                // out the other side
+                // out the other side (still in the group if this is a short link on to another of its junctions)
                 d = (a.jt - 1f) * a.jLen
                 val ne = g.edges[a.edge]
                 a.inJunction = false
+                if (!shortLink(ne) || clusterOf(ne.other(a.from)) != a.through) a.through = -1
                 a.s = clearAt(ne, a.from)
                 a.next = -1
                 continue
@@ -744,9 +1116,10 @@ class Traffic(private val rnd: Random = Random(7)) {
             val sEnd = e.len - clearAt(e, to)
             a.s += d
             if (a.s < sEnd) {
-                at(e, a.from, a.s, laneOffset(e, a.lane), tmp)
+                at(e, a.from, a.s, laneOffset(e, a.lane) + a.shift, tmp)
                 a.x = tmp[0]; a.y = tmp[1]
-                a.heading = headingOf(e, a.from)
+                // angled a little toward the lane it's moving into
+                a.heading = headingOf(e, a.from) + if (a.shift == 0f) 0f else atan2(-kotlin.math.sign(a.shift) * LANE_CHANGE, max(a.speed, 2f))
                 return
             }
             d = a.s - sEnd
@@ -754,32 +1127,26 @@ class Traffic(private val rnd: Random = Random(7)) {
             val ne = g.edges[a.next]
             val nFrom = if (a.next == e.id) to else to
             if (clearAt(e, to) <= 0f && clearAt(ne, to) <= 0f && a.next != e.id) {
-                // a bend in the road: carry on
-                a.edge = ne.id; a.from = nFrom; a.lane = a.nextLane.coerceIn(0, ne.cls.lanes - 1); a.s = 0f; a.next = -1
+                // a bend in the road: carry on (the same distance off the lane's middle if it's changing lanes)
+                val lane = a.nextLane.coerceIn(0, ne.cls.lanes - 1)
+                if (a.shift != 0f || lane != a.lane) a.shift = (laneOffset(e, a.lane) + a.shift - laneOffset(ne, lane)).coerceIn(-ne.cls.laneWidth, ne.cls.laneWidth)
+                a.edge = ne.id; a.from = nFrom; a.lane = lane; a.s = 0f; a.next = -1
                 continue
             }
             // a curve through the junction, from the end of this lane to the start of the next
-            at(e, a.from, sEnd, laneOffset(e, a.lane), tmp)
             val lane = a.nextLane.coerceIn(0, ne.cls.lanes - 1)
-            at(ne, nFrom, clearAt(ne, nFrom), laneOffset(ne, lane), tmp2)
-            a.jx0 = tmp[0]; a.jy0 = tmp[1]; a.jx1 = tmp2[0]; a.jy1 = tmp2[1]
-            val d0x = if (a.from == e.a) e.ux else -e.ux; val d0y = if (a.from == e.a) e.uy else -e.uy
-            val d1x = if (nFrom == ne.a) ne.ux else -ne.ux; val d1y = if (nFrom == ne.a) ne.uy else -ne.uy
-            // control point where the two lane lines meet (or half way for straight crossings)
-            val den = d0x * d1y - d0y * d1x
-            if (abs(den) > .15f) {
-                val qx = a.jx1 - a.jx0; val qy = a.jy1 - a.jy0
-                val t = (qx * d1y - qy * d1x) / den
-                if (t > 0f && t < 60f) { a.jcx = a.jx0 + d0x * t; a.jcy = a.jy0 + d0y * t } else { a.jcx = (a.jx0 + a.jx1) * .5f; a.jcy = (a.jy0 + a.jy1) * .5f }
-            } else if (a.next == e.id) {
-                // U-turn at a dead end: swing out past the end
-                val nx = g.nodes[to].x; val ny = g.nodes[to].y
-                a.jcx = nx + d0x * 6f; a.jcy = ny + d0y * 6f
-            } else { a.jcx = (a.jx0 + a.jx1) * .5f; a.jcy = (a.jy0 + a.jy1) * .5f }
+            curve(g, e, a.from, a.lane, ne, nFrom, lane, cv, a.shift)
+            a.shift = 0f
+            a.jx0 = cv[0]; a.jy0 = cv[1]; a.jcx = cv[2]; a.jcy = cv[3]; a.jx1 = cv[4]; a.jy1 = cv[5]
             a.jLen = (dist(a.jx0, a.jy0, a.jcx, a.jcy) + dist(a.jcx, a.jcy, a.jx1, a.jy1)).coerceAtLeast(1f)
             a.jt = 0f
             a.jNode = to
+            a.jEdge = e.id
+            a.jLane = a.lane
             a.inJunction = true
+            // into a junction (or a group working as one) from outside it: through it now, in this light group
+            val cl = clusterOf(to)
+            if (a.through != cl) { a.through = cl; a.jGroup = group(g.nodes[to], e) }
             a.edge = ne.id; a.from = nFrom; a.lane = lane
         }
     }
@@ -923,19 +1290,43 @@ class Traffic(private val rnd: Random = Random(7)) {
         a.next = nextId
         a.nextLane = side
         a.tx = tmp[0]; a.ty = tmp[1]
+        a.roundX = Float.NaN; a.rounds = 0; a.roundOf = null
         a.jNode = node.id
         // which road (if any) the walk crosses
         a.lane = -1
-        for (id in node.edges) {
-            if (id == nextId || id == e.id) continue
+        // (the road they've walked along, or the one they're heading on to, if the corner they're going to is across it)
+        for (id in node.edges.sortedBy { if (it == nextId || it == e.id) 1 else 0 }) {
             val f = g.edges[id]
             val fx = if (node.id == f.a) f.ux else -f.ux; val fy = if (node.id == f.a) f.uy else -f.uy
-            val reach = clearAt(f, node.id) + f.cls.halfWidth + 3f
+            val reach = f.len
             if (Geo.segHit(a.x, a.y, a.tx, a.ty, node.x, node.y, node.x + fx * reach, node.y + fy * reach, tmp2)) { a.lane = id; break }
         }
         // at a scramble every walk off the curb waits for the walk signal, the crowd spreading along the curb
         val off = node.scramble && dist(a.x, a.y, a.tx, a.ty) > 6f
-        a.state = if ((a.lane >= 0 || off) && node.signal) 1 else 2
+        a.leg = 2
+        if (a.lane >= 0 && !node.scramble && !shortLink(g.edges[a.lane])) {
+            // anywhere else the road's crossed on its crossing, just out from the junction: first along the curb to its
+            // near end, wait there for the lights, over to the far end, then on round the corner
+            val f = g.edges[a.lane]
+            val sc = min(clearAt(f, node.id) + 1.85f, f.len * .5f)
+            val fx = if (node.id == f.a) f.ux else -f.ux; val fy = if (node.id == f.a) f.uy else -f.uy
+            val lateral = (a.x - node.x) * -fy + (a.y - node.y) * fx
+            // (waiting a step back from the curb, clear of cars cutting the corner)
+            val edge = f.cls.halfWidth + .9f
+            at(f, node.id, sc, if (lateral >= 0f) edge else -edge, tmp2)
+            a.wx0 = tmp2[0]; a.wy0 = tmp2[1]
+            at(f, node.id, sc, if (lateral >= 0f) -edge else edge, tmp2)
+            a.wx1 = tmp2[0]; a.wy1 = tmp2[1]
+            if (!wetWalk(a.x, a.y, a.wx0, a.wy0) && !wetWalk(a.wx1, a.wy1, a.tx, a.ty)) a.leg = 0
+        }
+        // round the pavement's corner rather than straight over the junction's asphalt
+        a.c0x = Float.NaN; a.c2x = Float.NaN
+        if (a.leg == 0) {
+            val f = g.edges[a.lane]
+            if (cornerVia(g, node, e, a.x, a.y, f, a.wx0, a.wy0, tmp2)) { a.c0x = tmp2[0]; a.c0y = tmp2[1] }
+            if (cornerVia(g, node, f, a.wx1, a.wy1, ne, a.tx, a.ty, tmp2)) { a.c2x = tmp2[0]; a.c2y = tmp2[1] }
+        } else if (a.lane < 0 && cornerVia(g, node, e, a.x, a.y, ne, a.tx, a.ty, tmp2)) { a.c2x = tmp2[0]; a.c2y = tmp2[1] }
+        a.state = if ((a.lane >= 0 || off) && node.signal && a.leg == 2) 1 else 2
         if (off && a.state == 1) {
             // a spot a little back or along, as long as it's still on the pavement
             val wx = a.x - node.x; val wy = a.y - node.y; val wl = max(.01f, kotlin.math.sqrt(wx * wx + wy * wy))
@@ -945,6 +1336,44 @@ class Traffic(private val rnd: Random = Random(7)) {
                 if (!g.onAsphalt(nx, ny) && !g.nearAsphalt(nx, ny, .4f)) { a.x = nx; a.y = ny; break }
             }
         }
+    }
+
+    /**
+     * Where the pavements of [ea] (beside which (px, py) stands) and [eb] (beside which (tx, ty) does) meet at the corner
+     * of [node], into [out]: true when walking round it keeps off the asphalt that a straight walk from one to the other
+     * would cut over (a big junction's open middle).
+     */
+    private fun cornerVia(g: RoadGraph, node: RoadNode, ea: RoadEdge, px: Float, py: Float, eb: RoadEdge, tx: Float, ty: Float, out: FloatArray): Boolean {
+        if (ea.id == eb.id || !walkOverRoad(g, px, py, tx, ty)) return false
+        val ax = if (node.id == ea.a) ea.ux else -ea.ux; val ay = if (node.id == ea.a) ea.uy else -ea.uy
+        val bx = if (node.id == eb.a) eb.ux else -eb.ux; val by = if (node.id == eb.a) eb.uy else -eb.uy
+        // the middle of the pavement each end is on, as lines out from the junction
+        val sa = if ((px - node.x) * -ay + (py - node.y) * ax >= 0f) 1f else -1f
+        val sb = if ((tx - node.x) * -by + (ty - node.y) * bx >= 0f) 1f else -1f
+        val oa = sa * (ea.cls.halfWidth + ea.cls.sidewalk * .5f); val ob = sb * (eb.cls.halfWidth + eb.cls.sidewalk * .5f)
+        val a0x = node.x - ay * oa; val a0y = node.y + ax * oa
+        val b0x = node.x - by * ob; val b0y = node.y + bx * ob
+        val det = bx * ay - ax * by
+        if (abs(det) < .25f) return false
+        val qx = b0x - a0x; val qy = b0y - a0y
+        val t = (bx * qy - qx * by) / det
+        val k = (ax * qy - ay * qx) / det
+        if (t < -3f || k < -3f || t > 45f || k > 45f) return false
+        val wx = a0x + ax * t; val wy = a0y + ay * t
+        if (g.onAsphalt(wx, wy) || dist(px, py, wx, wy) + dist(wx, wy, tx, ty) > dist(px, py, tx, ty) * 2.5f + 8f) return false
+        if (wetWalk(px, py, wx, wy) || wetWalk(wx, wy, tx, ty)) return false
+        out[0] = wx; out[1] = wy
+        return true
+    }
+
+    /** Whether a straight walk from (x0, y0) to (x1, y1) would go out over a road. */
+    private fun walkOverRoad(g: RoadGraph, x0: Float, y0: Float, x1: Float, y1: Float): Boolean {
+        val n = (dist(x0, y0, x1, y1) / 1f).toInt() + 1
+        for (k in 1 until n) {
+            val t = k / n.toFloat()
+            if (g.onAsphalt(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return true
+        }
+        return false
     }
 
     /** Whether a straight walk from (x0, y0) to (x1, y1) would cross water. */
@@ -959,19 +1388,62 @@ class Traffic(private val rnd: Random = Random(7)) {
     }
 
     private fun crossing(g: RoadGraph, a: Agent, dt: Float) {
+        if (a.leg == 0) {
+            // along the curb (round the corner) to the crossing, then wait there (at lights) or go straight over
+            if (!a.c0x.isNaN()) { if (walkTo(a, dt, a.c0x, a.c0y, a.cruise * hurry)) a.c0x = Float.NaN; return }
+            if (walkTo(a, dt, a.wx0, a.wy0, a.cruise * hurry)) {
+                a.leg = 1
+                a.state = if (g.nodes[a.jNode].signal) 1 else 2
+                a.pause = 0f
+            }
+            return
+        }
         if (a.state == 1) {
             // waiting for the walk signal: cars on the road we cross must have red (at a scramble, all of them)
             val node = g.nodes[a.jNode]
             val crossed = g.edges.getOrNull(a.lane)
-            val go = if (node.scramble) scrambleWalk(node) else crossed == null || light(node, crossed) == 2
+            // (and only while there's red enough left to get across)
+            val go = if (node.scramble) scrambleWalk(node)
+                else crossed == null || (light(node, crossed) == 2 && redLeft(node, crossed) > (crossed.cls.halfWidth * 2f + 1f) / (a.cruise * hurry) + 1.5f)
             if (go) a.state = 2 else { a.speed = 0f; return }
+        }
+        // nobody walks into a car: they let one that's moving go by, and step round the nearer end of one that's stopped
+        val viaCorner = a.leg == 2 && !a.c2x.isNaN()
+        val gx = if (a.leg == 1) a.wx1 else if (viaCorner) a.c2x else a.tx; val gy = if (a.leg == 1) a.wy1 else if (viaCorner) a.c2y else a.ty
+        if (!a.roundX.isNaN()) {
+            if (carInWay(a, a.roundX, a.roundY)?.let { it.speed > .8f } == true) { a.speed = 0f; return }
+            if (walkTo(a, dt, a.roundX, a.roundY, a.cruise * hurry)) a.roundX = Float.NaN
+            return
+        }
+        // (round any one car twice at most: past that there's no way round it, and they squeeze by)
+        val c = carInWay(a, gx, gy)?.takeIf { it !== a.roundOf || a.rounds < 2 }
+        if (c != null) {
+            if (c.speed > .3f) { a.speed = 0f; return }
+            if (c !== a.roundOf) { a.roundOf = c; a.rounds = 0 }
+            // just off whichever corner of it on their side makes the shorter way
+            val fx = sin(c.heading); val fy = -cos(c.heading); val rx = -fy; val ry = fx
+            val reach = c.length * .5f + .7f
+            val side = (if ((a.x - c.x) * rx + (a.y - c.y) * ry >= 0f) 1f else -1f) * (c.width * .5f + .7f)
+            val px = c.x + rx * side; val py = c.y + ry * side
+            val front = dist(a.x, a.y, px + fx * reach, py + fy * reach) + dist(px + fx * reach, py + fy * reach, gx, gy)
+            val back = dist(a.x, a.y, px - fx * reach, py - fy * reach) + dist(px - fx * reach, py - fy * reach, gx, gy)
+            val k = if (front <= back) reach else -reach
+            a.roundX = px + fx * k; a.roundY = py + fy * k
+            a.rounds++
+            return
         }
         var speed = a.cruise * hurry
         val crossed = g.edges.getOrNull(a.lane)
         val node = g.nodes[a.jNode]
         val late = if (node.scramble) !scrambleWalk(node) else crossed != null && node.signal && light(node, crossed) != 2
         if (late) speed *= 1.6f
-        if (walkTo(a, dt, a.tx, a.ty, speed)) {
+        if (a.leg == 1) {
+            // over the road on the crossing
+            if (walkTo(a, dt, a.wx1, a.wy1, speed)) a.leg = 2
+            return
+        }
+        if (viaCorner) { if (walkTo(a, dt, a.c2x, a.c2y, a.cruise * hurry)) a.c2x = Float.NaN; return }
+        if (walkTo(a, dt, a.tx, a.ty, a.cruise * hurry)) {
             val ne = g.edges[a.next]
             a.edge = ne.id
             a.from = a.jNode
@@ -980,6 +1452,24 @@ class Traffic(private val rnd: Random = Random(7)) {
             a.state = 0
             a.next = -1
         }
+    }
+
+    /** The car standing, or coming, right where walker [a] is about to step on its way to ([gx], [gy]), if any. */
+    private fun carInWay(a: Agent, gx: Float, gy: Float): Agent? {
+        val dx = gx - a.x; val dy = gy - a.y
+        val d = sqrt(dx * dx + dy * dy)
+        if (d < .2f) return null
+        val px = a.x + dx / d * .8f; val py = a.y + dy / d * .8f
+        for (o in cars) {
+            if (!o.placed || abs(o.x - px) > 7f || abs(o.y - py) > 7f) continue
+            val fx = sin(o.heading); val fy = -cos(o.heading)
+            // a moving car is in the way a little further ahead of itself
+            val ahead = o.length * .5f + .3f + o.speed * .4f
+            val ox = px - o.x; val oy = py - o.y
+            val along = ox * fx + oy * fy
+            if (along < ahead && along > -o.length * .5f - .3f && abs(-ox * fy + oy * fx) < o.width * .5f + .3f) return o
+        }
+        return null
     }
 
     /** Walks straight toward a point; true on arrival. */
@@ -998,6 +1488,18 @@ class Traffic(private val rnd: Random = Random(7)) {
     companion object {
         /** Seconds round a scramble crossing's lights: two road phases, then the walk. */
         const val SCRAMBLE_CYCLE = 48f
+        /** The scramble's walk, after three seconds of red for the cars still crossing to get clear. */
+        private const val WALK_START = 37f
+        private const val WALK_END = 46f
+        /** Seconds round an ordinary junction's lights: each direction's green and amber, and a moment of red for both after each. */
+        const val CYCLE = 41f
+        /** A car stops with its nose this far short of a junction with lights (behind the stop line), and this far without (behind the crossing). */
+        private const val STOP_LINE = 4.9f
+        private const val GIVE_WAY = 3.6f
+        /** A link between junctions shorter than this (between their edges) has no room to wait on. */
+        private const val SHORT_LINK = 9f
+        /** How fast a car moves across into another lane (m/s sideways). */
+        private const val LANE_CHANGE = 1.3f
 
         /** How far ahead a walker starts stepping round something on the pavement, and how wide a berth they give it. */
         private const val RAMP = 1.6f
