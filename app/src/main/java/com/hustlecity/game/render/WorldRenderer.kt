@@ -458,7 +458,7 @@ class WorldRenderer(private val e: GameEngine) {
                     val taxi = it.style == 0 && dIdx[i] % map.taxiEvery == 0
                     val color = if (taxi) map.taxiColors[(dIdx[i] / map.taxiEvery) % map.taxiColors.size] else it.color
                     drawCar(it.x, it.y, it.heading, it.length, it.width, it.height, color, it.style, false,
-                        taxi = taxi, braking = it.speed < it.cruise * .45f, accent = it.accent, pitch = it.pitch, roll = it.roll)
+                        taxi = taxi, braking = it.speed < it.cruise * .45f, accent = it.accent, pitch = it.pitch, roll = it.roll, moving = true)
                 }
                 3 -> e.traffic.peds.getOrNull(dIdx[i])?.let { drawPed(it, dIdx[i]) }
                 4 -> drawPlayer()
@@ -469,7 +469,7 @@ class WorldRenderer(private val e: GameEngine) {
                     if (driving) com.hustlecity.game.world.lean(lean, e.carSpeed, v.heading, (e.realTime - leanT).coerceIn(0f, .1f))
                     else { lean.pitch = 0f; lean.roll = 0f; lean.lastSpeed = 0f; lean.lastHeading = v.heading }
                     drawCar(v.x, v.y, v.heading, v.def.length, v.def.width, v.def.height, if (v.color != 0) v.color else v.def.color, v.def.style, true,
-                        braking = driving && e.input.brake, pitch = lean.pitch, roll = lean.roll)
+                        braking = driving && e.input.brake, pitch = lean.pitch, roll = lean.roll, moving = true, parked = !driving)
                 }
                 6 -> drawTrafficLight(dIdx[i], false)
                 15 -> drawTrafficLight(dIdx[i], true)
@@ -1431,11 +1431,18 @@ class WorldRenderer(private val e: GameEngine) {
     }
 
     private fun drawCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int, owned: Boolean,
-                        taxi: Boolean = false, braking: Boolean = false, accent: Int = 0, pitch: Float = 0f, roll: Float = 0f) {
+                        taxi: Boolean = false, braking: Boolean = false, accent: Int = 0, pitch: Float = 0f, roll: Float = 0f,
+                        moving: Boolean = false, parked: Boolean = !moving) {
         val lod = when (e.settings.quality) { 0 -> 45f; 1 -> 80f; else -> 120f }
-        val near = !mapMode && keyFor(x, y) < lod * lod
+        val k = keyFor(x, y)
+        // the full model up close and a light one out to twice as far, so traffic doesn't jump straight to the simple
+        // shapes; what stands still is kept in the city's cache, so it has the full models only half as far out and
+        // the light ones to where the full ones stop on the road
+        val full = if (moving) lod else lod * .5f
+        val near = !mapMode && k < full * full
+        val mid = !mapMode && k < full * full * 4f
         cars.leftHand = e.city.leftHand
-        cars.draw(x, y, heading, len, wid, hgt, color, style, near, taxi, braking, accent, pitch, roll)
+        cars.draw(x, y, heading, len, wid, hgt, color, style, near, taxi, braking, accent, pitch, roll, mid, parked)
     }
 
     /** Body lean of the player's own cars, kept between frames. */

@@ -14,7 +14,7 @@ import math
 import numpy as np
 
 from products import gen
-from shapes import _tris, box, disc, lathe, prism
+from shapes import Shape, _tris, box, disc, lathe, prism
 
 PAINT = '#FFFFFF'
 SHADE = '#A8A8A8'
@@ -34,6 +34,10 @@ INSIDE = '#2B2622'
 FRAME = '#2B2E33'
 ROOF = '#E4E7EA'
 DOOR = '#1B2128'
+
+
+# building the light version of each vehicle (see low()): plain wheels, flat lamps, no small parts
+LOW = False
 
 
 def paint(k):
@@ -115,7 +119,8 @@ def wheel(x, y, r, w):
     """One wheel, its hub caps on both sides (a bike's)."""
     t = tire(r, w).move(x, y, r)
     for sg in (1, -1):
-        t = t + disc(r * .5, 0, RIM, n=8).rotx(-90 if sg > 0 else 90).move(x, y + sg * (w / 2 + .004), r)
+        if not LOW:
+            t = t + disc(r * .5, 0, RIM, n=8).rotx(-90 if sg > 0 else 90).move(x, y + sg * (w / 2 + .004), r)
     return t
 
 
@@ -135,6 +140,8 @@ def arch(x, z, r, w, sgn):
 
 def tire(r, w):
     """A tire [r] round and [w] wide on its side across y, its middle at the origin: rounded off by smooth shading."""
+    if LOW:
+        return lathe([(r, -w / 2), (r, w / 2)], TIRE, n=6, cap=False).rotx(90)
     return lathe([(r, -w / 2), (r, w / 2)], TIRE, n=12).rotx(90)
 
 
@@ -146,8 +153,8 @@ def wheels(xs, y, r, w, body_w, arches=True):
         for sg in (1, -1):
             t = tire(r, w).move(x, sg * y, r)
             cap = disc(r * .62, 0, RIM, n=8).rotx(-90 if sg > 0 else 90).move(x, sg * (y + w / 2 + .004), r)
-            part = t + cap
-            if arches:
+            part = t if LOW else t + cap
+            if arches and not LOW:
                 part = part + arch(x, r, r + .07, body_w + .003, sg)
             s = part if s is None else s + part
     return s
@@ -156,6 +163,16 @@ def wheels(xs, y, r, w, body_w, arches=True):
 def lights(xf, xr, yo, yi, zf, zr, hf=.1, hr=.1, d=.1, rear_bar=False):
     """Headlights at the front corners ([xf], between [yi] and [yo] out from the middle, from [zf] up) and tail lights
     at the back ([xr] from [zr] up), or one bar across the back."""
+    if LOW:
+        # flat lenses on the ends
+        s = None
+        for sg in (1, -1):
+            y0, y1 = sorted((sg * yi, sg * yo))
+            h = front_face(xf + .005, y0, y1, zf, zf + hf, HEAD, True)
+            if not rear_bar:
+                h = h + rear_face(xr - .005, y0, y1, zr, zr + hr, TAIL, True)
+            s = h if s is None else s + h
+        return s + rear_face(xr - .005, -yo, yo, zr, zr + hr, TAIL, True) if rear_bar else s
     s = None
     for sg in (1, -1):
         h = box(xf - d, sg * yi, zf, xf, sg * yo, zf + hf, HEAD, emit=True)
@@ -170,6 +187,8 @@ def lights(xf, xr, yo, yi, zf, zr, hf=.1, hr=.1, d=.1, rear_bar=False):
 def ends(xf, xr, w, zb=.3, zt=.45, plate=True, grille=(.4, .38, .52)):
     """Bumpers front and back, the grille and the number plates."""
     s = box(xf - .14, -w, zb, xf + .05, w, zt, BUMPER) + box(xr - .05, -w, zb, xr + .14, w, zt, BUMPER)
+    if LOW:
+        return s
     gw, g0, g1 = grille
     s = s + front_face(xf + .002, -gw, gw, g0, g1, BLACK)
     if plate:
@@ -178,6 +197,8 @@ def ends(xf, xr, w, zb=.3, zt=.45, plate=True, grille=(.4, .38, .52)):
 
 
 def mirrors(x, z, w):
+    if LOW:
+        return Shape()
     return box(x, w - .02, z, x + .14, w + .1, z + .1, PAINT, mat='paint') + box(x, -w - .1, z, x + .14, -w + .02, z + .1, PAINT, mat='paint')
 
 
@@ -360,6 +381,8 @@ def jeepney():
 
 def horse(f, y, z):
     """A rearing chrome horse standing on the hood, side on (flat: it's seen from either side)."""
+    if LOW:
+        return Shape()
     parts = [[(f - .17, z), (f - .1, z), (f - .04, z + .2), (f - .15, z + .2)],          # hind legs
              [(f - .2, z + .17), (f + .1, z + .2), (f + .1, z + .31), (f - .19, z + .29)],  # body
              [(f + .03, z + .26), (f + .12, z + .24), (f + .24, z + .42), (f + .15, z + .46)],  # neck and head
@@ -558,6 +581,52 @@ def mirrored(shape):
     return shape.scale(1, -1, 1)
 
 
+def drop_small(s, size):
+    """[s] without its small parts: each piece whose triangles share corners, unless it lights up, that's under [size]
+    across its two largest dimensions (door lines and handles, plates, badges)."""
+    tris = s.pos.reshape(-1, 3, 3)
+    n = len(tris)
+    parent = list(range(n))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    seen = {}
+    for t in range(n):
+        for p in tris[t]:
+            key = tuple(np.round(p, 4))
+            if key in seen:
+                a, b = find(t), find(seen[key])
+                if a != b:
+                    parent[a] = b
+            else:
+                seen[key] = t
+    groups = {}
+    for t in range(n):
+        groups.setdefault(find(t), []).append(t)
+    keep = np.zeros(n, bool)
+    for g in groups.values():
+        pts = tris[g].reshape(-1, 3)
+        ext = np.sort(pts.max(0) - pts.min(0))
+        if ext[1] * ext[2] >= size * size or any(s.emit[t] for t in g):
+            keep[g] = True
+    corners = np.repeat(keep, 3)
+    return Shape(s.pos[corners], s.nrm[corners], s.col[corners], [m for m, k in zip(s.mat, keep) if k], [e for e, k in zip(s.emit, keep) if k])
+
+
+def low(make):
+    """The light version of a vehicle, for the middle distance: plain six-sided wheels, flat lamps, no mirrors, plates,
+    grilles or ornaments, nothing else under a quarter meter across (but what lights up)."""
+    global LOW
+    LOW = True
+    try:
+        return drop_small(make(), .25)
+    finally:
+        LOW = False
+
+
 # the game picks by style: 0 sedan (a hatchback when short), taxi, 1 pickup, 2 van, 3 sports, 4 jeepney, 5 tricycle,
 # 6 kei car, 7 bus, 8 motorbike, 9 SUV, 10 box truck, 11 modern jeepney, 12 moped (a delivery rider's with a box)
 CARS = {
@@ -581,3 +650,9 @@ CARS = {
     'moped': [gen(moped())],
     'moped_box': [gen(moped(True))],
 }
+# and their light versions (bikes stay simple shapes past the near distance: their riders are the game's)
+for _id, _make in (('sedan', sedan), ('hatchback', hatchback), ('taxi', taxi), ('pickup', pickup), ('van', van), ('sports', sports),
+                   ('suv', suv), ('box_truck', box_truck), ('jeepney', jeepney), ('modern_jeep', modern_jeep),
+                   ('modern_jeep_l', lambda: mirrored(modern_jeep())), ('tricycle', tricycle), ('tricycle_l', lambda: mirrored(tricycle())),
+                   ('kei', kei), ('bus', bus), ('bus_l', lambda: mirrored(bus()))):
+    CARS[_id + '_lod'] = [gen(low(_make))]

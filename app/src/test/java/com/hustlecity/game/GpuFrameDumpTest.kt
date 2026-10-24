@@ -278,6 +278,39 @@ class GpuFrameDumpTest {
             }
     }
 
+    /**
+     * Down a long street with cars every few meters out to 150 m: where they change from models to simple shapes (at
+     * the default quality, 80 m from the camera). Runs with HC_LOD=1; frames go to build/glframes/lod_<city>.
+     */
+    @Test
+    fun carDetailDistance() {
+        if (System.getenv("HC_LOD") != "1") return
+        for (map in listOf("nyc", "manila")) {
+            val e = engine(map)
+            e.settings.quality = 1
+            e.traffic.ensure(e.settings.carCount, e.settings.pedCount)
+            val b = e.city.bounds
+            // the longest street block (the camera stands well back, so it reaches past 80 m)
+            val ed = e.city.roads.edges.filter { !it.overWater && it.cls.lanes >= 2 && it.ax in b[0] + 150f..b[2] - 150f && it.ay in b[1] + 150f..b[3] - 150f }
+                .maxByOrNull { it.len }!!
+            e.traffic.update(0f, (ed.ax + ed.bx) / 2, (ed.ay + ed.by) / 2, 230f, -9999f, -9999f, initial = true)
+            for (c in e.traffic.cars) c.placed = false
+            val styles = e.city.map.trafficMix
+            var at = 8f; var k = 0
+            while (at < ed.len - 5f && k < e.traffic.cars.size) {
+                e.traffic.placeCar(k, ed.id, ed.a, at, styles[k % styles.size], lane = k % 2)
+                e.traffic.cars[k].speed = 0f
+                at += 6.5f; k++
+            }
+            // the player at the start of the street, the camera behind them looking along it
+            e.state.player.x = ed.ax + ed.ux * 6f; e.state.player.y = ed.ay + ed.uy * 6f
+            e.camera.tx = e.state.player.x; e.camera.ty = e.state.player.y
+            e.camera.zoom = 40f; e.camera.dist = 40f; e.camera.yaw = look(-ed.ux, -ed.uy)
+            e.state.minute = 15 * 60L
+            city("lod_$map", e, 18f, warm = 0)
+        }
+    }
+
     /** The edges of the world: what lies past the last streets. Runs with HC_EDGES=1. */
     @Test
     fun edges() {

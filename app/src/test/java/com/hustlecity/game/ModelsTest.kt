@@ -177,6 +177,16 @@ class ModelsTest {
         for (id in listOf("jeepney", "modern_jeep", "tricycle", "kei", "bus", "motorbike", "moped_box"))
             assertTrue("$id takes a second color", Models.car(id)!!.parts.count { it == Models.PART_ACCENT } >= 6)
         for (id in listOf("modern_jeep", "bus")) assertTrue("$id has lit windows", Models.car(id)!!.parts.count { it == Models.PART_WINDOW } >= 24)
+        // the light versions for the middle distance: the same size, a good deal lighter, still lit up at night
+        for (id in CarPainter.MODEL_SIZE.keys - CarPainter.RIDDEN + listOf("tricycle", "tricycle_l") - listOf("moped_box")) {
+            val full = Models.car(id)!!
+            val light = Models.car(id + "_lod")
+            assertNotNull("$id has a light version", light)
+            light!!
+            for (k in 0 until 6) assertEquals("$id light version's bounds", full.bounds[k], light.bounds[k], .25f)
+            assertTrue("$id light version is lighter (${light.vertices} of ${full.vertices})", light.vertices <= full.vertices * 2 / 3 && light.vertices <= 600)
+            assertTrue("$id light version keeps its lights", light.parts.count { it == Models.PART_LENS } >= 4 && light.parts.count { it == Models.PART_RED_LENS } >= 4)
+        }
         // a mirror image keeps its doors (or sidecar) on the other side
         for (id in listOf("modern_jeep", "tricycle", "bus")) {
             val r = Models.car(id)!!; val l = Models.car(id + "_l")!!

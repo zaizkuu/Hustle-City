@@ -64,13 +64,17 @@ class CarPainter(private val scene: Scene3D) {
      * is a livery's second color (stripes, a two-tone roof); 0 lets the painter pick one.
      */
     fun draw(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int,
-             near: Boolean, taxi: Boolean = false, braking: Boolean = false, accent: Int = 0, pitch: Float = 0f, roll: Float = 0f) {
+             near: Boolean, taxi: Boolean = false, braking: Boolean = false, accent: Int = 0, pitch: Float = 0f, roll: Float = 0f,
+             mid: Boolean = false, parked: Boolean = false) {
         val night = scene.daylight < .5f
-        // headlights go on after dark, and in rain or fog
-        val lights = night || scene.rain > .3f
+        // headlights go on after dark, and in rain or fog (not on a parked car)
+        val lights = !parked && (night || scene.rain > .3f)
         frame(x, y, heading)
         if (!near) {
-            farCar(len, wid, hgt, color, style, accent)
+            // in the middle distance a light version of the model, further off simple shapes
+            if (!mid || !model(x, y, len, wid, hgt, color, accent, style, taxi, lights, night, braking, 0f, 0f, false, light = true))
+                farCar(len, wid, hgt, color, style, accent)
+            scene.material = Mat.PLAIN
             if (lights) headGlow(x, y, heading, len)
             return
         }
@@ -120,10 +124,11 @@ class CarPainter(private val scene: Scene3D) {
     /**
      * In HD, the vehicles are models (tools/models/cars.py) painted in the vehicle's color and its livery's second color,
      * leaning on their springs, their lights lit at night and the tail lights when braking, bus and jeepney windows lit
-     * after dark; riders sit on the bikes. False when this one isn't (the classic renderer, no model files).
+     * after dark; riders sit on the bikes. [light] takes the light version (no bikes). False when this one isn't drawn
+     * so (the classic renderer, no model files).
      */
     private fun model(x: Float, y: Float, len: Float, wid: Float, hgt: Float, color: Int, accent: Int, style: Int, taxi: Boolean,
-                      lights: Boolean, night: Boolean, braking: Boolean, pitch: Float, roll: Float, fine: Boolean): Boolean {
+                      lights: Boolean, night: Boolean, braking: Boolean, pitch: Float, roll: Float, fine: Boolean, light: Boolean = false): Boolean {
         if (scene.gpu == null || !scene.smooth) return false
         val delivery = accent != 0 && accent != color
         val id = when (style) {
@@ -136,7 +141,7 @@ class CarPainter(private val scene: Scene3D) {
             12 -> if (delivery) "moped_box" else "moped"
             else -> return false
         }
-        val m = Models.car(id) ?: return false
+        val m = Models.car(if (light) id + "_lod" else id) ?: return false
         val size = MODEL_SIZE.getValue(id)
         // the livery's second color, or what each draws without one (as the shapes below do)
         val second = when (style) {
