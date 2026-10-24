@@ -669,7 +669,8 @@ class WorldRenderer(private val e: GameEngine) {
         // land: the city's paving, then rivers and bays cut into it (or, on island maps, the land masses)
         scene.material = Mat.SIDEWALK
         val sh = city.shore
-        if (sh.land.isEmpty()) clipRect(city.bounds[0], city.bounds[1], city.bounds[2], city.bounds[3], 0f, sidewalk)
+        // (out to the last streets past the edge of the reachable area, so none of them run on over the sea)
+        if (sh.land.isEmpty()) clipRect(city.ground[0], city.ground[1], city.ground[2], city.ground[3], 0f, sidewalk)
         else for (l in sh.land) groundPoly(l, 0f, sidewalk)
         scene.material = Mat.WATER
         val water = scene.lit(WATER, 1f)
@@ -678,6 +679,8 @@ class WorldRenderer(private val e: GameEngine) {
         for (w in sh.islands) groundPoly(w, .01f, sidewalk)
         scene.material = Mat.WATER
         for (w in sh.canals) groundPoly(w, .012f, water)
+        // streets that run on past the shore end on piers
+        features.water.drawPierDecks(scene, bbox)
         // parks, plazas and palace grounds with their footpaths
         for (pk in city.parks) {
             when (pk.kind) {

@@ -394,7 +394,7 @@ fun MiniMap(e: GameEngine, modifier: Modifier = Modifier) {
             rotate(yawDeg, Offset(cxp, cyp)) {
                 // ground, water and parks
                 val city = e.city
-                val bnd = city.bounds
+                val bnd = city.ground
                 if (city.shore.land.isEmpty()) drawRect(Color(0xFF8D949C), Offset(sx(bnd[0]), sy(bnd[1])), Size((bnd[2] - bnd[0]) * scale, (bnd[3] - bnd[1]) * scale))
                 fun poly(pts: FloatArray, color: Color) {
                     val bb = city.boxOf(pts)

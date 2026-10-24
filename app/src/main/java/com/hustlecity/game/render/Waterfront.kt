@@ -32,6 +32,7 @@ class Waterfront(private val city: City) {
         private val LAWN = c(0xFF6A9A55)
         private val GATE = c(0xFFB5A588)
         private val LAMP = c(0xFF2F3A35)
+        private val PIER = c(0xFFADB0B4)
     }
 
     // ------------------------------------------------------------------ quays
@@ -39,6 +40,11 @@ class Waterfront(private val city: City) {
     /** Quay runs: x0, y0, x1, y1, land normal x, y, depth — 7 floats each. */
     private val quay: FloatArray
     private val quayCount: Int
+
+    // ------------------------------------------------------------------ piers
+
+    /** Streets that run on past the shore end on a pier: edge, from, to (meters along it), 3 floats each. */
+    private val piers: FloatArray
 
     // ------------------------------------------------------------------ bridges
 
@@ -117,6 +123,32 @@ class Waterfront(private val city: City) {
         quayCount = quay.size / 7
         buildBridges()
         buildWalls()
+        piers = buildPiers()
+    }
+
+    /** The wet stretches of the streets that aren't bridges, out to the turning circle where they end. */
+    private fun buildPiers(): FloatArray {
+        val out = ArrayList<Float>()
+        val g = city.roads
+        for (e in g.edges) {
+            if (e.overWater) continue
+            val steps = max(2, ceil(e.len).toInt())
+            var start = -1f
+            for (k in 0..steps) {
+                val s = e.len * k / steps
+                val wet = city.shore.wet(e.ax + e.ux * s, e.ay + e.uy * s)
+                if (wet && start < 0f) start = max(0f, s - e.len / steps)
+                if ((!wet || k == steps) && start >= 0f) {
+                    var a = start; var b = s
+                    // a dead end's turning circle reaches past the node
+                    if (a <= 0f && g.nodes[e.a].degree == 1) a = -e.cls.halfWidth
+                    if (k == steps && wet && g.nodes[e.b].degree == 1) b = e.len + e.cls.halfWidth
+                    out += e.id.toFloat(); out += a; out += b
+                    start = -1f
+                }
+            }
+        }
+        return out.toFloatArray()
     }
 
     private fun underBridge(x: Float, y: Float): Boolean {
@@ -275,6 +307,26 @@ class Waterfront(private val city: City) {
             scene.quad(x0, y0, 0f, x1, y1, 0f, x1, y1, -d + .55f, x0, y0, -d + .55f, scene.lit(QUAY, sh))
             scene.quad(x0, y0, -d + .55f, x1, y1, -d + .55f, x1, y1, -d, x0, y0, -d, scene.lit(QUAY_WET, sh))
         }
+        // the piers' faces down to the water (their decks go down before the streets, see drawPierDecks)
+        scene.material = Mat.STONE
+        for (k in 0 until piers.size / 3) {
+            val e = city.roads.edges[piers[k * 3].toInt()]
+            val a = piers[k * 3 + 1]; val b = piers[k * 3 + 2]
+            val x0 = e.ax + e.ux * a; val y0 = e.ay + e.uy * a; val x1 = e.ax + e.ux * b; val y1 = e.ay + e.uy * b
+            if (max(x0, x1) < bbox[0] - 20f || min(x0, x1) > bbox[2] + 20f || max(y0, y1) < bbox[1] - 20f || min(y0, y1) > bbox[3] + 20f) continue
+            val w = e.cls.outer + .4f
+            val nx = e.uy * w; val ny = -e.ux * w
+            fun face(ax: Float, ay: Float, bx: Float, by: Float, ox: Float, oy: Float) {
+                if ((camX - (ax + bx) * .5f) * ox + (camY - (ay + by) * .5f) * oy <= 0f) return
+                val sh = scene.sideShade(ox, oy)
+                scene.quad(ax, ay, .014f, bx, by, .014f, bx, by, -DEPTH + .55f, ax, ay, -DEPTH + .55f, scene.lit(QUAY, sh))
+                scene.quad(ax, ay, -DEPTH + .55f, bx, by, -DEPTH + .55f, bx, by, -DEPTH, ax, ay, -DEPTH, scene.lit(QUAY_WET, sh))
+            }
+            face(x0 + nx, y0 + ny, x1 + nx, y1 + ny, e.uy, -e.ux)
+            face(x1 - nx, y1 - ny, x0 - nx, y0 - ny, -e.uy, e.ux)
+            if (b > e.len) face(x1 + nx, y1 + ny, x1 - nx, y1 - ny, e.ux, e.uy)
+            if (a < 0f) face(x0 - nx, y0 - ny, x0 + nx, y0 + ny, -e.ux, -e.uy)
+        }
         // bridges: the side facing the camera, with arches between the piers
         val water = ARCH_SHADOW
         for (br in bridges) {
@@ -309,6 +361,21 @@ class Waterfront(private val city: City) {
             }
         }
         scene.material = Mat.PLAIN
+    }
+
+    /** Piers where streets run on out over the water: their concrete decks, drawn over the water and under the streets. */
+    fun drawPierDecks(scene: Scene3D, bbox: FloatArray) {
+        scene.material = Mat.SIDEWALK
+        val deck = scene.mix(scene.lit(PIER, 1f), scene.lit(0xFFF2F5F8.toInt(), 1f), scene.snow * .9f)
+        for (k in 0 until piers.size / 3) {
+            val e = city.roads.edges[piers[k * 3].toInt()]
+            val a = piers[k * 3 + 1]; val b = piers[k * 3 + 2]
+            val x0 = e.ax + e.ux * a; val y0 = e.ay + e.uy * a; val x1 = e.ax + e.ux * b; val y1 = e.ay + e.uy * b
+            if (max(x0, x1) < bbox[0] - 20f || min(x0, x1) > bbox[2] + 20f || max(y0, y1) < bbox[1] - 20f || min(y0, y1) > bbox[3] + 20f) continue
+            val w = e.cls.outer + .4f
+            val nx = e.uy * w; val ny = -e.ux * w
+            scene.quad(x0 + nx, y0 + ny, .014f, x1 + nx, y1 + ny, .014f, x1 - nx, y1 - ny, .014f, x0 - nx, y0 - ny, .014f, deck)
+        }
     }
 
     private inline fun arch(scene: Scene3D, p: Float, q: Float, o: Float, x: (Float, Float) -> Float, y: (Float, Float) -> Float, stone: Int, shadow: Int, ring: Int) {

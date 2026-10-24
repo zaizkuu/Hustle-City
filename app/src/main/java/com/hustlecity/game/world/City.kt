@@ -284,6 +284,38 @@ class Shore(val water: List<FloatArray>, val land: List<FloatArray>, val islands
 
     /** Any water, canals included (no buildings there). */
     fun anyWater(x: Float, y: Float) = wet(x, y) || inAny(x, y, canals, canalBox)
+
+    /**
+     * This shore with whatever crosses the edge of [bounds] carried on straight out past the edge of [ground]: rivers and
+     * bays run on under the streets past the edge and off it, instead of stopping short of them in a slanted end, and
+     * land runs on under them too.
+     */
+    fun reaching(bounds: FloatArray, ground: FloatArray): Shore {
+        fun reach(p: FloatArray): FloatArray {
+            val n = p.size / 2
+            val bb = Geo.bounds(p)
+            // each side the outline crosses: everything past it goes out to one line, well past the ground's edge
+            val far = FloatArray(4) { side -> if (side < 2) min(bb[side], ground[side] - 20f) else max(bb[side], ground[side] + 20f) }
+            val x = FloatArray(n); val y = FloatArray(n); val on = IntArray(n)
+            for (i in 0 until n) {
+                x[i] = p[i * 2]; y[i] = p[i * 2 + 1]
+                if (x[i] < bounds[0]) { x[i] = far[0]; on[i] = on[i] or 1 }
+                if (x[i] > bounds[2]) { x[i] = far[2]; on[i] = on[i] or 4 }
+                if (y[i] < bounds[1]) { y[i] = far[1]; on[i] = on[i] or 2 }
+                if (y[i] > bounds[3]) { y[i] = far[3]; on[i] = on[i] or 8 }
+            }
+            if (on.all { it == 0 }) return p
+            // a run of points along one of those lines keeps only its ends (between them it could double back on itself)
+            val out = ArrayList<Float>()
+            for (i in 0 until n) {
+                val prev = on[(i + n - 1) % n]; val next = on[(i + 1) % n]
+                if (on[i] != 0 && Integer.bitCount(on[i]) == 1 && on[i] and prev != 0 && on[i] and next != 0) continue
+                out += x[i]; out += y[i]
+            }
+            return out.toFloatArray()
+        }
+        return Shore(water.map(::reach), land.map(::reach), islands.map(::reach), canals.map(::reach))
+    }
 }
 
 /** A city, generated from one of the [Maps] and a seed. Same seed and map give the same city. */
@@ -302,6 +334,8 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
     val neighborhoods: List<Neighborhood>
     /** World area the player can reach: x0, y0, x1, y1. */
     val bounds: FloatArray
+    /** The paved ground: [bounds], grown to take in the streets (and their sidewalks) that run on past them. */
+    val ground: FloatArray
     val maxHeight: Float
     val placeBuildings = HashMap<String, MutableList<Int>>()
     /** Cars keep left (Tokyo) instead of right. */
@@ -329,14 +363,24 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
         roads = layout.roads
         buildings += layout.buildings
         trees += layout.trees
-        water = layout.shore.water
-        shore = layout.shore
         parks = layout.parks
         rails = layout.rails
         landmarks = layout.landmarks
         walls = layout.walls
         neighborhoods = layout.neighborhoods
         bounds = layout.bounds
+        val g = bounds.copyOf()
+        for (e in roads.edges) {
+            if (e.overWater) continue
+            val r = e.cls.halfWidth + e.cls.sidewalk
+            g[0] = min(g[0], min(e.ax, e.bx) - r); g[1] = min(g[1], min(e.ay, e.by) - r)
+            g[2] = max(g[2], max(e.ax, e.bx) + r); g[3] = max(g[3], max(e.ay, e.by) + r)
+        }
+        ground = g
+        shore = layout.shore.reaching(bounds, ground)
+        water = shore.water
+        // nothing grows where the water now runs on past the edge, or out past the paving
+        trees.removeAll { shore.anyWater(it.x, it.y) || it.x < g[0] || it.x > g[2] || it.y < g[1] || it.y > g[3] }
         leftHand = map.leftHand
         for (b in buildings) b.placeId?.let { placeBuildings.getOrPut(it) { mutableListOf() } += b.id }
         for (l in landmarks) if (l.kind == Landmark.BILLBOARDS && l.style == Landmark.SCRAMBLE) scrambleNode(l)?.scramble = true

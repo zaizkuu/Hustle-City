@@ -140,6 +140,50 @@ class GpuFrameDumpTest {
         city("props_night", e)
     }
 
+    /** Close-ups of what's still drawn from shapes: vendors, vending machines, power poles, lanterns, bunting, fountains, hoops. */
+    @Test
+    fun streetShapes() {
+        if (System.getenv("HC_SHAPES") != "1") return
+        val SP = com.hustlecity.game.render.StreetProps
+        for ((map, kind, name) in listOf(Triple("manila", SP.VENDOR, "vendor"), Triple("manila", SP.UTIL_POLE, "util_pole"), Triple("tokyo", SP.VENDING, "vending"),
+            Triple("tokyo", SP.LANTERNS, "lanterns"), Triple("manila", SP.BUNTING, "bunting"), Triple("nyc", SP.FOUNTAIN, "fountain"), Triple("manila", SP.HOOP, "hoop"))) {
+            val e0 = engine(map)
+            val pr = SP.of(e0.city)
+            val i = (0 until pr.count).firstOrNull { pr.kind[it] == kind } ?: continue
+            val e = engine(map)
+            e.state.player.x = pr.x[i] - pr.dirX[i] * 1.5f + pr.dirY[i] * 2f; e.state.player.y = pr.y[i] - pr.dirY[i] * 1.5f - pr.dirX[i] * 2f
+            e.camera.tx = pr.x[i]; e.camera.ty = pr.y[i]
+            e.camera.zoom = 9f; e.camera.dist = 9f; e.camera.yaw = .5f
+            e.state.minute = 14L * 60
+            city("shape_$name", e)
+            if (name == "vending") {
+                val f = engine(map)
+                f.state.player.x = e.state.player.x; f.state.player.y = e.state.player.y; f.camera.tx = pr.x[i]; f.camera.ty = pr.y[i]
+                f.camera.zoom = 40f; f.camera.dist = 40f; f.camera.yaw = .5f; f.state.minute = 14L * 60
+                city("shape_vending_wide", f)
+                println("vending at ${pr.x[i]},${pr.y[i]} player ${e.state.player.x},${e.state.player.y} inBuilding ${e.state.player.inBuilding}")
+            }
+        }
+    }
+
+    /** The edges of the world: what lies past the last streets. Runs with HC_EDGES=1. */
+    @Test
+    fun edges() {
+        if (System.getenv("HC_EDGES") != "1") return
+        val spots = System.getenv("HC_EDGE_SPOTS")?.split(';')?.map { it.split(',') }?.map { Quad(it[0], it[1].toFloat(), it[2].toFloat(), it[3].toFloat()) }
+            ?: listOf(Quad("tokyo", 650f, 20f, 3.14f), Quad("manila", 900f, 20f, 3.14f), Quad("seoul", 1000f, 20f, 3.14f),
+                Quad("nyc", 660f, 30f, 3.14f), Quad("tokyo", 1280f, 650f, 1.57f), Quad("seoul", 20f, 650f, -1.57f), Quad("classic", 450f, 0f, 3.14f))
+        for ((map, x, y, yaw) in spots) {
+            val e = engine(map)
+            e.state.player.x = x; e.state.player.y = y; e.camera.tx = x; e.camera.ty = y
+            e.camera.zoom = 90f; e.camera.dist = 90f; e.camera.yaw = yaw
+            e.state.minute = 14L * 60
+            city("edge_${map}_${x.toInt()}_${y.toInt()}", e)
+        }
+    }
+
+    private data class Quad(val map: String, val x: Float, val y: Float, val yaw: Float)
+
     /**
      * A sweep for glitches: street-level views all over each city (junctions, bus stops, shopping streets, parks), by day
      * and a few by night, with the crowds out. Runs with HC_SWEEP=1; frames go to build/glframes/sweep_<city>_<n>.

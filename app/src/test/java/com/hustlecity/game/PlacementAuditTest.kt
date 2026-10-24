@@ -6,6 +6,7 @@ import com.hustlecity.game.render.Models
 import com.hustlecity.game.render.StreetProps
 import com.hustlecity.game.world.City
 import com.hustlecity.game.world.Curbside
+import com.hustlecity.game.world.Geo
 import com.hustlecity.game.world.Maps
 import com.hustlecity.game.world.companionAt
 import org.junit.Test
@@ -81,6 +82,45 @@ class PlacementAuditTest {
                 else -> null
             }
         }
+    }
+
+    /**
+     * Everything stands on paved ground: no street furniture, tree, building or parked car out past the city's paving
+     * (or a land mass's shore) or in the water, at the edges of the map as much as anywhere, and the paving reaches past
+     * the end of every street.
+     */
+    @Test
+    fun everythingStandsOnTheGround() {
+        Models.assets = ApplicationProvider.getApplicationContext<android.content.Context>().assets
+        val out = StringBuilder()
+        var total = 0
+        for (map in Maps.all) {
+            val c = GameEngine(null).also { it.newGame("T", 0, 0, 1, mapId = map.id) }.city
+            val sh = c.shore
+            val g = c.ground
+            fun slab(x: Float, y: Float) = x >= g[0] && x <= g[2] && y >= g[1] && y <= g[3]
+            fun paved(x: Float, y: Float): Boolean {
+                val land = if (sh.land.isEmpty()) slab(x, y) else sh.land.any { Geo.inside(x, y, it) } || sh.islands.any { Geo.inside(x, y, it) }
+                return land && !c.inWater(x, y)
+            }
+            val bad = ArrayList<String>()
+            for (b in c.buildings) if (!paved(b.cx, b.cy)) bad += "building ${b.id} at ${b.cx.toInt()},${b.cy.toInt()}"
+            val pr = StreetProps.of(c)
+            for (i in 0 until pr.count) if (!paved(pr.x[i], pr.y[i])) bad += "prop (kind ${pr.kind[i]}) at ${pr.x[i].toInt()},${pr.y[i].toInt()}"
+            for (t in c.trees) if (!paved(t.x, t.y)) bad += "tree at ${t.x.toInt()},${t.y.toInt()}"
+            for (ci in 0 until c.curb.count) if (!paved(c.curb.x[ci], c.curb.y[ci])) bad += "parked car at ${c.curb.x[ci].toInt()},${c.curb.y[ci].toInt()}"
+            if (sh.land.isEmpty()) for (ed in c.roads.edges) {
+                val r = ed.cls.outer
+                if (!slab(ed.ax - r, ed.ay - r) || !slab(ed.ax + r, ed.ay + r) || !slab(ed.bx - r, ed.by - r) || !slab(ed.bx + r, ed.by + r))
+                    bad += "street ${ed.id} runs off the paving"
+            }
+            val line = "${map.id}: ${bad.size} off the ground ${bad.take(6)}"
+            println(line); out.appendLine(line)
+            total += bad.size
+        }
+        File("build").mkdirs()
+        File("build/ground.txt").writeText(out.toString())
+        org.junit.Assert.assertEquals("things off the ground:\n$out", 0, total)
     }
 
     /**
