@@ -559,7 +559,10 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             val (fw, fd) = itemDims(def, p.rot)
             (0 until fw * fd).map { idx(p.x + it % fw, p.y + it / fw) }
         } else frontTiles(p, occ)
-        val free = tiles.filter { it >= 0 && it !in taken }
+        // (not where the line for the register forms, and only where they can get to without going through anyone)
+        val queuing = queueSlots.values.flatMapTo(HashSet()) { it.asIterable() }
+        val open = reachable(v, occ)
+        val free = tiles.filter { it >= 0 && it !in taken && it !in queuing && open[it] }
         return if (free.isEmpty()) -1 else free[e.rnd.nextInt(free.size)]
     }
 
@@ -688,22 +691,26 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         if (v.pathIdx >= v.path.size) return true
         val t = v.path[v.pathIdx]
         val tx = t % w + .5f; val ty = t / w + .5f
-        // someone right in front of us? wait a moment, then squeeze past
+        // someone right in front of us? step aside round them (to the right, else the left), or wait a moment; only
+        // when there's no way round for a while squeeze past
         if (v.ghost > 0f) v.ghost -= dt
         else {
             val dx = tx - v.x; val dy = ty - v.y
             val dd = sqrt(dx * dx + dy * dy).coerceAtLeast(1e-3f)
-            var blocked = false
-            for (o in visitors) {
-                if (o === v || o.done) continue
-                val ox = o.x - v.x; val oy = o.y - v.y
-                val dist2 = ox * ox + oy * oy
-                if (dist2 > .5f) continue
-                if ((ox * dx + oy * dy) / dd > .15f) { blocked = true; break }
-            }
-            if (blocked) {
+            val o = personAhead(v, dx / dd, dy / dd, .7f)
+            if (o != null) {
+                // one who's settled there since the way was planned (sat down, dancing, in the line): plan round them
+                if (v.blockedFor == 0f && v.goal >= 0 && (o.wait > 0f || o.seated || o.stage == 2)) {
+                    val goal = v.goal
+                    goTo(v, goal, occ)
+                    if (v.pathIdx < v.path.size) { v.blockedFor = dt; return false }
+                }
                 v.blockedFor += dt
-                if (v.blockedFor > 1.1f) { v.ghost = .9f; v.blockedFor = 0f }
+                for (sd in floatArrayOf(1f, -1f)) {
+                    val sx = v.x + (-dy / dd * sd * .55f + dx / dd * .25f); val sy = v.y + (dx / dd * sd * .55f + dy / dd * .25f)
+                    if (free(sx, sy, v, occ)) { moveToward(sx, sy, v.speed * .8f * dt, false, v); return false }
+                }
+                if (v.blockedFor > 2.5f) { v.ghost = .9f; v.blockedFor = 0f }
                 return false
             }
             v.blockedFor = 0f
@@ -712,10 +719,76 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         return v.pathIdx >= v.path.size
     }
 
+    /** Someone (customer or staff) within [reach] meters ahead of [v] along (fx, fy), or null. */
+    private fun personAhead(v: Person, fx: Float, fy: Float, reach: Float): Person? {
+        for (list in arrayOf(visitors, staff)) for (o in list) {
+            if (o === v || o.done) continue
+            val ox = o.x - v.x; val oy = o.y - v.y
+            if (ox * ox + oy * oy > reach * reach) continue
+            if (ox * fx + oy * fy > .15f) return o
+        }
+        return null
+    }
+
+    /** True when (x, y) is clear floor for [v] to step on: no furniture, the room's edge or back-room wall, nor anyone within a shoulder's width. */
+    private fun free(x: Float, y: Float, v: Person, occ: BooleanArray): Boolean {
+        val i = idx(floor(x).toInt(), floor(y).toInt())
+        if (i < 0 || occ[i] || x < .25f || y < .25f || x > w - .25f || y > d - .25f) return false
+        if (backRoom?.cuts(v.x, v.y, x, y) == true) return false
+        for (list in arrayOf(visitors, staff)) for (o in list) {
+            if (o === v || o.done) continue
+            val ox = o.x - x; val oy = o.y - y
+            if (ox * ox + oy * oy < .45f * .45f) return false
+        }
+        if ((px - x) * (px - x) + (py - y) * (py - y) < .45f * .45f) return false
+        return true
+    }
+
+    /** [occ] with the tiles of everyone staying put (seated, dancing, at a display, in a line) closed, but [keep] and [keep2]. */
+    private fun roundOthers(v: Person, occ: BooleanArray, keep: Int, keep2: Int = -1): BooleanArray {
+        val round = occ.copyOf()
+        for (o in visitors) {
+            if (o === v || o.done || (o.wait <= 0f && !o.seated && o.stage != 2)) continue
+            val t = idx(floor(o.x).toInt(), floor(o.y).toInt())
+            if (t >= 0 && t != keep && t != keep2) round[t] = true
+        }
+        return round
+    }
+
+    /** Which tiles [v] can get to from where they stand without going through anyone staying put. */
+    private fun reachable(v: Person, occ: BooleanArray): BooleanArray {
+        val here = idx(floor(v.x).toInt().coerceIn(0, w - 1), floor(v.y).toInt().coerceIn(0, d - 1))
+        val round = roundOthers(v, occ, here)
+        val seen = BooleanArray(w * d)
+        if (here < 0) return seen
+        val queue = IntArray(w * d)
+        var head = 0; var tail = 0
+        queue[tail++] = here; seen[here] = true
+        val wall = backRoom
+        while (head < tail) {
+            val cur = queue[head++]
+            val cx = cur % w; val cy = cur / w
+            for (k in 0 until 4) {
+                val nx = cx + DX[k]; val ny = cy + DY[k]
+                if (nx !in 0 until w || ny !in 0 until d) continue
+                if (wall != null && wall.blocks(cx, cy, nx, ny)) continue
+                val ni = ny * w + nx
+                if (seen[ni]) continue
+                seen[ni] = true
+                // a spot taken by someone can be reached, but not walked through
+                if (!round[ni]) queue[tail++] = ni
+            }
+        }
+        return seen
+    }
+
     private fun goTo(v: Person, goal: Int, occ: BooleanArray) {
         val here = idx(floor(v.x).toInt().coerceIn(0, w - 1), floor(v.y).toInt().coerceIn(0, d - 1))
         v.goal = goal
-        v.path = if (goal < 0) IntArray(0) else smooth(here, bfs(here, goal, occ) ?: intArrayOf(goal), occ)
+        // the way round anyone sitting, dancing, standing at a display or in the line for the register, if there is one
+        val round = roundOthers(v, occ, here, goal)
+        val way = if (goal < 0) null else bfs(here, goal, round)?.let { smooth(here, it, round) }
+        v.path = if (goal < 0) IntArray(0) else way ?: smooth(here, bfs(here, goal, occ) ?: intArrayOf(goal), occ)
         v.pathIdx = 0
     }
 

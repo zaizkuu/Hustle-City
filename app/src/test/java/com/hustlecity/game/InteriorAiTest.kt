@@ -53,6 +53,8 @@ class InteriorAiTest {
         assertTrue("$typeId: nobody came in", spawned > 10)
         assertTrue("$typeId: customers don't leave ($served of $spawned)", served >= spawned / 2)
         assertTrue("$typeId: someone was stuck inside (${oldest / 30} s)", oldest < 30 * 120)
+        // people step round each other instead of walking through (a brief squeeze at the door is fine)
+        assertTrue("$typeId: customers walk through each other ($overlapFrames/$frames frames)", overlapFrames < frames / 40)
         return report
     }
 
