@@ -75,11 +75,12 @@ for k in range(6):  # and before and after on every hit
     EDL.append((B(67 + k), B(68 + k), 'flip', dict(shot=s, f0=f, side=k % 2, look='day' if s == 'v05_street' else 'interior')))
 EDL += [
     (B(73), B(77), 'shot', dict(shot='v13_night', f0=0, look='night')),
-    (B(77), B(81), 'device', dict(still='v_sell', bg=('c9_manila', 10, 'day'))),
+    (B(77), B(81), 'device', dict(still='v_sell', bg=('v05_street_after', 20, 'day'))),
     (B(81), B(85), 'device', dict(still='v_landlord', bg=('v12_crowd', 20, 'day'))),
     (B(85), B(89), 'device', dict(still='v_slots', bg=('v01_open', 40, 'dusk'))),
-    (B(89), B(93), 'shot', dict(shot='c9_manila', f0=6, look='day')),
-    (B(93), B(97), 'shot', dict(shot='c14_snow', f0=12, look='snow')),
+    # these two were recorded a little shorter than their bars: slowed a touch to fill them
+    (B(89), B(93), 'shot', dict(shot='c9_manila', f0=6, look='day', speed=50 / ((B(93) - B(89)) * FPS))),
+    (B(93), B(97), 'shot', dict(shot='c14_snow', f0=12, look='snow', speed=58 / ((B(97) - B(93)) * FPS))),
 ]
 # the second pre-chorus: the new look, a cut on every beat, then on every half beat into the chorus
 SIZZLE = [('v03_market_after', 100, 'interior'), ('v04_cafe_after', 110, 'interior'), ('v05_street_after', 120, 'day'), ('v12_crowd', 64, 'day')]
