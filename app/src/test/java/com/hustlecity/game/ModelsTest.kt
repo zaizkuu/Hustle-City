@@ -141,6 +141,28 @@ class ModelsTest {
         }
     }
 
+    /** Riders sit on bikes out on the road, but not on one that's parked (your own, waiting at the curb). */
+    @Test
+    fun parkedBikesHaveNobodyOnThem() {
+        setUp()
+        val proj = com.hustlecity.game.render.Projector()
+        proj.tx = 0f; proj.ty = 0f; proj.dist = 8f
+        proj.update(800f, 600f)
+        val scene = com.hustlecity.game.render.Scene3D(proj, com.hustlecity.game.render.RenderBatch())
+        val painter = CarPainter(scene)
+        fun verts(style: Int, parked: Boolean): Int {
+            val f = com.hustlecity.game.render.gpu.GpuFrame()
+            scene.gpu = f
+            painter.draw(0f, 0f, 0f, 1.9f, .78f, 1.3f, 0xFF2F80ED.toInt(), style, near = true, parked = parked)
+            scene.gpu = null
+            return f.streams.sumOf { it.nv }
+        }
+        for (style in intArrayOf(8, 12)) {
+            val riding = verts(style, false); val parked = verts(style, true)
+            assertTrue("style $style: a rider on the road ($riding vs $parked vertices parked)", riding > parked + 100)
+        }
+    }
+
     @Test
     fun carsHaveModels() {
         setUp()

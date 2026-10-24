@@ -72,7 +72,7 @@ class CarPainter(private val scene: Scene3D) {
         frame(x, y, heading)
         if (!near) {
             // in the middle distance a light version of the model, further off simple shapes
-            if (!mid || !model(x, y, len, wid, hgt, color, accent, style, taxi, lights, night, braking, 0f, 0f, false, light = true))
+            if (!mid || !model(x, y, len, wid, hgt, color, accent, style, taxi, lights, night, braking, 0f, 0f, false, light = true, parked = parked))
                 farCar(len, wid, hgt, color, style, accent)
             scene.material = Mat.PLAIN
             if (lights) headGlow(x, y, heading, len)
@@ -89,7 +89,7 @@ class CarPainter(private val scene: Scene3D) {
         val nearSide = if (camL >= 0f) 1 else -1
         // the smallest trim (ornaments, mirrors, lettering) only close to the camera
         val fine = proj.camZOf(x, y, 1f) < 42f
-        if (model(x, y, len, wid, hgt, body, accent, style, taxi, lights, night, braking, pitch, roll, fine)) {
+        if (model(x, y, len, wid, hgt, body, accent, style, taxi, lights, night, braking, pitch, roll, fine, parked = parked)) {
             tiltF = 0f; tiltL = 0f
             scene.material = Mat.PLAIN
             if (lights) headGlow(x, y, heading, len)
@@ -124,11 +124,12 @@ class CarPainter(private val scene: Scene3D) {
     /**
      * In HD, the vehicles are models (tools/models/cars.py) painted in the vehicle's color and its livery's second color,
      * leaning on their springs, their lights lit at night and the tail lights when braking, bus and jeepney windows lit
-     * after dark; riders sit on the bikes. [light] takes the light version (no bikes). False when this one isn't drawn
+     * after dark; riders sit on the bikes (not when [parked]). [light] takes the light version (no bikes). False when this one isn't drawn
      * so (the classic renderer, no model files).
      */
     private fun model(x: Float, y: Float, len: Float, wid: Float, hgt: Float, color: Int, accent: Int, style: Int, taxi: Boolean,
-                      lights: Boolean, night: Boolean, braking: Boolean, pitch: Float, roll: Float, fine: Boolean, light: Boolean = false): Boolean {
+                      lights: Boolean, night: Boolean, braking: Boolean, pitch: Float, roll: Float, fine: Boolean, light: Boolean = false,
+                      parked: Boolean = false): Boolean {
         if (scene.gpu == null && scene.soft == null) return false
         val delivery = accent != 0 && accent != color
         val id = when (style) {
@@ -160,8 +161,8 @@ class CarPainter(private val scene: Scene3D) {
         // the model's y points left; the lean's roll is per meter to the right
         if (!scene.meshAt(m, x, y, 0f, fx, fy, -rx, -ry, len / size[0], wid / size[1], hgt / size[2],
                 paint = color, tiltF = pitch, tiltL = roll, lenses = lenses, accent = second, windowsLit = night)) return false
-        // (not in the menus' pictures, which show the bike for sale)
-        if (id in RIDDEN && scene.soft == null) {
+        // (a parked bike, your own or one in the menus' pictures, has nobody on it)
+        if (id in RIDDEN && !parked) {
             scene.material = Mat.FABRIC
             when (style) {
                 8 -> rider(color xor second, fine)
