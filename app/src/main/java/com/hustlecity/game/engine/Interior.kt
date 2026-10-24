@@ -539,7 +539,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         return if (cands.isEmpty()) -1 else cands[e.rnd.nextInt(cands.size)].index
     }
 
-    private fun claimed(except: Person): Set<Int> = visitors.mapNotNullTo(HashSet()) { if (it !== except && it.claim >= 0) it.claim else null }
+    private fun claimed(except: Person?): Set<Int> = visitors.mapNotNullTo(HashSet()) { if (it !== except && it.claim >= 0) it.claim else null }
 
     /** A free, unreserved spot to stand at an item: in front of it, or anywhere on a dance floor. */
     private fun spotAt(item: Int, occ: BooleanArray, v: Person): Int {
@@ -559,10 +559,12 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             val (fw, fd) = itemDims(def, p.rot)
             (0 until fw * fd).map { idx(p.x + it % fw, p.y + it / fw) }
         } else frontTiles(p, occ)
-        // (not where the line for the register forms, and only where they can get to without going through anyone)
+        // (not where the line for the register forms or anyone's standing, and only where they can get to without going
+        // through anyone)
         val queuing = queueSlots.values.flatMapTo(HashSet()) { it.asIterable() }
+        val kept = keptTiles(v).apply { for (o in staff) if (o.goal >= 0) add(o.goal) }
         val open = reachable(v, occ)
-        val free = tiles.filter { it >= 0 && it !in taken && it !in queuing && open[it] }
+        val free = tiles.filter { it >= 0 && it !in taken && it !in queuing && it !in kept && open[it] }
         return if (free.isEmpty()) -1 else free[e.rnd.nextInt(free.size)]
     }
 
@@ -700,7 +702,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             val o = personAhead(v, dx / dd, dy / dd, .7f)
             if (o != null) {
                 // one who's settled there since the way was planned (sat down, dancing, in the line): plan round them
-                if (v.blockedFor == 0f && v.goal >= 0 && (o.wait > 0f || o.seated || o.stage == 2)) {
+                if (v.blockedFor == 0f && v.goal >= 0 && staysPut(o)) {
                     val goal = v.goal
                     goTo(v, goal, occ)
                     if (v.pathIdx < v.path.size) { v.blockedFor = dt; return false }
@@ -744,14 +746,25 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         return true
     }
 
-    /** [occ] with the tiles of everyone staying put (seated, dancing, at a display, in a line) closed, but [keep] and [keep2]. */
+    /** True for someone staying where they are for a while: seated, dancing, at a display, in a line, or staff at their post. */
+    private fun staysPut(o: Person): Boolean =
+        if (o in staff) o.pathIdx >= o.path.size else o.wait > 0f || o.seated || o.stage == 2
+
+    /** The tiles of everyone staying put but [v]. */
+    private fun keptTiles(v: Person?): HashSet<Int> {
+        val tiles = HashSet<Int>()
+        for (list in arrayOf(visitors, staff)) for (o in list) {
+            if (o === v || o.done || !staysPut(o)) continue
+            val t = idx(floor(o.x).toInt(), floor(o.y).toInt())
+            if (t >= 0) tiles += t
+        }
+        return tiles
+    }
+
+    /** [occ] with the tiles of everyone staying put closed, but [keep] and [keep2]. */
     private fun roundOthers(v: Person, occ: BooleanArray, keep: Int, keep2: Int = -1): BooleanArray {
         val round = occ.copyOf()
-        for (o in visitors) {
-            if (o === v || o.done || (o.wait <= 0f && !o.seated && o.stage != 2)) continue
-            val t = idx(floor(o.x).toInt(), floor(o.y).toInt())
-            if (t >= 0 && t != keep && t != keep2) round[t] = true
-        }
+        for (t in keptTiles(v)) if (t != keep && t != keep2) round[t] = true
         return round
     }
 
@@ -1002,7 +1015,12 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                             val cur = staffGoal[emp.id]
                             val t = staffTimer[emp.id] ?: 0f
                             if (cur != null && cur >= 0 && t > 0f) Post(cur)
-                            else (e.economy.dirt.dirtiest(b, 6).randomOrNull(e.rnd) ?: cleanerRest(occFull) ?: freeTile(occFull, e.rnd.nextInt(w * d))).let { staffTimer[emp.id] = 4f; Post(it) }
+                            else {
+                                // (not where customers are standing, waiting in line or about to stand)
+                                val busy = keptTiles(staffById[emp.id]).apply { addAll(claimed(null)); queueSlots.values.forEach { q -> q.forEach { add(it) } } }
+                                (e.economy.dirt.dirtiest(b, 6).filter { it !in busy }.randomOrNull(e.rnd) ?: cleanerRest(occFull) ?: idleTile(occFull, busy))
+                                    .let { staffTimer[emp.id] = 4f; Post(it) }
+                            }
                         }
                         StaffRole.DJ -> behind(itemsWith("dj_booth").firstOrNull()?.index)
                         StaffRole.ACTOR -> itemsWith("stage").firstOrNull()?.let { st -> frontTiles(st.value, occFull).getOrNull(n % 4)?.let { Post(it, -1) } }
@@ -1051,10 +1069,9 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 p.pose = 0; p.z = 0f; p.seated = false
                 goTo(p, post.tile, occ)
             }
-            if (dt > 0f && p.pathIdx < p.path.size) {
-                val t = p.path[p.pathIdx]
-                if (moveToward(t % w + .5f, t / w + .5f, p.speed * dt, false, p)) p.pathIdx++
-            } else if (p.pathIdx >= p.path.size) {
+            // staff step round customers the way customers do round each other
+            if (dt > 0f && p.pathIdx < p.path.size) walk(p, dt, occ)
+            else if (p.pathIdx >= p.path.size) {
                 runs[key]?.let { if (p.goal == post.tile) advanceRun(key, it, p, dt) }
                 val seat = post.seat
                 if (seat != null && !p.seated) {
@@ -1141,6 +1158,23 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             if (!occ[i] && !room.isDoorTile(x, y)) return i
         }
         return null
+    }
+
+    /**
+     * Somewhere out of the way for a cleaner with nothing to clean: against a wall or furniture, not in front of
+     * anything, in a line or where anyone is ([busy]).
+     */
+    private fun idleTile(occ: BooleanArray, busy: Set<Int>): Int {
+        val fronts = HashSet<Int>()
+        for (p in items) fronts += frontTiles(p, occ)
+        val open = (0 until w * d).filter { !occ[it] && !isDoorTile(it % w, it / w) && it !in busy && it !in fronts && it / w < d - 1 }
+        fun againstSomething(i: Int): Boolean {
+            val x = i % w; val y = i / w
+            if (x == 0 || x == w - 1 || y == 0) return true
+            for (k in 0 until 4) idx(x + DX[k], y + DY[k]).let { if (it >= 0 && occ[it]) return true }
+            return false
+        }
+        return (open.filter(::againstSomething).ifEmpty { open }).randomOrNull(e.rnd) ?: freeTile(occ, e.rnd.nextInt(w * d))
     }
 
     private fun freeTile(occ: BooleanArray, seed: Int): Int {
