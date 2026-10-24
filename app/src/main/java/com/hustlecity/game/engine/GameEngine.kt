@@ -153,7 +153,7 @@ class GameEngine(context: Context?) {
         // the street furniture goes down first: people on the sidewalks walk round it
         com.hustlecity.game.render.StreetProps.of(city)
         traffic.attach(city)
-        val s = GameState(seed = seed, minute = 8L * 60, mapId = city.mapId)
+        val s = GameState(seed = seed, minute = 8L * 60, mapId = city.mapId, mapRev = city.rev)
         s.player = PlayerState(name = name.ifBlank { "Alex" }, skin = skin, shirt = shirt, money = rules.startMoney, difficulty = difficulty, rules = rules)
         state = s
         rnd = Random(seed xor System.nanoTime())
@@ -201,7 +201,7 @@ class GameEngine(context: Context?) {
     fun loadGame(slot: Int = saves.latestSlot() ?: saves.slot): Boolean {
         val s = saves.load(slot) ?: return false
         state = s
-        city = City(s.seed, s.mapId)
+        city = City(s.seed, s.mapId, s.mapRev)
         // the street furniture goes down first: people on the sidewalks walk round it
         com.hustlecity.game.render.StreetProps.of(city)
         traffic.attach(city)
@@ -242,7 +242,7 @@ class GameEngine(context: Context?) {
         // the street furniture goes down first: people on the sidewalks walk round it
         com.hustlecity.game.render.StreetProps.of(city)
         traffic.attach(city)
-        state = GameState(seed = 1337L, minute = 18L * 60 + 40, mapId = city.mapId)
+        state = GameState(seed = 1337L, minute = 18L * 60 + 40, mapId = city.mapId, mapRev = city.rev)
         // the tallest office tower makes a good backdrop
         val b = city.buildings.filter { it.kind == BKind.OFFICE }.maxByOrNull { it.height } ?: city.buildings.first()
         state.player.x = b.doorX; state.player.y = b.doorY + 8f

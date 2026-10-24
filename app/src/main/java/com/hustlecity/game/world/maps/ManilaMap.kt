@@ -11,6 +11,13 @@ import kotlin.math.sin
 object ManilaMap : PlannedMap("manila", "Manila", "Manila Bay, the Pasig River, Intramuros, Binondo and Makati's towers.") {
     override val extent = floatArrayOf(0f, 0f, 1300f, 1300f)
 
+    /**
+     * 1: both banks of the Pasig built up, with a street along each and every bridge landing on the far bank's street,
+     * and Binondo's lanes kept west of Rizal Avenue (the first layout left empty ground along the river, with four
+     * bridges ending in it, and ran Binondo's lanes into Quiapo's grid).
+     */
+    override val revision = 1
+
     override val firstNames = listOf("Jose", "Maria", "Juan", "Ana", "Mark", "Angelica", "Paolo", "Kristine", "Ramon", "Liza", "Carlo", "Joy",
         "Miguel", "Bea", "Rafael", "Camille", "Jericho", "Patricia", "Nico", "Grace", "Andres", "Lourdes", "Emilio", "Teresa")
     override val lastNames = listOf("Santos", "Reyes", "Cruz", "Bautista", "Garcia", "Mendoza", "Villanueva", "Ramos", "Aquino", "Dela Cruz",
@@ -75,7 +82,34 @@ object ManilaMap : PlannedMap("manila", "Manila", "Manila Bay, the Pasig River, 
         islands += rect(80f, 150f, 200f, 200f)
         islands += rect(70f, 255f, 200f, 300f)
         // the Pasig River
-        river(floatArrayOf(-60f, 455f, 180f, 455f, 330f, 492f, 480f, 445f, 640f, 520f, 800f, 470f, 960f, 560f, 1120f, 520f, 1360f, 590f), 26f)
+        val pasig = floatArrayOf(-60f, 455f, 180f, 455f, 330f, 492f, 480f, 445f, 640f, 520f, 800f, 470f, 960f, 560f, 1120f, 520f, 1360f, 590f)
+        river(pasig, 26f)
+        val banks = rev >= 1
+        // the riverside streets run 16 m back from the water (the river's centre line pushed out), the districts beside
+        // them reach down to just short of them
+        val course = Geo.spline(pasig, 6)
+        val southBank = Geo.offset(course, -42f); val northBank = Geo.offset(course, 42f)
+        val southEdge = Geo.offset(course, -56f); val northEdge = Geo.offset(course, 56f)
+        fun xs(line: FloatArray, x0: Float, x1: Float): FloatArray {
+            val out = ArrayList<Float>()
+            for (i in 0 until line.size / 2) if (line[i * 2] in x0..x1) { out += line[i * 2]; out += line[i * 2 + 1] }
+            return out.toFloatArray()
+        }
+        /** A bridge from (ax, ay) toward (bx, by) that lands on the south bank's street (just past it, so they join). */
+        fun bridge(ax: Float, ay: Float, bx: Float, by: Float, cls: RoadClass, name: String) {
+            var ex = bx; var ey = by
+            if (banks) {
+                val dx = bx - ax; val dy = by - ay
+                val l = kotlin.math.sqrt(dx * dx + dy * dy)
+                var best = Float.MAX_VALUE
+                for (i in 0 until southBank.size / 2 - 1) {
+                    val t = Geo.rayHit(ax, ay, dx / l, dy / l, southBank[i * 2], southBank[i * 2 + 1], southBank[i * 2 + 2], southBank[i * 2 + 3])
+                    if (t > 0f && t < best) best = t
+                }
+                if (best < l + 120f) { ex = ax + dx / l * (best + 1f); ey = ay + dy / l * (best + 1f) }
+            }
+            roads.add(ax, ay, ex, ey, cls, name, bridge = true)
+        }
 
         // Roxas Boulevard along the bay, lined with palms
         curve(floatArrayOf(205f, 500f, 215f, 700f, 210f, 900f, 230f, 1100f, 220f, 1360f), RoadClass.BOULEVARD, "Roxas Boulevard")
@@ -86,12 +120,17 @@ object ManilaMap : PlannedMap("manila", "Manila", "Manila Bay, the Pasig River, 
         rails += Rail("LRT-1", Geo.spline(floatArrayOf(430f, -60f, 450f, 200f, 470f, 420f, 520f, 540f, 535f, 800f, 540f, 1050f, 548f, 1360f), 5), c(0xFFF2C94C), false)
         // Quezon and España boulevards to the north-east
         curve(floatArrayOf(560f, 440f, 700f, 330f, 900f, 220f, 1100f, 120f, 1360f, -20f), RoadClass.BOULEVARD, "España Boulevard")
-        roads.add(560f, 420f, 590f, 560f, RoadClass.AVENUE, "Quezon Bridge", bridge = true)
+        bridge(560f, 420f, 590f, 560f, RoadClass.AVENUE, "Quezon Bridge")
         // more bridges over the Pasig
         roads.add(400f, 410f, 410f, 545f, RoadClass.STREET, "Jones Bridge", bridge = true)
-        roads.add(720f, 440f, 740f, 600f, RoadClass.AVENUE, "Ayala Bridge", bridge = true)
-        roads.add(950f, 480f, 960f, 640f, RoadClass.STREET, "Nagtahan Bridge", bridge = true)
-        roads.add(1160f, 440f, 1150f, 620f, RoadClass.STREET, "Lambingan Bridge", bridge = true)
+        bridge(720f, 440f, 740f, 600f, RoadClass.AVENUE, "Ayala Bridge")
+        bridge(950f, 480f, 960f, 640f, RoadClass.STREET, "Nagtahan Bridge")
+        bridge(1160f, 440f, 1150f, 620f, RoadClass.STREET, "Lambingan Bridge")
+        if (banks) {
+            // the south bank's street from MacArthur Bridge to the city's edge, and the north bank's east of Ayala Bridge
+            roads.polyline(xs(southBank, 498f, 1360f), RoadClass.STREET, "Arroceros Street")
+            roads.polyline(xs(northBank, 760f, 1360f), RoadClass.STREET, "J. P. Laurel Street")
+        }
         // EDSA sweeps around the south-east, Gil Puyat crosses to the bay
         curve(floatArrayOf(1360f, 640f, 1180f, 840f, 1020f, 1040f, 900f, 1360f), RoadClass.BOULEVARD, "EDSA")
         curve(floatArrayOf(215f, 1090f, 540f, 1060f, 800f, 1030f, 1360f, 980f), RoadClass.AVENUE, "Gil Puyat Avenue")
@@ -101,10 +140,15 @@ object ManilaMap : PlannedMap("manila", "Manila", "Manila Bay, the Pasig River, 
         grid(floatArrayOf(175f, -60f, 430f, -60f, 450f, 230f, 175f, 260f), 300f, 100f, 0f, 75f, 62f,
             { RoadClass.STREET }, { RoadClass.STREET }, { tondo[Math.floorMod(it, tondo.size)] }, { tondo[Math.floorMod(it + 3, tondo.size)] })
         // Binondo: Chinatown's crowded old streets
-        organic(floatArrayOf(180f, 262f, 600f, 230f, 600f, 440f, 180f, 450f), 38f, 9f, .05f, .12f, RoadClass.LANE, binondo, ring = null)
+        // (west of Rizal Avenue: past it they ran into Quiapo's grid)
+        val binondoArea = if (banks) floatArrayOf(180f, 262f, 436f, 238f, 454f, 436f, 180f, 450f) else floatArrayOf(180f, 262f, 600f, 230f, 600f, 440f, 180f, 450f)
+        organic(binondoArea, 38f, 9f, .05f, .12f, RoadClass.LANE, binondo, ring = null)
         landmarks += Landmark(Landmark.CHURCH, 420f, 320f, 0f, .9f, "Binondo Church", Landmark.PAGODA_TOWER)
         // Quiapo and Sampaloc: an older grid at an angle
-        grid(floatArrayOf(470f, -60f, 1360f, -60f, 1360f, 470f, 600f, 470f, 480f, 420f), 900f, 200f, -.42f, 85f, 66f,
+        // (down to the north bank's street east of Ayala Bridge)
+        val quiapoArea = if (banks) floatArrayOf(470f, -60f, 1360f, -60f) + xs(northEdge, 760f, 1360f).let { e -> FloatArray(e.size) { k -> e[e.size - 2 - (k / 2) * 2 + k % 2] } } +
+            floatArrayOf(600f, 470f, 480f, 420f) else floatArrayOf(470f, -60f, 1360f, -60f, 1360f, 470f, 600f, 470f, 480f, 420f)
+        grid(quiapoArea, 900f, 200f, -.42f, 85f, 66f,
             { if (it % 3 == 0) RoadClass.AVENUE else RoadClass.STREET }, { RoadClass.STREET },
             { sampaloc[Math.floorMod(it, sampaloc.size)] }, { sampaloc[Math.floorMod(it + 5, sampaloc.size)] })
         landmarks += Landmark(Landmark.CHURCH, 650f, 440f, -.42f, 1f, "Quiapo Church", Landmark.BASILICA)
@@ -131,7 +175,10 @@ object ManilaMap : PlannedMap("manila", "Manila", "Manila Bay, the Pasig River, 
         grid(floatArrayOf(205f, 860f, 760f, 850f, 760f, 1360f, 205f, 1360f), 300f, 900f, -.05f, 78f, 60f,
             { RoadClass.STREET }, { RoadClass.STREET }, { ermita[Math.floorMod(it, ermita.size)] }, { ermita[Math.floorMod(it + 6, ermita.size)] })
         // Paco and Pandacan: in between
-        organic(floatArrayOf(560f, 565f, 1000f, 612f, 1360f, 650f, 1360f, 890f, 1040f, 990f, 820f, 1050f, 770f, 1040f, 770f, 855f, 560f, 862f), 58f, 14f, .2f, .18f, RoadClass.STREET, paco, ring = null)
+        // (up to the south bank's street and across to Taft Avenue)
+        val pacoArea = if (banks) xs(southEdge, 552f, 1360f) + floatArrayOf(1360f, 890f, 1040f, 990f, 820f, 1050f, 770f, 1040f, 770f, 855f, 552f, 862f)
+            else floatArrayOf(560f, 565f, 1000f, 612f, 1360f, 650f, 1360f, 890f, 1040f, 990f, 820f, 1050f, 770f, 1040f, 770f, 855f, 560f, 862f)
+        organic(pacoArea, 58f, 14f, .2f, .18f, RoadClass.STREET, paco, ring = null)
         parks += Park("Paco Park", Geo.ellipse(700f, 700f, 32f, 26f, 16))
         // Makati: big blocks at 45°, the tallest towers, Ayala Avenue through the middle
         val makatiArea = floatArrayOf(820f, 1060f, 1040f, 1000f, 1360f, 900f, 1360f, 1360f, 900f, 1360f)

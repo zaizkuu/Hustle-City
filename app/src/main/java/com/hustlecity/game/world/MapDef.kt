@@ -38,7 +38,13 @@ abstract class MapDef(val id: String, val title: String, val blurb: String) {
     /** Neighborhood index for each place, in the order places are assigned. */
     abstract val placeHoods: List<Pair<String, Int>>
 
-    abstract fun generate(seed: Long): CityLayout
+    /**
+     * The newest revision of this map's layout. A save keeps the revision its game started on (its buildings are
+     * numbered by the layout), so a fixed street plan only reaches new games.
+     */
+    open val revision = 0
+
+    abstract fun generate(seed: Long, rev: Int = revision): CityLayout
 
     /** Neighborhood index at a point. */
     abstract fun hoodAt(x: Float, y: Float): Int
@@ -87,7 +93,7 @@ abstract class PlannedMap(id: String, title: String, blurb: String) : MapDef(id,
     /** Map extent: x0, y0, x1, y1. */
     abstract val extent: FloatArray
 
-    protected class Plan(override val rnd: Random) : PlannedMapPlanAccess {
+    protected class Plan(override val rnd: Random, /** Which revision of the layout to lay out. */ val rev: Int) : PlannedMapPlanAccess {
         val roads = RoadBuilder()
         /** Rivers, bays and lakes. */
         val water = ArrayList<FloatArray>()
@@ -126,8 +132,8 @@ abstract class PlannedMap(id: String, title: String, blurb: String) : MapDef(id,
         return best
     }
 
-    override fun generate(seed: Long): CityLayout {
-        val p = Plan(Random(seed))
+    override fun generate(seed: Long, rev: Int): CityLayout {
+        val p = Plan(Random(seed), rev)
         plan(p)
         // landmark grounds are cut out of the side streets exactly at their outline
         val cleared = p.landmarks.filter { it.clearsRoads }.mapNotNull { it.footprint }

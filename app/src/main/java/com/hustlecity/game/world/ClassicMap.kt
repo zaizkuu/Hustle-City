@@ -84,7 +84,7 @@ object ClassicMap : MapDef("classic", "Hustle City", "The original grid: seven a
 
     private val ROOFS = intArrayOf(c(0xFF6E7378), c(0xFF5F6368), c(0xFF7D8085), c(0xFF8A8D91), c(0xFF55595E))
 
-    override fun generate(seed: Long): CityLayout {
+    override fun generate(seed: Long, rev: Int): CityLayout {
         val rnd = Random(seed)
         val raws = ArrayList<Raw>()
         val trees = ArrayList<Tree>()

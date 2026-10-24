@@ -448,6 +448,8 @@ data class GameState(
     var snowCover: Double = 0.0,
     /** Which map the city was generated from (older saves are all the classic grid). */
     val mapId: String = "classic",
+    /** The revision of that map's layout (older saves started on the first). */
+    val mapRev: Int = 0,
     /** Delivery routes for your vans, and the stock they are carrying right now. */
     val fleet: MutableList<FleetRoute> = mutableListOf(),
     val fleetDrops: MutableList<FleetDrop> = mutableListOf(),

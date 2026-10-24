@@ -319,8 +319,10 @@ class Shore(val water: List<FloatArray>, val land: List<FloatArray>, val islands
 }
 
 /** A city, generated from one of the [Maps] and a seed. Same seed and map give the same city. */
-class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
+class City(val seed: Long, val mapId: String = Maps.CLASSIC, rev: Int = -1) {
     val map: MapDef = Maps.byId(mapId)
+    /** The revision of the map's layout this city was laid out from (the newest unless a save says otherwise). */
+    val rev = if (rev < 0) map.revision else rev
     val roads: RoadGraph
     val buildings = ArrayList<Building>()
     val trees = ArrayList<Tree>()
@@ -359,7 +361,7 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
     val height get() = bounds[3] - bounds[1]
 
     init {
-        val layout = map.generate(seed)
+        val layout = map.generate(seed, this.rev)
         roads = layout.roads
         buildings += layout.buildings
         trees += layout.trees
