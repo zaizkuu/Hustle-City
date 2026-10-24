@@ -55,7 +55,7 @@ class PlacementAuditTest {
     companion object {
         val MODEL = mapOf(StreetProps.LAMP to "lamp", StreetProps.HYDRANT to "hydrant", StreetProps.BIN to "bin", StreetProps.BENCH to "bench",
             StreetProps.BUS_STOP to "bus_stop", StreetProps.NEWS to "news", StreetProps.MAILBOX to "mailbox", StreetProps.PARK_LAMP to "park_lamp",
-            StreetProps.BIKE_RACK to "bike_rack", StreetProps.PLANTER to "planter")
+            StreetProps.BIKE_RACK to "bike_rack", StreetProps.PLANTER to "planter", StreetProps.VENDING to "vending", StreetProps.FOUNTAIN to "fountain")
 
         /** What a prop stands on: its model's plan (all its looks), the lamp's base only (its arm reaches over the road by design). */
         fun footprint(pr: StreetProps, i: Int): Rect? {
@@ -75,10 +75,9 @@ class PlacementAuditTest {
                 return local(x0, y0, x1, y1)
             }
             return when (k) {
-                StreetProps.VENDING -> local(-1.5f, -.45f, 1.5f, .35f)
-                StreetProps.VENDOR -> local(-1.3f, -.6f, 1.3f, .6f)
-                StreetProps.HOOP -> local(-.3f, -.3f, .3f, .3f)
-                StreetProps.FOUNTAIN -> local(-3.4f, -3.4f, 3.4f, 3.4f)
+                // a cart's umbrella and a hoop's board reach out overhead: what stands on the ground is the cart, the post
+                StreetProps.VENDOR -> local(-1.33f, -.88f, .84f, .5f)
+                StreetProps.HOOP -> local(-.08f, -.08f, .08f, .08f)
                 else -> null
             }
         }

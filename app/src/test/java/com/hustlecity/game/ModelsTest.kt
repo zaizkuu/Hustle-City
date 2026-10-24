@@ -98,7 +98,8 @@ class ModelsTest {
     fun streetPropsHaveModels() {
         setUp()
         val ids = Models.propIds()
-        for (id in listOf("lamp", "park_lamp", "hydrant", "bin", "bench", "bus_stop", "news", "mailbox", "bike_rack", "planter", "traffic_light")) {
+        for (id in listOf("lamp", "park_lamp", "hydrant", "bin", "bench", "bus_stop", "news", "mailbox", "bike_rack", "planter", "traffic_light",
+                "food_cart", "vending", "utility_pole", "hoop", "fountain")) {
             assertTrue("$id has a model", id in ids)
             for ((k, m) in Models.prop(id)!!.withIndex()) {
                 val name = "$id look $k"
@@ -111,20 +112,30 @@ class ModelsTest {
                 assertTrue("$name is light enough (${m.vertices} vertices)", m.vertices <= budget)
             }
         }
-        // the newspaper boxes come in the four color orders the box version uses
+        // the newspaper boxes come in the four color orders the box version uses; carts in their three, vending machines
+        // (pairs and threes), poles and hoops in six
         assertEquals(4, Models.prop("news")!!.size)
+        assertEquals(3, Models.prop("food_cart")!!.size)
+        for (id in listOf("vending", "utility_pole", "hoop")) assertEquals(id, 6, Models.prop(id)!!.size)
         // every look stays within the ground plan street furniture is placed by
         val kinds = mapOf("lamp" to StreetProps.LAMP, "hydrant" to StreetProps.HYDRANT, "bin" to StreetProps.BIN, "bench" to StreetProps.BENCH,
             "bus_stop" to StreetProps.BUS_STOP, "news" to StreetProps.NEWS, "mailbox" to StreetProps.MAILBOX, "park_lamp" to StreetProps.PARK_LAMP,
-            "bike_rack" to StreetProps.BIKE_RACK, "planter" to StreetProps.PLANTER)
+            "bike_rack" to StreetProps.BIKE_RACK, "planter" to StreetProps.PLANTER, "food_cart" to StreetProps.VENDOR, "vending" to StreetProps.VENDING,
+            "utility_pole" to StreetProps.UTIL_POLE, "hoop" to StreetProps.HOOP, "fountain" to StreetProps.FOUNTAIN)
+        // what reaches out overhead (a cart's umbrella, a pole's street light, a hoop's board and rim) is above head height
+        val overhead = setOf("food_cart", "utility_pole", "hoop")
         for ((id, k) in kinds) {
             val plan = StreetProps.plan(k)!!
             val base = id == "lamp" || id == "park_lamp"
             for (m in Models.prop(id)!!) {
-                val b = m.bounds
                 // a lamp's plan is its base: only its foot has to fit (the arm reaches out over the road)
                 if (base) continue
-                assertTrue("$id fits its plan ${plan.toList()}: ${b.toList()}", b[0] >= plan[0] - .01f && b[1] >= plan[1] - .01f && b[3] <= plan[2] + .01f && b[4] <= plan[3] + .01f)
+                var x0 = 9f; var y0 = 9f; var x1 = -9f; var y1 = -9f
+                for (v in 0 until m.vertices) {
+                    if (id in overhead && m.pos[v * 3 + 2] > 2f) continue
+                    x0 = minOf(x0, m.pos[v * 3]); y0 = minOf(y0, m.pos[v * 3 + 1]); x1 = maxOf(x1, m.pos[v * 3]); y1 = maxOf(y1, m.pos[v * 3 + 1])
+                }
+                assertTrue("$id fits its plan ${plan.toList()}: ${listOf(x0, y0, x1, y1)}", x0 >= plan[0] - .01f && y0 >= plan[1] - .01f && x1 <= plan[2] + .01f && y1 <= plan[3] + .01f)
             }
         }
     }

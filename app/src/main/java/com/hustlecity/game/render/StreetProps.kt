@@ -91,7 +91,8 @@ class StreetProps(val city: City) {
         }
 
         /** Model of each kind of prop (by kind), where it has one. */
-        private val MODEL_IDS = arrayOf("lamp", "hydrant", "bin", "bench", "bus_stop", "news", "mailbox", null, "park_lamp", "bike_rack", "planter")
+        private val MODEL_IDS = arrayOf("lamp", "hydrant", "bin", "bench", "bus_stop", "news", "mailbox", "fountain", "park_lamp", "bike_rack", "planter",
+            "utility_pole", "food_cart", "vending", null, null, "hoop")
         private val VENDING_BODIES = intArrayOf(c(0xFFF2F2F0), c(0xFFD32F2F), c(0xFF1E5BC6), c(0xFFF2F2F0), c(0xFF2E9E4F), c(0xFFF2F2F0))
         private val DRINKS = intArrayOf(c(0xFFE53935), c(0xFF1E88E5), c(0xFFFDD835), c(0xFF43A047), c(0xFF6D4C41), c(0xFFF5F5F5), c(0xFFFB8C00))
     }
@@ -559,7 +560,7 @@ class StreetProps(val city: City) {
         scene.setFrame(x[i], y[i], dirY[i], -dirX[i])
         try {
             val m = if (modelled && scene.smooth) model(i) else null
-            if (m == null || !scene.meshAt(m, 0f, 0f, 0f, 1f, 0f, 0f, 1f)) drawLocal(scene, i, near, time) else onModel(scene, i, near)
+            if (m == null || !scene.meshAt(m, 0f, 0f, 0f, 1f, 0f, 0f, 1f)) drawLocal(scene, i, near, time) else onModel(scene, i, near, time)
         } finally { scene.clearFrame() }
     }
 
@@ -567,12 +568,17 @@ class StreetProps(val city: City) {
     private fun model(i: Int): Models.Mesh? {
         val id = MODEL_IDS.getOrNull(kind[i]) ?: return null
         val looks = Models.prop(id) ?: return null
-        // newspaper boxes keep the colors the box version gives them; bike racks vary in how many bikes are locked up
-        return looks[(if (kind[i] == NEWS) i else i * 7 + 3) % looks.size]
+        // newspaper boxes, carts, vending machines, poles and hoops look as their shapes do; bike racks vary in how many
+        // bikes are locked up
+        val k = when (kind[i]) { NEWS, VENDOR, VENDING, UTIL_POLE, HOOP -> i; else -> i * 7 + 3 }
+        return looks[k % looks.size]
     }
 
-    /** What's drawn over a prop's model: lamp lenses (lit at night), a bus shelter's glass and advert, snow, shrubs. */
-    private fun onModel(scene: Scene3D, i: Int, near: Boolean) {
+    /**
+     * What's drawn over a prop's model: lamp lenses (lit at night), a bus shelter's glass and advert, snow, shrubs, a
+     * fountain's water, a utility pole's lines and a vending machine's lit windows.
+     */
+    private fun onModel(scene: Scene3D, i: Int, near: Boolean, time: Float) {
         val night = scene.daylight < .5f
         when (kind[i]) {
             LAMP -> {
@@ -594,6 +600,28 @@ class StreetProps(val city: City) {
             PLANTER -> {
                 scene.blob(0f, 0f, 1.05f, .55f, scene.lit(scene.mix(c(0xFF4C8C3F), c(0xFFF2F5F8), scene.snow * .6f), .95f), 9)
                 if (near) scene.blob(-.1f, -.1f, 1.25f, .32f, scene.lit(scene.mix(c(0xFF6DB35A), c(0xFFF2F5F8), scene.snow * .7f), 1.05f), 8)
+            }
+            FOUNTAIN -> fountainWater(scene, 0f, 0f, near, time, .54f, 3.03f, 1.95f, 1.2f)
+            UTIL_POLE -> {
+                val lens = if (night) c(0xFFFFE6A8) else c(0xFF8A9198)
+                scene.box(-.22f, 1.41f, 6.75f, .22f, 1.89f, 6.77f, lens, lens)
+                utilityLines(scene, i, near)
+            }
+            VENDING -> {
+                // the windows light up at night, behind the drinks
+                val n = 2 + i % 2
+                if (night) {
+                    scene.glow = true
+                    for (m in 0 until n) {
+                        val cx = (m - n * .5f) * 1.02f + .49f
+                        scene.quad(cx - .41f, .312f, .95f, cx + .41f, .312f, .95f, cx + .41f, .312f, 1.75f, cx - .41f, .312f, 1.75f, c(0xFFF3F8FF))
+                    }
+                    scene.glow = false
+                }
+                if (scene.snow > .15f) {
+                    val w = scene.snowy(c(0xFFF2F2F0))
+                    scene.box(-n * .51f, -.38f, 1.86f, n * .51f - .04f, .38f, 1.9f, w, w)
+                }
             }
         }
     }
@@ -718,7 +746,6 @@ class StreetProps(val city: City) {
      */
     private fun utilityPole(scene: Scene3D, i: Int, near: Boolean, night: Boolean) {
         val concrete = c(0xFFA8A49B)
-        val dark = c(0xFF1E1F22)
         scene.box(-.2f, -.2f, 0f, .2f, .2f, 1f, concrete, concrete)
         scene.box(-.15f, -.15f, 1f, .15f, .15f, 8.6f, concrete, concrete)
         // a cross-arm across the line of wires
@@ -736,6 +763,12 @@ class StreetProps(val city: City) {
         if (i % 2 == 0) scene.box(-.17f, -.36f, 4.7f, .17f, -.15f, 5.25f, c(0xFF8D9399), c(0xFF6E757C))
         if (i % 3 == 1) scene.box(-.15f, .15f, 5.05f, .15f, .34f, 5.45f, c(0xFF55606A), c(0xFF454E57))
         if (near) for (yy in floatArrayOf(-.65f, -.22f, .22f, .65f)) scene.box(-.04f, yy - .04f, 8.08f, .04f, yy + .04f, 8.22f, c(0xFFE8E4DA), c(0xFFE8E4DA))
+        utilityLines(scene, i, near)
+    }
+
+    /** What a utility pole carries (its model, see tools/models/props.py, is the pole itself): the lines, coils and drops. */
+    private fun utilityLines(scene: Scene3D, i: Int, near: Boolean) {
+        val dark = c(0xFF1E1F22)
         val nxt = link[i]
         val segs = if (near) 7 else 4
         if (nxt >= 0) {
@@ -1021,20 +1054,29 @@ class StreetProps(val city: City) {
 
     private fun fountain(scene: Scene3D, px: Float, py: Float, near: Boolean, time: Float) {
         val stone = c(0xFFCFC6B6)
-        val frozen = scene.snow > .3f
         scene.cylinder(px, py, 3.4f, 0f, .55f, 12, stone, stone)
+        scene.cylinder(px, py, .45f, .55f, 1.7f, 8, stone)
+        scene.cylinder(px, py, 1.3f, 1.7f, 1.95f, 10, stone, stone)
+        scene.cylinder(px, py, .22f, 1.95f, 2.6f, 6, stone)
+        fountainWater(scene, px, py, near, time, .57f, 3.05f, 1.96f, 1.25f)
+    }
+
+    /**
+     * A fountain's water (its stone is shapes, or the model): the basin's at [low] out to [r], ripples spreading over
+     * it, the bowl's at [high] out to [rb], the jet and the spray. Frozen still in the cold.
+     */
+    private fun fountainWater(scene: Scene3D, px: Float, py: Float, near: Boolean, time: Float, low: Float, r: Float, high: Float, rb: Float) {
+        val frozen = scene.snow > .3f
         val water = if (frozen) c(0xFFDCE9F2) else c(0xFF4F8FB8)
-        scene.disc(px, py, .57f, 3.05f, 3.05f, 16, scene.lit(water, 1f))
+        scene.disc(px, py, low, r, r, 16, scene.lit(water, 1f))
         if (!frozen) {
             // ripples spreading from the middle
             for (k in 0..1) {
                 val ph = ((time * .5f + k * .5f) % 1f)
-                scene.disc(px, py, .58f, .8f + ph * 2.1f, .8f + ph * 2.1f, 14, scene.withAlpha(c(0xFFE3F1FA), (1f - ph) * .35f))
+                scene.disc(px, py, low + .01f, .8f + ph * (r - .95f), .8f + ph * (r - .95f), 14, scene.withAlpha(c(0xFFE3F1FA), (1f - ph) * .35f))
             }
         }
-        scene.cylinder(px, py, .45f, .55f, 1.7f, 8, stone)
-        scene.cylinder(px, py, 1.3f, 1.7f, 1.95f, 10, stone, if (frozen) c(0xFFDCE9F2) else c(0xFF5D9CC4))
-        scene.cylinder(px, py, .22f, 1.95f, 2.6f, 6, stone)
+        scene.disc(px, py, high, rb, rb, 12, scene.lit(if (frozen) c(0xFFDCE9F2) else c(0xFF5D9CC4), 1f))
         if (!frozen && near) {
             val jet = 3.1f + sin(time * 2.3f) * .15f
             scene.blob(px, py, jet, .28f, scene.withAlpha(c(0xFFF4FAFF), .8f), 8)

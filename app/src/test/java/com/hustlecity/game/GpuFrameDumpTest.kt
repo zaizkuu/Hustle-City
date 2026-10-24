@@ -92,9 +92,10 @@ class GpuFrameDumpTest {
         DataOutputStream(FileOutputStream(f)).use { it.write(bb.array()) }
     }
 
-    private fun city(name: String, e: GameEngine) {
+    private fun city(name: String, e: GameEngine, pitch: Float? = null) {
         repeat(30) { e.frame(1 / 30f) }
         val r = WorldRenderer(e)
+        if (pitch != null) r.cinemaPitch = Math.toRadians(pitch.toDouble()).toFloat()
         val canvasBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         r.draw(Canvas(canvasBmp), w, h, 2f)
         val frame = GpuFrame()
@@ -146,16 +147,20 @@ class GpuFrameDumpTest {
         if (System.getenv("HC_SHAPES") != "1") return
         val SP = com.hustlecity.game.render.StreetProps
         for ((map, kind, name) in listOf(Triple("manila", SP.VENDOR, "vendor"), Triple("manila", SP.UTIL_POLE, "util_pole"), Triple("tokyo", SP.VENDING, "vending"),
-            Triple("tokyo", SP.LANTERNS, "lanterns"), Triple("manila", SP.BUNTING, "bunting"), Triple("nyc", SP.FOUNTAIN, "fountain"), Triple("manila", SP.HOOP, "hoop"))) {
+            Triple("tokyo", SP.LANTERNS, "lanterns"), Triple("manila", SP.BUNTING, "bunting"), Triple("classic", SP.FOUNTAIN, "fountain"), Triple("manila", SP.HOOP, "hoop"))) {
             val e0 = engine(map)
             val pr = SP.of(e0.city)
-            val i = (0 until pr.count).firstOrNull { pr.kind[it] == kind } ?: continue
+            // one near the middle of the city
+            val b = e0.city.bounds
+            val i = (0 until pr.count).filter { pr.kind[it] == kind }.minByOrNull { kotlin.math.hypot(pr.x[it] - (b[0] + b[2]) / 2, pr.y[it] - (b[1] + b[3]) / 2) } ?: continue
             val e = engine(map)
             e.state.player.x = pr.x[i] - pr.dirX[i] * 1.5f + pr.dirY[i] * 2f; e.state.player.y = pr.y[i] - pr.dirY[i] * 1.5f - pr.dirX[i] * 2f
             e.camera.tx = pr.x[i]; e.camera.ty = pr.y[i]
-            e.camera.zoom = 9f; e.camera.dist = 9f; e.camera.yaw = .5f
-            e.state.minute = 14L * 60
-            city("shape_$name", e)
+            // a power pole is tall: from further back and lower down
+            val d = if (kind == SP.UTIL_POLE) 17f else 9f
+            e.camera.zoom = d; e.camera.dist = d; e.camera.yaw = look(pr.dirX[i], pr.dirY[i]) + .6f
+            e.state.minute = (System.getenv("HC_SHAPES_HOUR")?.toLong() ?: 14L) * 60
+            city("shape_$name" + (System.getenv("HC_SHAPES_HOUR")?.let { "_$it" } ?: ""), e, if (kind == SP.UTIL_POLE) 9f else 24f)
             if (name == "vending") {
                 val f = engine(map)
                 f.state.player.x = e.state.player.x; f.state.player.y = e.state.player.y; f.camera.tx = pr.x[i]; f.camera.ty = pr.y[i]
@@ -181,6 +186,9 @@ class GpuFrameDumpTest {
             city("edge_${map}_${x.toInt()}_${y.toInt()}", e)
         }
     }
+
+    /** Camera yaw that looks along (dx, dy) (here: from the road toward a prop). */
+    private fun look(dx: Float, dy: Float) = kotlin.math.atan2(dx, dy)
 
     private data class Quad(val map: String, val x: Float, val y: Float, val yaw: Float)
 
