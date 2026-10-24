@@ -129,7 +129,7 @@ class CarPainter(private val scene: Scene3D) {
      */
     private fun model(x: Float, y: Float, len: Float, wid: Float, hgt: Float, color: Int, accent: Int, style: Int, taxi: Boolean,
                       lights: Boolean, night: Boolean, braking: Boolean, pitch: Float, roll: Float, fine: Boolean, light: Boolean = false): Boolean {
-        if (scene.gpu == null || !scene.smooth) return false
+        if (scene.gpu == null && scene.soft == null) return false
         val delivery = accent != 0 && accent != color
         val id = when (style) {
             0 -> if (taxi) "taxi" else if (len < 4.4f) "hatchback" else "sedan"
@@ -160,7 +160,8 @@ class CarPainter(private val scene: Scene3D) {
         // the model's y points left; the lean's roll is per meter to the right
         if (!scene.meshAt(m, x, y, 0f, fx, fy, -rx, -ry, len / size[0], wid / size[1], hgt / size[2],
                 paint = color, tiltF = pitch, tiltL = roll, lenses = lenses, accent = second, windowsLit = night)) return false
-        if (id in RIDDEN) {
+        // (not in the menus' pictures, which show the bike for sale)
+        if (id in RIDDEN && scene.soft == null) {
             scene.material = Mat.FABRIC
             when (style) {
                 8 -> rider(color xor second, fine)

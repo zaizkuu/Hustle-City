@@ -198,14 +198,16 @@ fun Chip(text: String, selected: Boolean, color: Color = HC.Blue, icon: String? 
 @Composable
 fun ItemThumb(id: String, size: Dp, modifier: Modifier = Modifier) {
     val px = (size.value * 2.5f).toInt().coerceIn(48, 320)
-    val bmp = remember(id, px) { Thumbnails.item(id, px).asImageBitmap() }
+    val models = Thumbnails.models
+    val bmp = remember(id, px, models) { Thumbnails.item(id, px).asImageBitmap() }
     Image(bmp, null, modifier.size(size))
 }
 
 @Composable
 fun VehicleThumb(id: String, size: Dp, modifier: Modifier = Modifier) {
     val px = (size.value * 2.5f).toInt().coerceIn(48, 360)
-    val bmp = remember(id, px) { Thumbnails.vehicle(id, px).asImageBitmap() }
+    val models = Thumbnails.models
+    val bmp = remember(id, px, models) { Thumbnails.vehicle(id, px).asImageBitmap() }
     Image(bmp, null, modifier.size(size))
 }
 

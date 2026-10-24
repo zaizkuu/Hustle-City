@@ -5,9 +5,16 @@ import android.graphics.Canvas
 import com.hustlecity.game.data.Catalog
 import com.hustlecity.game.data.c
 import kotlin.math.max
+import kotlin.math.min
 
 /** Renders small 3D previews of furniture, vehicles and product boxes for the shop UIs. */
 object Thumbnails {
+    /**
+     * Show the modelled furniture and vehicles, as the HD renderer draws them (set while it runs); otherwise the box
+     * shapes the classic renderer draws.
+     */
+    @Volatile var models = false
+
     private val cache = HashMap<String, Bitmap>()
     private val proj = Projector()
     private val batch = RenderBatch(4000)
@@ -30,26 +37,58 @@ object Thumbnails {
         return bmp to canvas
     }
 
-    fun item(id: String, size: Int): Bitmap = cache.getOrPut("i:$id:$size") {
+    fun item(id: String, size: Int): Bitmap = cache.getOrPut("i:$id:$size:$models") {
         val def = Catalog.item(id)
         val w = (def?.w ?: 1).toFloat(); val d = (def?.d ?: 1).toFloat()
-        val h = def?.parts?.maxOfOrNull { it.z1 } ?: 1f
+        val m = if (models && def != null) Models.get(def.id) else null
+        // (a model can stand taller than the box version)
+        val h = max(def?.parts?.maxOfOrNull { it.z1 } ?: 1f, m?.bounds?.get(5) ?: 0f)
         val ext = max(max(w, d), h) * 1.1f + .6f
-        val (bmp, _) = begin(size, w / 2, d / 2, ext * 2.2f, -30.0)
-        proj.update(size.toFloat(), size.toFloat(), .5f + (h / ext) * .18f)
-        if (def != null) {
+        val (bmp, canvas) = begin(size, w / 2, d / 2, ext * 2.2f, -30.0)
+        fit(size, 0f, 0f, 0f, w, d, h, .78f)
+        if (m != null) {
+            withModels(size, canvas) { scene.mesh(m, 0f, 0f, 0, def!!.w.toFloat(), def.d.toFloat()) }
+        } else if (def != null) {
             parts.draw(def, 0f, 0f, 0)
+            batch.flush()
         }
-        batch.flush()
         bmp
     }
 
-    fun vehicle(id: String, size: Int): Bitmap = cache.getOrPut("v:$id:$size") {
-        val def = Catalog.vehicle(id)
-        val (bmp, _) = begin(size, 0f, 0f, def.length * 2.1f, -35.0)
-        proj.update(size.toFloat(), size.toFloat(), .58f)
-        cars.draw(0f, 0f, (Math.PI / 2).toFloat(), def.length, def.width, def.height, def.color, def.style, true)
+    private val pt = FloatArray(3)
+
+    /** Moves the camera in or out and centers the picture so the box (x0, y0, z0)-(x1, y1, z1) fills [fill] of it. */
+    private fun fit(size: Int, x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float, fill: Float) {
+        repeat(3) {
+            proj.update(size.toFloat(), size.toFloat(), .5f)
+            var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+            for (k in 0 until 8) {
+                if (!proj.project(if (k and 1 == 0) x0 else x1, if (k and 2 == 0) y0 else y1, if (k and 4 == 0) z0 else z1, pt)) continue
+                minX = min(minX, pt[0]); maxX = max(maxX, pt[0]); minY = min(minY, pt[1]); maxY = max(maxY, pt[1])
+            }
+            if (maxX < minX) return
+            val span = max(maxX - minX, maxY - minY)
+            if (it < 2) { proj.dist *= span / (size * fill); return@repeat }
+            proj.centerX -= (minX + maxX) / 2 - size / 2f
+            proj.centerY -= (minY + maxY) / 2 - size / 2f
+        }
+    }
+
+    /** Runs [draw] with model meshes going to a software rasterizer, then paints them over what else was drawn. */
+    private inline fun withModels(size: Int, canvas: Canvas, draw: () -> Unit) {
+        val raster = SoftRaster(size)
+        scene.soft = raster
+        try { draw() } finally { scene.soft = null }
         batch.flush()
+        raster.drawOnto(canvas)
+    }
+
+    fun vehicle(id: String, size: Int): Bitmap = cache.getOrPut("v:$id:$size:$models") {
+        val def = Catalog.vehicle(id)
+        val (bmp, canvas) = begin(size, 0f, 0f, def.length * 2.1f, -35.0)
+        fit(size, -def.length / 2 - .15f, -def.width / 2 - .1f, 0f, def.length / 2 + .15f, def.width / 2 + .1f, def.height, .86f)
+        fun draw() = cars.draw(0f, 0f, (-Math.PI / 2).toFloat(), def.length, def.width, def.height, def.color, def.style, true, parked = true)
+        if (models) withModels(size, canvas) { draw() } else { draw(); batch.flush() }
         bmp
     }
 

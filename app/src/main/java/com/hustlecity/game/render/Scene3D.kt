@@ -198,6 +198,8 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
      * frame's screen would leave holes at the edges.
      */
     var cacheBuild = false
+    /** Where model meshes go when there's no GPU frame (the menus' previews); without either they aren't drawn. */
+    var soft: SoftRaster? = null
     /** Level of detail for GPU spheres: 0 far .. 2 near. */
     var sphereDetail = 1
     /** Surface material for the GPU shaders (see [Mat]); [topMaterial] overrides it on box tops (roofs) when set. */
@@ -584,7 +586,7 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
 
     /**
      * Draws a model mesh for furniture of footprint [w] x [d] tiles at grid position (x, y), turned [rot] quarter
-     * turns the way box models turn (GPU only). Returns false when it wasn't drawn.
+     * turns the way box models turn (GPU, or [soft] when set). Returns false when it wasn't drawn.
      */
     fun mesh(m: Models.Mesh, x: Float, y: Float, rot: Int, w: Float, d: Float, alpha: Float = 1f): Boolean {
         // the quarter turn and footprint offset of PartSorter.add, as an affine map of the model's own x, y
@@ -598,7 +600,7 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
 
     /**
      * Draws a model mesh with its own origin at grid position (x, y, z), its x axis along (ax, ay) and its y axis along
-     * (bx, by), scaled by [sx], [sy], [sz] (GPU only). Returns false when it wasn't drawn.
+     * (bx, by), scaled by [sx], [sy], [sz] (GPU, or [soft] when set). Returns false when it wasn't drawn.
      */
     fun meshAt(
         m: Models.Mesh, x: Float, y: Float, z: Float, ax0: Float, ay0: Float, bx0: Float, by0: Float,
@@ -606,7 +608,8 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         paint: Int = 0, tiltF: Float = 0f, tiltL: Float = 0f, lenses: Int = com.hustlecity.game.render.gpu.GpuFrame.LENSES_LIT,
         accent: Int = 0, windowsLit: Boolean = true,
     ): Boolean {
-        val g = gpu ?: return false
+        val g = gpu
+        if (g == null && soft == null) return false
         var ax = ax0; var ay = ay0; var bx = bx0; var by = by0; var ox = x; var oy = y
         if (fOn) {
             val nax = ax * fc - ay * fs; val nay = ax * fs + ay * fc
@@ -620,6 +623,10 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         val cx = ox + ax * mx + bx * my; val cy = oy + ay * mx + by * my
         val reach = (b[3] - b[0]) * sx + (b[4] - b[1]) * sy + (b[5] - b[2]) * sz
         if (proj.camZOf(cx, cy, z + (b[2] + b[5]) * .5f * sz) < -reach) return true
+        if (g == null) {
+            soft!!.mesh(proj, m, ox, oy, z, ax, ay, bx, by, sx, sy, sz, paint, lenses, accent, windowsLit)
+            return true
+        }
         val a = (alpha.coerceIn(0f, 1f) * 255).toInt()
         g.mesh(if (a < 250) com.hustlecity.game.render.gpu.GpuFrame.TRANSPARENT else com.hustlecity.game.render.gpu.GpuFrame.OPAQUE, m, ox, oy, z, ax, ay, bx, by, a, sx, sy, sz,
             paint, tiltF, tiltL, lenses, accent, windowsLit)

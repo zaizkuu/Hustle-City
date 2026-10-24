@@ -194,6 +194,8 @@ fun WorldCanvas(e: GameEngine, r: Renderers, interactive: Boolean) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val canGpu = remember { android.os.Build.FINGERPRINT != "robolectric" && GlWorldView.supported(context) }
     val gpuOn = canGpu && e.settings.hd && !e.settings.gpuFailed
+    // the shops' pictures show the furniture and vehicles as the world draws them
+    com.hustlecity.game.render.Thumbnails.models = gpuOn
     val glView = remember { arrayOfNulls<GlWorldView>(1) }
     val quality = e.settings.quality
     // automatic resolution: start from what this quality level can shade, then follow the frame rate

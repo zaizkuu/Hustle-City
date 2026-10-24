@@ -49,7 +49,7 @@ class GpuFrame {
         const val LENSES_OFF = 1
         const val LENSES_BRAKING = 2
         /** A vehicle's window by day (b, g, r of #26313D, as the vertex colors pack them). */
-        private const val WINDOW_GLASS = 0x3D3126
+        internal const val WINDOW_GLASS = 0x3D3126
         const val STRIDE = 8
         const val GROUND = 0
         const val OPAQUE = 1
