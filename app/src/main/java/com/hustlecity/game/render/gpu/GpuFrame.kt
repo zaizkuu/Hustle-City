@@ -44,6 +44,10 @@ class GpuFrame {
     }
 
     companion object {
+        /** Which of a car model's lenses are lit (see [mesh]): all of them (at night), none (by day), the red ones (braking). */
+        const val LENSES_LIT = 0
+        const val LENSES_OFF = 1
+        const val LENSES_BRAKING = 2
         const val STRIDE = 8
         const val GROUND = 0
         const val OPAQUE = 1
@@ -424,11 +428,14 @@ class GpuFrame {
      * Appends a model mesh (see [com.hustlecity.game.render.Models]) placed by a 2D affine map of its own x, y:
      * world x = ox + x·ax + y·bx, world y = oy + x·ay + y·by (a quarter turn, its footprint offset and any frame),
      * raised by [oz], after scaling it by [sx], [sy], [sz] (products fitted to a shelf). [alpha] below 255 fades it
-     * (for see-through previews).
+     * (for see-through previews). A car's model also takes its [paint] (0 keeps the model's own colors), the body's
+     * lean on its springs ([tiltF] meters of rise per meter forward, [tiltL] per meter along -y; the wheels and anything
+     * below a quarter meter stay put) and which of its lenses are lit ([lenses]: LENSES_LIT, LENSES_OFF or LENSES_BRAKING).
      */
     fun mesh(
         stream: Int, m: com.hustlecity.game.render.Models.Mesh, ox: Float, oy: Float, oz: Float, ax: Float, ay: Float, bx: Float, by: Float,
         alpha: Int = 255, sx: Float = 1f, sy: Float = 1f, sz: Float = 1f,
+        paint: Int = 0, tiltF: Float = 0f, tiltL: Float = 0f, lenses: Int = LENSES_LIT,
     ) {
         val s = streams[stream]
         s.ensure(m.vertices, m.idx.size)
@@ -438,18 +445,36 @@ class GpuFrame {
         val p = m.pos; val n = m.nrm
         val fade = alpha < 255
         val kax = ax * sx; val kay = ay * sx; val kbx = bx * sy; val kby = by * sy
+        val car = paint != 0 || tiltF != 0f || tiltL != 0f || lenses != LENSES_LIT
+        val parts = if (car) m.parts else null
+        val pr = (paint shr 16) and 255; val pg = (paint shr 8) and 255; val pb = paint and 255
         for (i in 0 until m.vertices) {
             val x = p[i * 3]; val y = p[i * 3 + 1]
+            var z = p[i * 3 + 2] * sz
+            if (car && z >= .25f) z += x * sx * tiltF - y * sy * tiltL
             v[o] = java.lang.Float.floatToRawIntBits(ox + x * kax + y * kbx)
             v[o + 1] = java.lang.Float.floatToRawIntBits(oy + x * kay + y * kby)
-            v[o + 2] = java.lang.Float.floatToRawIntBits(oz + p[i * 3 + 2] * sz)
+            v[o + 2] = java.lang.Float.floatToRawIntBits(oz + z)
             val nx = n[i * 3]; val ny = n[i * 3 + 1]
             v[o + 3] = java.lang.Float.floatToRawIntBits(nx * ax + ny * bx)
             v[o + 4] = java.lang.Float.floatToRawIntBits(nx * ay + ny * by)
             v[o + 5] = java.lang.Float.floatToRawIntBits(n[i * 3 + 2])
-            val c = m.rgba[i]
+            var c = m.rgba[i]
+            var f = m.flags[i]
+            if (parts != null) {
+                val part = parts[i]
+                if (part == com.hustlecity.game.render.Models.PART_PAINT && paint != 0) {
+                    // the model's paint is white, or grey where it's darker: the car's color, as dark
+                    val k = c and 255
+                    c = (c and -0x1000000) or ((pb * k / 255) shl 16) or ((pg * k / 255) shl 8) or (pr * k / 255)
+                } else if (part >= com.hustlecity.game.render.Models.PART_LENS &&
+                    (lenses == LENSES_OFF || (lenses == LENSES_BRAKING && part != com.hustlecity.game.render.Models.PART_RED_LENS))) {
+                    // a lens that isn't on: an ordinary surface (the emissive bit off)
+                    f = java.lang.Float.floatToRawIntBits(java.lang.Float.intBitsToFloat(f) - 1f)
+                }
+            }
             v[o + 6] = if (fade) (c and 0xFFFFFF) or ((((c ushr 24) * alpha) / 255) shl 24) else c
-            v[o + 7] = m.flags[i]
+            v[o + 7] = f
             o += STRIDE
         }
         s.nv += m.vertices

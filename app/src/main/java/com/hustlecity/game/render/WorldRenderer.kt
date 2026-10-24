@@ -1291,8 +1291,9 @@ class WorldRenderer(private val e: GameEngine) {
             }
         }
         if (!mapMode) {
-            if (dyn) for ((i, a) in e.traffic.cars.withIndex()) if (a.x in bbox[0]..bbox[2] && a.y in bbox[1]..bbox[3]) add(2, i, keyFor(a.x, a.y))
-            if (dyn && proj.dist < 260) for ((i, a) in e.traffic.peds.withIndex()) if (!a.hidden && a.x in bbox[0]..bbox[2] && a.y in bbox[1]..bbox[3]) add(3, i, keyFor(a.x, a.y))
+            // (one that isn't on the road just now keeps where it last was: it isn't drawn there)
+            if (dyn) for ((i, a) in e.traffic.cars.withIndex()) if (a.placed && a.x in bbox[0]..bbox[2] && a.y in bbox[1]..bbox[3]) add(2, i, keyFor(a.x, a.y))
+            if (dyn && proj.dist < 260) for ((i, a) in e.traffic.peds.withIndex()) if (a.placed && !a.hidden && a.x in bbox[0]..bbox[2] && a.y in bbox[1]..bbox[3]) add(3, i, keyFor(a.x, a.y))
             if (proj.dist < 230) {
                 val pr = props
                 pr.forIn(bbox[0] - 4f, bbox[1] - 7f, bbox[2] + 4f, bbox[3] + 4f) { pi ->

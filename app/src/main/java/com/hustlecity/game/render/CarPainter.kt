@@ -41,6 +41,12 @@ class CarPainter(private val scene: Scene3D) {
         val LIT_WINDOW = c(0xFFFFE3A0)
         val LED = c(0xFFFFD34D)
         private val SKIN = intArrayOf(c(0xFFC68B59), c(0xFF8D5524), c(0xFFE0AC69))
+        /** Each car model's body (length, width, height in meters, without its mirrors or a taxi's sign): scaled to the car's. */
+        internal val MODEL_SIZE = mapOf(
+            "sedan" to floatArrayOf(4.5f, 1.84f, 1.45f), "hatchback" to floatArrayOf(4.1f, 1.8f, 1.46f), "taxi" to floatArrayOf(4.5f, 1.84f, 1.45f),
+            "pickup" to floatArrayOf(5.2f, 1.84f, 1.8f), "van" to floatArrayOf(5.8f, 2.1f, 2.5f), "sports" to floatArrayOf(4.5f, 1.94f, 1.2f),
+            "suv" to floatArrayOf(4.8f, 2.0f, 1.85f), "box_truck" to floatArrayOf(7.2f, 2.4f, 3.3f),
+        )
         private val SHIRTS = intArrayOf(c(0xFFEB5757), c(0xFF2F80ED), c(0xFFF2F2F2), c(0xFF27AE60), c(0xFF333333), c(0xFFF2C94C))
     }
 
@@ -72,6 +78,13 @@ class CarPainter(private val scene: Scene3D) {
         val nearSide = if (camL >= 0f) 1 else -1
         // the smallest trim (ornaments, mirrors, lettering) only close to the camera
         val fine = proj.camZOf(x, y, 1f) < 42f
+        if (model(x, y, len, wid, hgt, body, style, taxi, lights, braking, pitch, roll)) {
+            tiltF = 0f; tiltL = 0f
+            scene.material = Mat.PLAIN
+            if (lights) headGlow(x, y, heading, len)
+            if (braking) brakeGlow(x, y, hl)
+            return
+        }
         when (style) {
             4 -> jeepney(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
             5 -> tricycle(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
@@ -86,13 +99,40 @@ class CarPainter(private val scene: Scene3D) {
         tiltF = 0f; tiltL = 0f
         scene.material = Mat.PLAIN
         if (lights) headGlow(x, y, heading, len)
-        if (braking) {
-            // brake lights wash the road behind red, fading out softly
-            val bx = x - fx * (hl + .7f); val by = y - fy * (hl + .7f)
-            scene.glow = true
-            scene.glowOval(bx, by, .04f, 1.5f, 1.15f, fx, fy, c(0xFFFF3B30), .15f)
-            scene.glow = false
+        if (braking) brakeGlow(x, y, hl)
+    }
+
+    /** Brake lights wash the road behind red, fading out softly. */
+    private fun brakeGlow(x: Float, y: Float, hl: Float) {
+        val bx = x - fx * (hl + .7f); val by = y - fy * (hl + .7f)
+        scene.glow = true
+        scene.glowOval(bx, by, .04f, 1.5f, 1.15f, fx, fy, c(0xFFFF3B30), .15f)
+        scene.glow = false
+    }
+
+    /**
+     * In HD, the everyday cars (sedan, pickup, van, sports car, SUV, box truck, and the taxis) are models
+     * (tools/models/cars.py) painted in the car's color, leaning on their springs, their lights lit at night and the tail
+     * lights when braking. False when this one isn't (another style, the classic renderer, no model files).
+     */
+    private fun model(x: Float, y: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int, taxi: Boolean, lights: Boolean,
+                      braking: Boolean, pitch: Float, roll: Float): Boolean {
+        if (scene.gpu == null || !scene.smooth) return false
+        val id = when (style) {
+            0 -> if (taxi) "taxi" else if (len < 4.4f) "hatchback" else "sedan"
+            1 -> "pickup"; 2 -> "van"; 3 -> "sports"; 9 -> "suv"; 10 -> "box_truck"
+            else -> return false
         }
+        val m = Models.car(id) ?: return false
+        val size = MODEL_SIZE.getValue(id)
+        val lenses = when {
+            lights -> com.hustlecity.game.render.gpu.GpuFrame.LENSES_LIT
+            braking -> com.hustlecity.game.render.gpu.GpuFrame.LENSES_BRAKING
+            else -> com.hustlecity.game.render.gpu.GpuFrame.LENSES_OFF
+        }
+        // the model's y points left; the lean's roll is per meter to the right
+        return scene.meshAt(m, x, y, 0f, fx, fy, -rx, -ry, len / size[0], wid / size[1], hgt / size[2],
+            paint = color, tiltF = pitch, tiltL = roll, lenses = lenses)
     }
 
     private fun frame(x: Float, y: Float, heading: Float) {

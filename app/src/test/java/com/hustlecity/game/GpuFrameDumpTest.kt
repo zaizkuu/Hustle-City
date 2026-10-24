@@ -92,8 +92,8 @@ class GpuFrameDumpTest {
         DataOutputStream(FileOutputStream(f)).use { it.write(bb.array()) }
     }
 
-    private fun city(name: String, e: GameEngine, pitch: Float? = null) {
-        repeat(30) { e.frame(1 / 30f) }
+    private fun city(name: String, e: GameEngine, pitch: Float? = null, warm: Int = 30) {
+        repeat(warm) { e.frame(1 / 30f) }
         val r = WorldRenderer(e)
         if (pitch != null) r.cinemaPitch = Math.toRadians(pitch.toDouble()).toFloat()
         val canvasBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -168,6 +168,67 @@ class GpuFrameDumpTest {
                 city("shape_vending_wide", f)
                 println("vending at ${pr.x[i]},${pr.y[i]} player ${e.state.player.x},${e.state.player.y} inBuilding ${e.state.player.inBuilding}")
             }
+        }
+    }
+
+    /** Traffic and parked cars from the street, by day and night. Runs with HC_CARS=1; frames go to build/glframes/cars_<city>_<hour>. */
+    @Test
+    fun cars() {
+        if (System.getenv("HC_CARS") != "1") return
+        for ((map, hour) in listOf("nyc" to 14, "nyc" to 21, "manila" to 15, "tokyo" to 13, "classic" to 16)) {
+            val e = engine(map)
+            e.settings.quality = 2; e.settings.busyRoads = 3f
+            e.traffic.ensure(e.settings.carCount, e.settings.pedCount)
+            val b = e.city.bounds
+            // a wide street near the middle of the city, seen from its sidewalk
+            val ed = e.city.roads.edges.filter { !it.overWater && it.len > 50f }.minByOrNull {
+                kotlin.math.hypot((it.ax + it.bx) / 2 - (b[0] + b[2]) / 2, (it.ay + it.by) / 2 - (b[1] + b[3]) / 2) - it.cls.halfWidth * 8f
+            }!!
+            val mx = (ed.ax + ed.bx) / 2; val my = (ed.ay + ed.by) / 2
+            e.state.player.x = mx + ed.uy * (ed.cls.halfWidth + 1.5f); e.state.player.y = my - ed.ux * (ed.cls.halfWidth + 1.5f)
+            e.camera.tx = mx; e.camera.ty = my
+            e.camera.zoom = 15f; e.camera.dist = 15f; e.camera.yaw = look(-ed.uy, ed.ux) + .5f
+            e.state.minute = hour * 60L
+            e.traffic.update(0f, mx, my, 230f, -9999f, -9999f, initial = true)
+            repeat(90) { e.frame(1 / 30f) }
+            city("cars_${map}_$hour", e, 16f)
+        }
+    }
+
+    /** One of each car model in a row along the curb (a taxi, a sedan, a hatchback, a pickup, a van, a sports car, an SUV, a box truck), by day and night. */
+    @Test
+    fun carLineup() {
+        if (System.getenv("HC_CARS") != "1") return
+        for (hour in listOf(14, 21)) {
+            val e = engine("nyc")
+            e.traffic.ensure(e.settings.carCount, e.settings.pedCount)
+            val b = e.city.bounds
+            val ed = e.city.roads.edges.filter { !it.overWater && it.len > 90f && it.cls.lanes >= 2 }
+                .minByOrNull { kotlin.math.hypot((it.ax + it.bx) / 2 - (b[0] + b[2]) / 2, (it.ay + it.by) / 2 - (b[1] + b[3]) / 2) }!!
+            e.traffic.update(0f, (ed.ax + ed.bx) / 2, (ed.ay + ed.by) / 2, 230f, -9999f, -9999f, initial = true)
+            for (c in e.traffic.cars) c.placed = false
+            // every few sedans is a cab (car 0 is): the plain sedan and the hatchback go where none is
+            val every = e.city.map.taxiEvery
+            val plain = (1 until 40).filter { it % every != 0 }
+            val row = listOf(Triple(0, 0, 4.6f), Triple(plain[0], 0, 4.7f), Triple(plain[1], 0, 4.2f), Triple(plain[2], 1, 0f), Triple(plain[3], 2, 0f),
+                Triple(plain[4], 3, 0f), Triple(plain[5], 9, 0f), Triple(plain[6], 10, 0f))
+            for ((slot, car) in row.withIndex()) {
+                val (k, style, len) = car
+                e.traffic.placeCar(k, ed.id, ed.a, 19f + slot * 8.4f, style)
+                val a = e.traffic.cars[k]
+                if (len > 0f) a.length = len
+                a.speed = 0f
+            }
+            val mx = ed.ax + ed.ux * 43f; val my = ed.ay + ed.uy * 43f
+            val side = ed.cls.halfWidth + 2f
+            e.state.player.x = mx - ed.uy * side; e.state.player.y = my + ed.ux * side
+            e.camera.tx = mx; e.camera.ty = my
+            e.camera.zoom = 34f; e.camera.dist = 34f; e.camera.yaw = look(ed.uy, -ed.ux) + .35f
+            e.state.minute = hour * 60L
+            // HC_CARS_OLD=1: the same with the cars as they were drawn before their models (everything as shapes)
+            val old = System.getenv("HC_CARS_OLD") == "1"
+            if (old) com.hustlecity.game.render.Models.enabled = false
+            try { city("lineup_$hour" + (if (old) "_old" else ""), e, 14f, warm = 0) } finally { com.hustlecity.game.render.Models.enabled = true }
         }
     }
 

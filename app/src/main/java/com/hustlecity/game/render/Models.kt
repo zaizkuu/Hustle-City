@@ -25,7 +25,31 @@ object Models {
         val idx: IntArray,
         /** Bounds: min x, y, z, max x, y, z. */
         val bounds: FloatArray,
-    )
+    ) {
+        /**
+         * Per vertex, for drawing it tinted and lit (see GpuFrame.mesh): [PART_PAINT] takes a car's color (white or grey
+         * paint), [PART_LENS] is a light that's only lit when it's on, [PART_RED_LENS] one that's also lit when braking.
+         */
+        val parts: ByteArray by lazy {
+            ByteArray(vertices) { i ->
+                val f = java.lang.Float.intBitsToFloat(flags[i]).toInt()
+                val c = rgba[i]
+                val r = c and 255; val g = (c shr 8) and 255; val b = (c shr 16) and 255
+                when {
+                    f and 1 == 1 -> if (r > 150 && g < 90 && b < 90) PART_RED_LENS else PART_LENS
+                    // car paint is modelled white or grey (metal and chrome share the surface, in their own colors)
+                    f shr 1 == MAT_PAINT && r == g && g == b -> PART_PAINT
+                    else -> 0
+                }.toByte()
+            }
+        }
+    }
+
+    const val PART_PAINT: Byte = 1
+    const val PART_LENS: Byte = 2
+    const val PART_RED_LENS: Byte = 3
+    /** The paint surface's number in the model files (tools/models/build_models.py). */
+    private const val MAT_PAINT = 16
 
     /** Where the model files are read from (set by the game engine when it has an Android context). */
     @Volatile var assets: AssetManager? = null
@@ -49,6 +73,7 @@ object Models {
 
     private val products = HashMap<String, Array<Mesh>>()
     private val props = HashMap<String, Array<Mesh>>()
+    private val cars = HashMap<String, Array<Mesh>>()
 
     /**
      * The looks of product [pid] (models/products/<pid>.hcm, then <pid>.1.hcm, <pid>.2.hcm...: neighboring slots of a
@@ -58,6 +83,9 @@ object Models {
 
     /** The looks of street prop [id] (models/props/<id>.hcm and its variants), or null when it has no model. */
     fun prop(id: String): Array<Mesh>? = looks("props", id, props)
+
+    /** Car model [id] (models/cars/<id>.hcm: sedan, hatchback, taxi, pickup, van, sports, suv, box_truck), or null. */
+    fun car(id: String): Mesh? = looks("cars", id, cars)?.get(0)
 
     private fun looks(folder: String, id: String, cache: HashMap<String, Array<Mesh>>): Array<Mesh>? {
         if (!enabled) return null
@@ -91,6 +119,7 @@ object Models {
         synchronized(cache) { cache.clear() }
         synchronized(products) { products.clear() }
         synchronized(props) { props.clear() }
+        synchronized(cars) { cars.clear() }
     }
 
     /** Parses an HCM1 file (see tools/models/build_models.py). */
