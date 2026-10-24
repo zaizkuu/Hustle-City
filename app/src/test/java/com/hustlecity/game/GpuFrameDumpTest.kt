@@ -232,6 +232,52 @@ class GpuFrameDumpTest {
         }
     }
 
+    /**
+     * Each city's own vehicles in a row along the curb, in their liveries, by day and night: Manila's jeepneys, modern
+     * jeepneys, tricycles, buses and bikes (traffic keeps right), Tokyo's kei cars, buses and bikes (it keeps left).
+     */
+    @Test
+    fun cityVehicles() {
+        if (System.getenv("HC_CARS") != "1") return
+        val lengths = mapOf(4 to 6.2f, 5 to 2.5f, 6 to 3.4f, 7 to 11f, 8 to 1.9f, 11 to 7f, 12 to 1.8f)
+        for ((map, styles) in listOf("manila" to listOf(4, 11, 5, 6, 7, 8, 12, 12, 5, 4), "tokyo" to listOf(6, 7, 8, 12, 6, 12, 6)))
+            for (hour in listOf(14, 21)) {
+                val e = engine(map)
+                e.traffic.ensure(e.settings.carCount, e.settings.pedCount)
+                val b = e.city.bounds
+                // a street out in the open: not under an elevated railway
+                fun clear(x: Float, y: Float) = e.city.rails.all { r -> (0 until r.pts.size / 2).all { kotlin.math.hypot(r.pts[it * 2] - x, r.pts[it * 2 + 1] - y) > 60f } }
+                val ed = e.city.roads.edges.filter { !it.overWater && it.len > 90f && it.cls.lanes >= 2 && clear(it.ax, it.ay) && clear(it.bx, it.by) }
+                    .minByOrNull { kotlin.math.hypot((it.ax + it.bx) / 2 - (b[0] + b[2]) / 2, (it.ay + it.by) / 2 - (b[1] + b[3]) / 2) }!!
+                e.traffic.update(0f, (ed.ax + ed.bx) / 2, (ed.ay + ed.by) / 2, 230f, -9999f, -9999f, initial = true)
+                for (c in e.traffic.cars) c.placed = false
+                // in the lane nearest the camera
+                val from = if (e.city.leftHand) ed.a else ed.b
+                var at = 14f
+                for ((k, style) in styles.withIndex()) {
+                    val len = lengths.getValue(style)
+                    val s = at + len / 2
+                    e.traffic.placeCar(k, ed.id, from, if (from == ed.a) s else ed.len - s, style)
+                    e.traffic.cars[k].speed = 0f
+                    at += len + 1.6f
+                }
+                // close up, a fifth of the row at a time
+                for (w in 0..4) {
+                    val mid = 14f + (at - 14f) * (w + .5f) / 5f
+                    val mx = ed.ax + ed.ux * mid; val my = ed.ay + ed.uy * mid
+                    // seen from the far lane, looking toward the curb (the street's trees and wires behind)
+                    val side = ed.cls.halfWidth * .5f
+                    e.state.player.x = mx + ed.uy * side; e.state.player.y = my - ed.ux * side
+                    e.camera.tx = mx; e.camera.ty = my
+                    e.camera.zoom = 10f; e.camera.dist = 10f; e.camera.yaw = look(-ed.uy, ed.ux) + .3f
+                    e.state.minute = hour * 60L
+                    val old = System.getenv("HC_CARS_OLD") == "1"
+                    if (old) com.hustlecity.game.render.Models.enabled = false
+                    try { city("rides_${map}_${hour}_$w" + (if (old) "_old" else ""), e, 20f, warm = 0) } finally { com.hustlecity.game.render.Models.enabled = true }
+                }
+            }
+    }
+
     /** The edges of the world: what lies past the last streets. Runs with HC_EDGES=1. */
     @Test
     fun edges() {

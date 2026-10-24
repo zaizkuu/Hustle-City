@@ -48,6 +48,8 @@ class GpuFrame {
         const val LENSES_LIT = 0
         const val LENSES_OFF = 1
         const val LENSES_BRAKING = 2
+        /** A vehicle's window by day (b, g, r of #26313D, as the vertex colors pack them). */
+        private const val WINDOW_GLASS = 0x3D3126
         const val STRIDE = 8
         const val GROUND = 0
         const val OPAQUE = 1
@@ -428,14 +430,15 @@ class GpuFrame {
      * Appends a model mesh (see [com.hustlecity.game.render.Models]) placed by a 2D affine map of its own x, y:
      * world x = ox + x·ax + y·bx, world y = oy + x·ay + y·by (a quarter turn, its footprint offset and any frame),
      * raised by [oz], after scaling it by [sx], [sy], [sz] (products fitted to a shelf). [alpha] below 255 fades it
-     * (for see-through previews). A car's model also takes its [paint] (0 keeps the model's own colors), the body's
-     * lean on its springs ([tiltF] meters of rise per meter forward, [tiltL] per meter along -y; the wheels and anything
-     * below a quarter meter stay put) and which of its lenses are lit ([lenses]: LENSES_LIT, LENSES_OFF or LENSES_BRAKING).
+     * (for see-through previews). A vehicle's model also takes its [paint] and its livery's [accent] (0 keeps the
+     * model's own colors), the body's lean on its springs ([tiltF] meters of rise per meter forward, [tiltL] per meter
+     * along -y; the wheels and anything below a quarter meter stay put), which of its lenses are lit ([lenses]:
+     * LENSES_LIT, LENSES_OFF or LENSES_BRAKING) and whether its windows are lit from inside ([windowsLit]).
      */
     fun mesh(
         stream: Int, m: com.hustlecity.game.render.Models.Mesh, ox: Float, oy: Float, oz: Float, ax: Float, ay: Float, bx: Float, by: Float,
         alpha: Int = 255, sx: Float = 1f, sy: Float = 1f, sz: Float = 1f,
-        paint: Int = 0, tiltF: Float = 0f, tiltL: Float = 0f, lenses: Int = LENSES_LIT,
+        paint: Int = 0, tiltF: Float = 0f, tiltL: Float = 0f, lenses: Int = LENSES_LIT, accent: Int = 0, windowsLit: Boolean = true,
     ) {
         val s = streams[stream]
         s.ensure(m.vertices, m.idx.size)
@@ -445,9 +448,10 @@ class GpuFrame {
         val p = m.pos; val n = m.nrm
         val fade = alpha < 255
         val kax = ax * sx; val kay = ay * sx; val kbx = bx * sy; val kby = by * sy
-        val car = paint != 0 || tiltF != 0f || tiltL != 0f || lenses != LENSES_LIT
+        val car = paint != 0 || accent != 0 || tiltF != 0f || tiltL != 0f || lenses != LENSES_LIT || !windowsLit
         val parts = if (car) m.parts else null
         val pr = (paint shr 16) and 255; val pg = (paint shr 8) and 255; val pb = paint and 255
+        val ar = (accent shr 16) and 255; val ag = (accent shr 8) and 255; val ab = accent and 255
         for (i in 0 until m.vertices) {
             val x = p[i * 3]; val y = p[i * 3 + 1]
             var z = p[i * 3 + 2] * sz
@@ -467,7 +471,16 @@ class GpuFrame {
                     // the model's paint is white, or grey where it's darker: the car's color, as dark
                     val k = c and 255
                     c = (c and -0x1000000) or ((pb * k / 255) shl 16) or ((pg * k / 255) shl 8) or (pr * k / 255)
-                } else if (part >= com.hustlecity.game.render.Models.PART_LENS &&
+                } else if (part == com.hustlecity.game.render.Models.PART_ACCENT && accent != 0) {
+                    val k = c and 255
+                    c = (c and -0x1000000) or ((ab * k / 255) shl 16) or ((ag * k / 255) shl 8) or (ar * k / 255)
+                } else if (part == com.hustlecity.game.render.Models.PART_WINDOW) {
+                    // by day a lit window is dark glass
+                    if (!windowsLit) {
+                        c = (c and -0x1000000) or WINDOW_GLASS
+                        f = java.lang.Float.floatToRawIntBits(java.lang.Float.intBitsToFloat(f) - 1f)
+                    }
+                } else if ((part == com.hustlecity.game.render.Models.PART_LENS || part == com.hustlecity.game.render.Models.PART_RED_LENS) &&
                     (lenses == LENSES_OFF || (lenses == LENSES_BRAKING && part != com.hustlecity.game.render.Models.PART_RED_LENS))) {
                     // a lens that isn't on: an ordinary surface (the emissive bit off)
                     f = java.lang.Float.floatToRawIntBits(java.lang.Float.intBitsToFloat(f) - 1f)

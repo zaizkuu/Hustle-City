@@ -27,8 +27,10 @@ object Models {
         val bounds: FloatArray,
     ) {
         /**
-         * Per vertex, for drawing it tinted and lit (see GpuFrame.mesh): [PART_PAINT] takes a car's color (white or grey
-         * paint), [PART_LENS] is a light that's only lit when it's on, [PART_RED_LENS] one that's also lit when braking.
+         * Per vertex, for drawing it tinted and lit (see GpuFrame.mesh): [PART_PAINT] takes a vehicle's color (white or
+         * grey paint) and [PART_ACCENT] its livery's second color (magenta), [PART_LENS] is a light that's only lit when
+         * it's on, [PART_RED_LENS] one that's also lit when braking, and [PART_WINDOW] a window lit from inside at night.
+         * Amber lit signs (route boards) stay lit.
          */
         val parts: ByteArray by lazy {
             ByteArray(vertices) { i ->
@@ -36,9 +38,16 @@ object Models {
                 val c = rgba[i]
                 val r = c and 255; val g = (c shr 8) and 255; val b = (c shr 16) and 255
                 when {
-                    f and 1 == 1 -> if (r > 150 && g < 90 && b < 90) PART_RED_LENS else PART_LENS
-                    // car paint is modelled white or grey (metal and chrome share the surface, in their own colors)
+                    f and 1 == 1 -> when {
+                        r > 150 && g < 90 && b < 90 -> PART_RED_LENS
+                        f shr 1 == MAT_GLASS -> PART_WINDOW
+                        b > 150 -> PART_LENS
+                        else -> 0
+                    }
+                    // paint is modelled white or grey, the second color magenta (metal and chrome share the surface, in
+                    // their own colors)
                     f shr 1 == MAT_PAINT && r == g && g == b -> PART_PAINT
+                    f shr 1 == MAT_PAINT && r == b && g == 0 && r > 0 -> PART_ACCENT
                     else -> 0
                 }.toByte()
             }
@@ -48,7 +57,10 @@ object Models {
     const val PART_PAINT: Byte = 1
     const val PART_LENS: Byte = 2
     const val PART_RED_LENS: Byte = 3
-    /** The paint surface's number in the model files (tools/models/build_models.py). */
+    const val PART_ACCENT: Byte = 4
+    const val PART_WINDOW: Byte = 5
+    /** The glass and paint surfaces' numbers in the model files (tools/models/build_models.py). */
+    private const val MAT_GLASS = 3
     private const val MAT_PAINT = 16
 
     /** Where the model files are read from (set by the game engine when it has an Android context). */
@@ -84,7 +96,11 @@ object Models {
     /** The looks of street prop [id] (models/props/<id>.hcm and its variants), or null when it has no model. */
     fun prop(id: String): Array<Mesh>? = looks("props", id, props)
 
-    /** Car model [id] (models/cars/<id>.hcm: sedan, hatchback, taxi, pickup, van, sports, suv, box_truck), or null. */
+    /**
+     * Vehicle model [id] (models/cars/<id>.hcm: sedan, hatchback, taxi, pickup, van, sports, suv, box_truck, jeepney,
+     * modern_jeep, tricycle, kei, bus, motorbike, moped, moped_box; an _l on the end is the mirror image, for traffic
+     * that keeps left), or null.
+     */
     fun car(id: String): Mesh? = looks("cars", id, cars)?.get(0)
 
     private fun looks(folder: String, id: String, cache: HashMap<String, Array<Mesh>>): Array<Mesh>? {

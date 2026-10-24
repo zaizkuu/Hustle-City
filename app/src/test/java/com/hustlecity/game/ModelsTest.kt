@@ -152,14 +152,16 @@ class ModelsTest {
             for (v in m.pos) assertTrue("$id positions are finite", v.isFinite())
             // there can be dozens on screen
             assertTrue("$id is light enough (${m.vertices} vertices)", m.vertices <= 900)
-            // centred on the origin, nose to +x, on its wheels, the size it's scaled from (give or take bumpers and mirrors)
+            // centred on the origin, nose to +x, on its wheels, the size it's scaled from (give or take bumpers, steps,
+            // mirrors and a tricycle's lopsided sidecar)
             val b = m.bounds
             assertEquals("$id stands on the ground", 0f, b[2], .01f)
-            assertEquals("$id is centred along", 0f, b[0] + b[3], .05f)
-            assertEquals("$id is centred across", 0f, b[1] + b[4], .05f)
-            assertEquals("$id length", size[0], b[3] - b[0], size[0] * .04f)
-            assertTrue("$id width ${b[4] - b[1]}", b[4] - b[1] >= size[1] - .02f && b[4] - b[1] <= size[1] + .26f)
-            assertTrue("$id height ${b[5]}", b[5] >= size[2] - .01f && b[5] <= size[2] + .3f)
+            assertEquals("$id is centred along", 0f, b[0] + b[3], .2f)
+            assertEquals("$id is centred across", 0f, b[1] + b[4], .1f)
+            assertEquals("$id length", size[0], b[3] - b[0], maxOf(size[0] * .04f, .45f))
+            assertTrue("$id width ${b[4] - b[1]}", b[4] - b[1] >= size[1] - .02f && b[4] - b[1] <= size[1] + .5f)
+            // (a rider brings a bike up to its height)
+            assertTrue("$id height ${b[5]}", (id in CarPainter.RIDDEN || b[5] >= size[2] - .01f) && b[5] <= size[2] + .3f)
             // it takes the car's paint, and has headlights and tail lights
             val parts = m.parts
             assertTrue("$id has paint", parts.count { it == Models.PART_PAINT } >= 30)
@@ -170,6 +172,16 @@ class ModelsTest {
             }
             assertTrue("$id has headlights", heads >= 4)
             assertTrue("$id has tail lights", tails >= 4)
+        }
+        // the liveries' second colors, and the windows that light up at night
+        for (id in listOf("jeepney", "modern_jeep", "tricycle", "kei", "bus", "motorbike", "moped_box"))
+            assertTrue("$id takes a second color", Models.car(id)!!.parts.count { it == Models.PART_ACCENT } >= 6)
+        for (id in listOf("modern_jeep", "bus")) assertTrue("$id has lit windows", Models.car(id)!!.parts.count { it == Models.PART_WINDOW } >= 24)
+        // a mirror image keeps its doors (or sidecar) on the other side
+        for (id in listOf("modern_jeep", "tricycle", "bus")) {
+            val r = Models.car(id)!!; val l = Models.car(id + "_l")!!
+            assertEquals("$id mirrored", r.bounds[1], -l.bounds[4], .001f)
+            assertEquals("$id mirrored", r.bounds[4], -l.bounds[1], .001f)
         }
     }
 

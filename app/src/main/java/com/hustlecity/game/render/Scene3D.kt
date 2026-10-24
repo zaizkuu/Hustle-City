@@ -604,6 +604,7 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         m: Models.Mesh, x: Float, y: Float, z: Float, ax0: Float, ay0: Float, bx0: Float, by0: Float,
         sx: Float = 1f, sy: Float = 1f, sz: Float = 1f, alpha: Float = 1f,
         paint: Int = 0, tiltF: Float = 0f, tiltL: Float = 0f, lenses: Int = com.hustlecity.game.render.gpu.GpuFrame.LENSES_LIT,
+        accent: Int = 0, windowsLit: Boolean = true,
     ): Boolean {
         val g = gpu ?: return false
         var ax = ax0; var ay = ay0; var bx = bx0; var by = by0; var ox = x; var oy = y
@@ -621,7 +622,7 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         if (proj.camZOf(cx, cy, z + (b[2] + b[5]) * .5f * sz) < -reach) return true
         val a = (alpha.coerceIn(0f, 1f) * 255).toInt()
         g.mesh(if (a < 250) com.hustlecity.game.render.gpu.GpuFrame.TRANSPARENT else com.hustlecity.game.render.gpu.GpuFrame.OPAQUE, m, ox, oy, z, ax, ay, bx, by, a, sx, sy, sz,
-            paint, tiltF, tiltL, lenses)
+            paint, tiltF, tiltL, lenses, accent, windowsLit)
         return true
     }
 

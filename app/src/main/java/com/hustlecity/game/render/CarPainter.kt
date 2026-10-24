@@ -46,7 +46,14 @@ class CarPainter(private val scene: Scene3D) {
             "sedan" to floatArrayOf(4.5f, 1.84f, 1.45f), "hatchback" to floatArrayOf(4.1f, 1.8f, 1.46f), "taxi" to floatArrayOf(4.5f, 1.84f, 1.45f),
             "pickup" to floatArrayOf(5.2f, 1.84f, 1.8f), "van" to floatArrayOf(5.8f, 2.1f, 2.5f), "sports" to floatArrayOf(4.5f, 1.94f, 1.2f),
             "suv" to floatArrayOf(4.8f, 2.0f, 1.85f), "box_truck" to floatArrayOf(7.2f, 2.4f, 3.3f),
+            // the city's own, at the sizes traffic gives them (bikes are their height with the rider on)
+            "jeepney" to floatArrayOf(6.2f, 2.05f, 2.3f), "modern_jeep" to floatArrayOf(7f, 2.2f, 2.85f), "modern_jeep_l" to floatArrayOf(7f, 2.2f, 2.85f),
+            "tricycle" to floatArrayOf(2.5f, 1.5f, 1.75f), "tricycle_l" to floatArrayOf(2.5f, 1.5f, 1.75f), "kei" to floatArrayOf(3.4f, 1.48f, 1.7f),
+            "bus" to floatArrayOf(11f, 2.5f, 3.1f), "bus_l" to floatArrayOf(11f, 2.5f, 3.1f), "motorbike" to floatArrayOf(1.9f, .78f, 1.3f),
+            "moped" to floatArrayOf(1.8f, .72f, 1.3f), "moped_box" to floatArrayOf(1.8f, .72f, 1.3f),
         )
+        /** The models with a rider seated on them by the game, who brings them up to their full height. */
+        internal val RIDDEN = setOf("motorbike", "moped", "moped_box", "tricycle", "tricycle_l")
         private val SHIRTS = intArrayOf(c(0xFFEB5757), c(0xFF2F80ED), c(0xFFF2F2F2), c(0xFF27AE60), c(0xFF333333), c(0xFFF2C94C))
     }
 
@@ -78,7 +85,7 @@ class CarPainter(private val scene: Scene3D) {
         val nearSide = if (camL >= 0f) 1 else -1
         // the smallest trim (ornaments, mirrors, lettering) only close to the camera
         val fine = proj.camZOf(x, y, 1f) < 42f
-        if (model(x, y, len, wid, hgt, body, style, taxi, lights, braking, pitch, roll)) {
+        if (model(x, y, len, wid, hgt, body, accent, style, taxi, lights, night, braking, pitch, roll, fine)) {
             tiltF = 0f; tiltL = 0f
             scene.material = Mat.PLAIN
             if (lights) headGlow(x, y, heading, len)
@@ -111,28 +118,60 @@ class CarPainter(private val scene: Scene3D) {
     }
 
     /**
-     * In HD, the everyday cars (sedan, pickup, van, sports car, SUV, box truck, and the taxis) are models
-     * (tools/models/cars.py) painted in the car's color, leaning on their springs, their lights lit at night and the tail
-     * lights when braking. False when this one isn't (another style, the classic renderer, no model files).
+     * In HD, the vehicles are models (tools/models/cars.py) painted in the vehicle's color and its livery's second color,
+     * leaning on their springs, their lights lit at night and the tail lights when braking, bus and jeepney windows lit
+     * after dark; riders sit on the bikes. False when this one isn't (the classic renderer, no model files).
      */
-    private fun model(x: Float, y: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int, taxi: Boolean, lights: Boolean,
-                      braking: Boolean, pitch: Float, roll: Float): Boolean {
+    private fun model(x: Float, y: Float, len: Float, wid: Float, hgt: Float, color: Int, accent: Int, style: Int, taxi: Boolean,
+                      lights: Boolean, night: Boolean, braking: Boolean, pitch: Float, roll: Float, fine: Boolean): Boolean {
         if (scene.gpu == null || !scene.smooth) return false
+        val delivery = accent != 0 && accent != color
         val id = when (style) {
             0 -> if (taxi) "taxi" else if (len < 4.4f) "hatchback" else "sedan"
             1 -> "pickup"; 2 -> "van"; 3 -> "sports"; 9 -> "suv"; 10 -> "box_truck"
+            4 -> "jeepney"; 6 -> "kei"; 8 -> "motorbike"
+            5 -> if (leftHand) "tricycle_l" else "tricycle"
+            7 -> if (leftHand) "bus_l" else "bus"
+            11 -> if (leftHand) "modern_jeep_l" else "modern_jeep"
+            12 -> if (delivery) "moped_box" else "moped"
             else -> return false
         }
         val m = Models.car(id) ?: return false
         val size = MODEL_SIZE.getValue(id)
+        // the livery's second color, or what each draws without one (as the shapes below do)
+        val second = when (style) {
+            4 -> if (accent != 0) accent else scene.mix(color, 0xFFFFFFFF.toInt(), .65f)
+            5 -> if (accent != 0) accent else scene.mix(color, 0xFFFFFFFF.toInt(), .7f)
+            7, 11 -> if (accent != 0) accent else scene.mix(color, 0xFF000000.toInt(), .35f)
+            8 -> if (accent != 0) accent else CHROME
+            12 -> if (delivery) accent else color
+            else -> if (accent != 0) accent else color
+        }
         val lenses = when {
             lights -> com.hustlecity.game.render.gpu.GpuFrame.LENSES_LIT
             braking -> com.hustlecity.game.render.gpu.GpuFrame.LENSES_BRAKING
             else -> com.hustlecity.game.render.gpu.GpuFrame.LENSES_OFF
         }
         // the model's y points left; the lean's roll is per meter to the right
-        return scene.meshAt(m, x, y, 0f, fx, fy, -rx, -ry, len / size[0], wid / size[1], hgt / size[2],
-            paint = color, tiltF = pitch, tiltL = roll, lenses = lenses)
+        if (!scene.meshAt(m, x, y, 0f, fx, fy, -rx, -ry, len / size[0], wid / size[1], hgt / size[2],
+                paint = color, tiltF = pitch, tiltL = roll, lenses = lenses, accent = second, windowsLit = night)) return false
+        if (id in RIDDEN) {
+            scene.material = Mat.FABRIC
+            when (style) {
+                8 -> rider(color xor second, fine)
+                12 -> {
+                    // one in four carries a passenger riding pillion
+                    val pillion = ((color ushr 5) xor (color ushr 13)) and 3 == 0
+                    if (pillion) { ahead(-.5f); rider(color * 31 + 7, fine); ahead(.5f) }
+                    ahead(-.1f); rider(color xor accent, fine); ahead(.1f)
+                }
+                5 -> {
+                    val bikeL = -(if (leftHand) -1 else 1) * (wid / 2 - .27f)
+                    shift(bikeL); rider(color xor second, fine); shift(-bikeL)
+                }
+            }
+        }
+        return true
     }
 
     private fun frame(x: Float, y: Float, heading: Float) {
