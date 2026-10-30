@@ -77,7 +77,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -256,7 +255,7 @@ fun TopBar(e: GameEngine) {
 @Composable
 fun ObjectivesPanel(e: GameEngine, modifier: Modifier = Modifier) {
     val open = e.ui.objectivesOpen
-    val screenH = LocalConfiguration.current.screenHeightDp
+    val screenH = com.hustlecity.game.ui.LocalScreenSize.current.height.value.toInt()
     val maxBody = (screenH - 58 - 28 - 165).coerceIn(70, 320).dp
     GlassPanel(modifier) {
         PanelHeader("Objectives", Modifier.clickable { e.ui.objectivesOpen = !open }) {
@@ -329,7 +328,7 @@ fun PhonePanel(e: GameEngine, modifier: Modifier = Modifier, reserveTop: Int = 0
         }
         return
     }
-    val screenH = LocalConfiguration.current.screenHeightDp
+    val screenH = com.hustlecity.game.ui.LocalScreenSize.current.height.value.toInt()
     Column(
         modifier.width(168.dp).heightIn(max = (screenH - 66 - reserveTop).coerceAtLeast(150).dp).shadow(6.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF232830)).padding(5.dp),
@@ -451,13 +450,14 @@ fun ActionButtons(e: GameEngine, modifier: Modifier = Modifier) {
     val p = e.state.player
     if (e.skip != null) return
     if (p.driving >= 0) return
+    // with keyboard controls, E and F go in and get in (the key hints say which), so those buttons stay hidden
+    val keys = e.settings.keyboard
     Row(modifier.padding(bottom = 22.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         e.nearDoor?.let { b ->
-            val label = if (b.kind == BKind.GAS) "Fuel Up" else e.buildingName(b)
-            HButton("Enter $label", color = HC.Green) { e.enterBuilding(b) }
+            if (!keys) HButton("Enter ${doorLabel(e, b)}", color = HC.Green) { e.enterBuilding(b) }
         }
         e.nearVehicle?.let { v ->
-            HButton("Get in ${v.def.name}", icon = Icons.Filled.DirectionsCar) { e.enterVehicle(v); e.ui.phoneOpen = false }
+            if (!keys) HButton("Get in ${v.def.name}", icon = Icons.Filled.DirectionsCar) { e.enterVehicle(v); e.ui.phoneOpen = false }
             // Manage storage: move boxes between the trunk and your hands, hand truck or store cart
             HButton("Manage storage (${v.cargo.size}/${v.def.cargo})", color = HC.Orange, icon = Icons.Filled.Inventory2) { e.ui.panel = Panel.Trunk(v.id) }
             val dest = e.unloadDestination(v)
@@ -466,6 +466,9 @@ fun ActionButtons(e: GameEngine, modifier: Modifier = Modifier) {
         }
     }
 }
+
+/** What a door leads into, for the Enter button and its key hint. */
+fun doorLabel(e: GameEngine, b: com.hustlecity.game.world.Building): String = if (b.kind == BKind.GAS) "Fuel Up" else e.buildingName(b)
 
 /** What you're carrying, and with what: bare hands (1 box), a hand truck (4) or a store cart (8). */
 @Composable
@@ -589,7 +592,7 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
     val sc = e.interior ?: return
     val b = sc.building
     val right = if (e.ui.phoneOpen && !e.ui.designer) 176.dp else 0.dp
-    val screenH = LocalConfiguration.current.screenHeightDp
+    val screenH = com.hustlecity.game.ui.LocalScreenSize.current.height.value.toInt()
     // stop above the phone button in the corner (the panel scrolls)
     val phoneButton = if (!e.ui.phoneOpen && !e.ui.designer) 62 else 0
     Column(

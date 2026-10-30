@@ -22,6 +22,13 @@ jobs:
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
 
+      # the Windows version's render checks, with the HD renderer on Mesa's software OpenGL
+      - name: Desktop tests
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri
+          xvfb-run -a -s "-screen 0 1920x1080x24" ./gradlew :desktop:test -PgpuTest --stacktrace
+
       - name: Build APKs
         run: ./gradlew assembleDebug assembleRelease --stacktrace
 
@@ -38,5 +45,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: snapshots
-          path: app/build/snapshots/
+          path: |
+            app/build/snapshots/
+            desktop/build/snapshots/
           if-no-files-found: ignore

@@ -1,8 +1,34 @@
 # Hustle City
 
-A business life-simulation game for Android, inspired by *Big Ambitions*. Start with a small apartment, a beat-up car and $5,000. Rent a storefront, furnish it, stock it, hire staff, and grow a business empire in a living 3D city.
+A business life-simulation game for Android and Windows, inspired by *Big Ambitions*. Start with a small apartment, a beat-up car and $5,000. Rent a storefront, furnish it, stock it, hire staff, and grow a business empire in a living 3D city.
 
 Native Kotlin + Jetpack Compose with a custom 3D engine. In HD mode the world is drawn by an OpenGL ES 3 renderer with per-pixel lighting, real-time sun shadows, procedural materials (brick, stone, glass that reflects the sky, asphalt, sidewalk slabs, grass, water, wood) and 4x anti-aliasing; a lightweight Canvas renderer is the fallback for older devices.
+
+The Windows version is built from the same code with Compose Multiplatform: same game, same saves format, with keyboard and mouse controls and an interface that scales to the monitor.
+
+## Windows
+
+**Install:** open the latest run of the **Windows build** workflow on GitHub Actions and download `hustle-city-windows-installer` from its **Artifacts**. It holds `HustleCity-1.7.0.exe`, a setup wizard that installs the game with Start menu and desktop shortcuts, and the same installer as an `.msi`. Tagged versions (`v1.7.0`, ...) also publish them on the Releases page. Java comes bundled, so there's nothing else to install. Windows SmartScreen may warn about an unsigned app the first time: choose **More info → Run anyway**.
+
+No installer wanted? `hustle-city-windows-portable` is a zip you can unpack anywhere and run `HustleCity.exe` from.
+
+Saves and settings are kept in `%APPDATA%\HustleCity`.
+
+**Keyboard and mouse:** keyboard controls are on by default. The on-screen joystick, steering wheel, pedals and the buttons the keys replace are hidden, and a key panel in the corner shows what each key does right now. Settings → Walking and driving switches back to on-screen controls.
+
+| Action | Keys and mouse |
+| --- | --- |
+| Walk | W A S D or the arrow keys |
+| Go in a door / get in or out of the car | E (F gets in the car when you're at a door too) |
+| Drive | W / ▲ gas, S / ▼ brake (hold to reverse), A D / ◀ ▶ steer, Space brake |
+| Park | P |
+| Back / close a menu | Esc |
+| Look around | Drag with the left mouse button |
+| Zoom | Mouse wheel |
+| Rotate camera | Drag with the right mouse button |
+| Select a building | Click it |
+
+**Bigger screens:** the interface grows with the window, so a monitor shows the same layout as a phone instead of tiny controls in the corners. Settings → Interface size makes it smaller or larger (this works on Android tablets too).
 
 ## Features
 
@@ -79,7 +105,16 @@ Requirements: JDK 17 or newer and the Android SDK (API 35).
 ./gradlew testDebugUnitTest      # simulation tests + offscreen render snapshots
 ```
 
-Every push also builds both APKs on GitHub Actions. Download them from the run's **Artifacts** section.
+The Windows version:
+
+```bash
+./gradlew :desktop:run           # play it from source (also runs on Linux)
+./gradlew :desktop:packageExe    # the installer, on Windows: desktop/build/compose/binaries/main/exe/
+./gradlew :desktop:packageMsi    # the same as an .msi
+./gradlew :desktop:test          # window render snapshots in desktop/build/snapshots/
+```
+
+Every push also builds both APKs and the Windows installer on GitHub Actions. Download them from the run's **Artifacts** section.
 
 The unit tests use Robolectric's native graphics to render the city, interiors and every main UI screen to PNG files in `app/build/snapshots/`. `AudioTest` renders each radio station to WAV files in `app/build/audio/`. `BalanceReportTest` writes a per-business-type profit report to `app/build/balance.txt`.
 
@@ -94,6 +129,13 @@ app/src/main/java/com/hustlecity/game/
   audio/     Procedural music stations, sound effects and the audio mixer
   engine/    Game loop, economy simulation, interiors, actions, objectives, saving
   ui/        Compose HUD, phone apps, BizHub, shops, menus
+
+desktop/src/main/kotlin/
+  com/hustlecity/game/desktop/  The Windows window, keyboard, and the OpenGL thread for HD graphics
+  android/, androidx/           Desktop versions of the few Android APIs the game calls: Canvas and Paint on Skia,
+                                GLES30 on desktop OpenGL, AudioTrack on Java Sound, settings in a file
 ```
+
+The desktop module compiles `app/src/main/java` itself, so a change to the game lands in both versions. Only `MainActivity.kt`, `render/gpu/GlWorldView.kt` and `ui/GpuHost.kt` are Android-only; the desktop has its own versions of them.
 
 *Hustle City is an independent fan project. It is not affiliated with Hovgaard Games or Big Ambitions. All names of in-game companies are fictional.*

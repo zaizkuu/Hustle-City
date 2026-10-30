@@ -58,6 +58,7 @@ import com.hustlecity.game.engine.roadside
 import com.hustlecity.game.ui.HButton
 import com.hustlecity.game.ui.theme.HC
 import com.hustlecity.game.world.BKind
+import androidx.compose.ui.text.style.TextOverflow
 import com.hustlecity.game.world.City
 import kotlin.math.abs
 import kotlin.math.cos
@@ -72,7 +73,9 @@ fun BoxScope.DrivingControls(e: GameEngine) {
     if (e.skip != null) return
     val v = e.state.vehicle(e.state.player.driving) ?: return
     val left = e.settings.leftHanded
-    if (e.settings.carControls == 0) {
+    if (e.settings.keyboard) {
+        KeyHints(e, Modifier.align(if (left) Alignment.BottomEnd else Alignment.BottomStart).padding(16.dp))
+    } else if (e.settings.carControls == 0) {
         SteeringWheel(e, Modifier.align(if (left) Alignment.BottomEnd else Alignment.BottomStart).padding(start = 20.dp, end = 20.dp, bottom = 14.dp))
         Pedals(e, Modifier.align(if (left) Alignment.BottomStart else Alignment.BottomEnd).padding(end = if (left) 0.dp else 72.dp, start = if (left) 72.dp else 0.dp, bottom = 12.dp))
     } else if (e.settings.carControls == 2) {
@@ -86,8 +89,11 @@ fun BoxScope.DrivingControls(e: GameEngine) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 6.dp)) {
             if (e.atGasStation) HButton("Refuel ${e.money((1 - v.fuel) * 45 * 1.4)}", color = HC.Orange, small = true) { e.refuel(v) }
             if (v.fuel <= 0.0) HButton("Roadside \$150", color = HC.Red, small = true) { e.roadside(v) }
-            HButton("Park", color = HC.Green, small = true) { if (e.parkVehicle()) e.ui.phoneOpen = true }
-            HButton("Get out", color = HC.Blue, small = true) { if (e.getOutOfCar()) e.ui.phoneOpen = true }
+            // P and E park and get out with keyboard controls
+            if (!e.settings.keyboard) {
+                HButton("Park", color = HC.Green, small = true) { if (e.parkVehicle()) e.ui.phoneOpen = true }
+                HButton("Get out", color = HC.Blue, small = true) { if (e.getOutOfCar()) e.ui.phoneOpen = true }
+            }
         }
         Dashboard(e)
     }
@@ -132,6 +138,52 @@ private fun Dashboard(e: GameEngine) {
                 com.hustlecity.game.ui.Bar(v.condition.toFloat(), if (v.condition < .3) HC.Red else HC.GreenLight, Modifier.width(36.dp).padding(start = 2.dp), height = 3.dp)
             }
         }
+    }
+}
+
+/** With keyboard controls: which keys walk or drive, in place of the on-screen joystick, wheel and pedals. */
+@Composable
+fun KeyHints(e: GameEngine, modifier: Modifier = Modifier) {
+    if (e.skip != null) return
+    Column(
+        modifier.shadow(4.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp)).background(Color(0xD91B1F25))
+            .padding(horizontal = 9.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        if (e.state.player.driving >= 0) {
+            KeyRow(listOf("W", "▲"), "Gas")
+            KeyRow(listOf("S", "▼"), "Brake, hold to reverse")
+            KeyRow(listOf("A", "D"), "Steer")
+            KeyRow(listOf("Space"), "Brake")
+            KeyRow(listOf("P"), "Park")
+            KeyRow(listOf("E"), "Get out")
+        } else {
+            val door = e.nearDoor
+            val car = e.nearVehicle
+            KeyRow(listOf("W", "A", "S", "D"), "Walk")
+            KeyRow(listOf("E"), when {
+                door != null -> "Enter ${doorLabel(e, door)}"
+                car != null -> "Get in ${car.def.name}"
+                else -> "Go in doors, get in cars"
+            })
+            if (door != null && car != null) KeyRow(listOf("F"), "Get in ${car.def.name}")
+        }
+    }
+}
+
+@Composable
+private fun KeyRow(keys: List<String>, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        for (k in keys) {
+            Box(
+                Modifier.height(19.dp).widthIn(min = 19.dp).clip(RoundedCornerShape(4.dp))
+                    .background(Brush.verticalGradient(listOf(Color(0xFF5A626D), Color(0xFF3A4048))))
+                    .border(1.dp, Color.White.copy(alpha = .35f), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text(k, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+        }
+        Text(label, color = Color.White.copy(alpha = .85f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 4.dp).widthIn(max = 220.dp))
     }
 }
 

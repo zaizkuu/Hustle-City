@@ -80,10 +80,12 @@ fun HustleCityApp(e: GameEngine, onExit: () -> Unit) {
     HustleTheme {
         @Suppress("UNUSED_VARIABLE") val tick = e.ui.tick
         BackHandler { handleBack(e, onExit) }
-        when (e.ui.screen) {
-            Screen.GAME -> if (e.hasGame) GameScreen(e) else MainMenu(e)
-            Screen.MENU -> MainMenu(e)
-            Screen.NEW_GAME -> NewGameScreen(e)
+        com.hustlecity.game.ui.ScaledUi(e.settings.uiSize) {
+            when (e.ui.screen) {
+                Screen.GAME -> if (e.hasGame) GameScreen(e) else MainMenu(e, onExit)
+                Screen.MENU -> MainMenu(e, onExit)
+                Screen.NEW_GAME -> NewGameScreen(e)
+            }
         }
     }
 }
@@ -108,7 +110,7 @@ private fun handleBack(e: GameEngine, onExit: () -> Unit) {
 private val titleStyle = TextStyle(shadow = Shadow(Color(0xAA000000), Offset(2f, 3f), 8f))
 
 @Composable
-fun MainMenu(e: GameEngine) {
+fun MainMenu(e: GameEngine, onExit: () -> Unit = {}) {
     if (!e.hasGame) e.prepareMenuBackground()
     val renderers = remember { Renderers(e) }
     val hasSave = remember(e.ui.screen) { e.saves.hasSave() }
@@ -131,7 +133,9 @@ fun MainMenu(e: GameEngine) {
             }
             HButton("New game", Modifier.fillMaxWidth().padding(bottom = 8.dp)) { e.ui.screen = Screen.NEW_GAME }
             HButton("Settings", Modifier.fillMaxWidth(), color = HC.GlassLight) { e.ui.panel = com.hustlecity.game.engine.Panel.Settings }
-            Text("v1.7.0 beta · A business life sim for Android", color = Color.White.copy(alpha = .5f), fontSize = 11.sp, modifier = Modifier.padding(top = 18.dp))
+            // a window has no back button to leave by
+            if (com.hustlecity.game.Platform.isDesktop) HButton("Quit", Modifier.fillMaxWidth().padding(top = 8.dp), color = HC.GlassLight) { onExit() }
+            Text(if (com.hustlecity.game.Platform.isDesktop) "v1.7.0 beta · A business life sim for Windows" else "v1.7.0 beta · A business life sim for Android", color = Color.White.copy(alpha = .5f), fontSize = 11.sp, modifier = Modifier.padding(top = 18.dp))
         }
         if (e.ui.panel == com.hustlecity.game.engine.Panel.Settings) SettingsPanel(e)
         Dialogs(e)

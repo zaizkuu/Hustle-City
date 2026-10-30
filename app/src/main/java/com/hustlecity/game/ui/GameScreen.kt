@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
@@ -18,7 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -26,8 +25,7 @@ import com.hustlecity.game.engine.AppId
 import com.hustlecity.game.engine.GameEngine
 import com.hustlecity.game.render.InteriorRenderer
 import com.hustlecity.game.render.WorldRenderer
-import com.hustlecity.game.render.gpu.GlWorldView
-import androidx.compose.ui.viewinterop.AndroidView
+import com.hustlecity.game.render.gpu.GpuSurface
 import androidx.compose.runtime.key
 import com.hustlecity.game.ui.apps.MapsOverlay
 import com.hustlecity.game.ui.apps.PhoneAppScreen
@@ -104,7 +102,9 @@ fun GameScreen(e: GameEngine) {
                     if (e.state.player.driving >= 0) {
                         DrivingControls(e)
                     } else {
-                        Joystick(e, Modifier.align(if (e.settings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart).padding(18.dp))
+                        val corner = if (e.settings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart
+                        if (e.settings.keyboard) com.hustlecity.game.ui.hud.KeyHints(e, Modifier.align(corner).padding(16.dp))
+                        else Joystick(e, Modifier.align(corner).padding(18.dp))
                         LocationLabel(e, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
                         com.hustlecity.game.ui.hud.CarryingChip(e, Modifier.align(if (e.settings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart).padding(start = 16.dp, end = 16.dp, bottom = 150.dp))
                         ActionButtons(e, Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp))
@@ -142,7 +142,7 @@ class ResolutionGovernor(private val e: GameEngine) {
         }
     }
 
-    fun tick(v: GlWorldView) {
+    fun tick(v: GpuSurface) {
         e.gpuFps = v.glFps
         e.renderScale = v.renderScale
         val fixed = e.settings.resolution
@@ -189,12 +189,11 @@ fun WorldCanvas(e: GameEngine, r: Renderers, interactive: Boolean) {
         }
     }
     var mod = Modifier.fillMaxSize()
-    if (interactive) mod = mod.pointerInput(Unit) { worldGestures(e, r) }
-    // HD graphics: a GL view underneath draws the 3D world; this layer keeps drawing labels, pins and weather
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val canGpu = remember { android.os.Build.FINGERPRINT != "robolectric" && GlWorldView.supported(context) }
+    if (interactive) mod = mod.pointerInput(Unit) { worldGestures(e, r) }.pointerInput(Unit) { wheelZoom(e) }
+    // HD graphics: the GPU draws the 3D world underneath; this layer keeps drawing labels, pins and weather
+    val canGpu = rememberGpuSupported()
     val gpuOn = canGpu && e.settings.hd && !e.settings.gpuFailed
-    val glView = remember { arrayOfNulls<GlWorldView>(1) }
+    val glView = remember { arrayOfNulls<GpuSurface>(1) }
     val quality = e.settings.quality
     // automatic resolution: start from what this quality level can shade, then follow the frame rate
     LaunchedEffect(gpuOn, quality, e.settings.resolution) {
@@ -206,36 +205,18 @@ fun WorldCanvas(e: GameEngine, r: Renderers, interactive: Boolean) {
         }
     }
     Box(Modifier.fillMaxSize()) {
-        if (gpuOn) key(quality) {
-            AndroidView(factory = { ctx ->
-                GlWorldView(ctx, quality) { e.settings.gpuFailed = true }.also {
-                    glView[0] = it
-                    val dm = ctx.resources.displayMetrics
-                    it.setRenderScale(ResolutionGovernor.initialScale(e, dm.widthPixels, dm.heightPixels))
-                }
-            }, modifier = Modifier.fillMaxSize(), onRelease = { glView[0] = null })
-            val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-            DisposableEffect(lifecycle) {
-                val obs = androidx.lifecycle.LifecycleEventObserver { _, ev ->
-                    when (ev) {
-                        androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> glView[0]?.onPause()
-                        androidx.lifecycle.Lifecycle.Event.ON_RESUME -> glView[0]?.onResume()
-                        else -> {}
-                    }
-                }
-                lifecycle.addObserver(obs)
-                onDispose { lifecycle.removeObserver(obs) }
-            }
-        }
+        if (gpuOn) key(quality) { GpuHost(e, quality, glView) }
         androidx.compose.foundation.layout.Spacer(
             mod.drawBehind {
                 frame.longValue
                 drawIntoCanvas { c ->
                     val w = size.width.toInt(); val h = size.height.toInt()
+                    val canvas = c.gameCanvas
                     val view = if (gpuOn) glView[0] else null
+                    view?.present(canvas, w, h)
                     val g = view?.acquire() ?: com.hustlecity.game.render.gpu.GpuCapture.frame?.also { it.clear() }
-                    if (e.interior != null && e.state.player.inBuilding >= 0) r.interior.draw(c.nativeCanvas, w, h, g, density)
-                    else r.world.draw(c.nativeCanvas, w, h, density, g)
+                    if (e.interior != null && e.state.player.inBuilding >= 0) r.interior.draw(canvas, w, h, g, density)
+                    else r.world.draw(canvas, w, h, density, g)
                     if (g != null) view?.submit()
                 }
             },
@@ -279,7 +260,9 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.worldGes
                 total += delta.getDistance()
                 if (moved || total > slop) {
                     moved = true
-                    onPan(e, r, last, centroid)
+                    // a mouse's right button turns the camera, the left one pans
+                    if (event.buttons.isSecondaryPressed) onRotate(e, delta.x * .006f)
+                    else onPan(e, r, last, centroid)
                 }
             }
             count = pressed.size
@@ -287,6 +270,22 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.worldGes
             event.changes.forEach { it.consume() }
         }
         if (!moved) onTap(e, r, down.position)
+    }
+}
+
+/** A mouse wheel zooms like a pinch. */
+private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelZoom(e: GameEngine) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent()
+            if (event.type != androidx.compose.ui.input.pointer.PointerEventType.Scroll) continue
+            var dy = 0f
+            for (c in event.changes) dy += c.scrollDelta.y
+            if (dy == 0f) continue
+            onZoom(e, kotlin.math.exp(dy.coerceIn(-4f, 4f) * .12f))
+            event.changes.forEach { it.consume() }
+            e.bump()
+        }
     }
 }
 

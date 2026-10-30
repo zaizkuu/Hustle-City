@@ -1,6 +1,7 @@
 package com.hustlecity.game.engine
 
 import android.content.Context
+import com.hustlecity.game.Platform
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +23,10 @@ class Settings(context: Context?) {
     var station by mutableIntStateOf(prefs?.getInt("station", 0) ?: 0)
     /** Car controls: 0 = steering wheel and pedals, 1 = joystick, 2 = arrow keys. */
     var carControls by mutableIntStateOf(prefs?.getInt("carControls", 0) ?: 0)
+    /** Walk and drive with a keyboard (W A S D or the arrow keys) instead of the on-screen joystick and pedals. */
+    var keyboard by mutableStateOf(prefs?.getBoolean("keyboard", Platform.isDesktop) ?: Platform.isDesktop)
+    /** Interface size in percent of what fits the screen (see [com.hustlecity.game.ui.uiScale]). */
+    var uiSize by mutableIntStateOf(prefs?.getInt("uiSize", 100) ?: 100)
     var minimap by mutableStateOf(prefs?.getBoolean("minimap", true) ?: true)
     /** HD graphics: the GPU renderer (lighting, depth, anti-aliasing) instead of the classic Canvas renderer. */
     var hd by mutableStateOf(prefs?.getBoolean("hd", true) ?: true)
@@ -50,6 +55,8 @@ class Settings(context: Context?) {
             ?.putBoolean("radioOn", radioOn)
             ?.putInt("station", station)
             ?.putInt("carControls", carControls)
+            ?.putBoolean("keyboard", keyboard)
+            ?.putInt("uiSize", uiSize)
             ?.putBoolean("minimap", minimap)
             ?.putBoolean("hd", hd)
             ?.putInt("resolution", resolution)

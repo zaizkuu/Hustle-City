@@ -94,7 +94,8 @@ class GameEngine(context: Context?) {
 
     /**
      * Hardware keyboard: arrow keys (and W A S D when no menu is open) walk, or steer, accelerate and brake while
-     * driving. Returns true when the key was used.
+     * driving. With no menu open, Space also brakes, E goes in the door you're at or gets in or out of the car, F gets
+     * in the car (when you're at a door too), and P parks. Returns true when the key was used.
      */
     fun onKey(keyCode: Int, down: Boolean): Boolean {
         if (!hasGame || ui.screen != Screen.GAME || state.player.inBuilding >= 0) return false
@@ -108,21 +109,46 @@ class GameEngine(context: Context?) {
             android.view.KeyEvent.KEYCODE_D -> if (wasd) 1 else return false
             android.view.KeyEvent.KEYCODE_W -> if (wasd) 2 else return false
             android.view.KeyEvent.KEYCODE_S -> if (wasd) 3 else return false
+            android.view.KeyEvent.KEYCODE_SPACE -> if (wasd && state.player.driving >= 0) 4 else return false
+            android.view.KeyEvent.KEYCODE_E -> if (wasd) KEY_USE else return false
+            android.view.KeyEvent.KEYCODE_F -> if (wasd && state.player.driving < 0) KEY_CAR else return false
+            android.view.KeyEvent.KEYCODE_P -> if (wasd && state.player.driving >= 0) KEY_PARK else return false
             else -> return false
+        }
+        if (k >= KEY_USE) {
+            // act once per press: a held key repeats its key-down
+            if (!down) { heldKeys -= k; return true }
+            if (!heldKeys.add(k)) return true
+            when (k) {
+                KEY_PARK -> if (parkVehicle()) ui.phoneOpen = true
+                KEY_CAR -> nearVehicle?.let { enterVehicle(it); ui.phoneOpen = false }
+                else -> useKey()
+            }
+            bump()
+            return true
         }
         if (down) heldKeys += k else heldKeys -= k
         val x = (if (1 in heldKeys) 1f else 0f) - (if (0 in heldKeys) 1f else 0f)
         val y = (if (3 in heldKeys) 1f else 0f) - (if (2 in heldKeys) 1f else 0f)
-        if (state.player.driving >= 0 && settings.carControls != 1) {
+        if (state.player.driving >= 0 && (settings.keyboard || settings.carControls != 1)) {
             input.steer = x
             input.gas = 2 in heldKeys
-            input.brake = 3 in heldKeys
+            input.brake = 3 in heldKeys || 4 in heldKeys
         } else {
             input.jx = x; input.jy = y
             if (state.player.driving >= 0) input.brake = false
         }
         return true
     }
+    /** E: gets out of the car, or goes in the door you're at, or gets in the car you're next to. */
+    private fun useKey() {
+        if (state.player.driving >= 0) { if (getOutOfCar()) ui.phoneOpen = true; return }
+        val door = nearDoor
+        val car = nearVehicle
+        if (door != null) enterBuilding(door)
+        else if (car != null) { enterVehicle(car); ui.phoneOpen = false }
+    }
+
     /** Seconds the brake has been held at a standstill (reverse kicks in after a moment). */
     private var stoppedFor = 0f
     var fps = 0f
@@ -188,7 +214,8 @@ class GameEngine(context: Context?) {
         ui.screen = Screen.GAME
         ui.app = null; ui.panel = null; ui.selected = -1; ui.summary = null; ui.designer = false; ui.phoneOpen = true; ui.ending = null
         tip("welcome", "Welcome to Hustle City",
-            "Use the joystick to walk and tap any building for details. Your phone (bottom right) has every app: Realty to rent property, BizHub to run your businesses, Maps to find places. Follow Uncle Sal's objectives on the left.")
+            (if (settings.keyboard) "Walk with W A S D or the arrow keys, press E at a door to go in," else "Use the joystick to walk") +
+                " and ${if (com.hustlecity.game.Platform.isDesktop) "click" else "tap"} any building for details. Your phone (bottom right) has every app: Realty to rent property, BizHub to run your businesses, Maps to find places. Follow Uncle Sal's objectives on the left.")
         save()
     }
 
@@ -953,7 +980,8 @@ class GameEngine(context: Context?) {
         if (!loadForDriving(v)) return
         resetInput()
         Audio.play(Sfx.CAR_DOOR)
-        tip("drive", "Driving", if (settings.carControls == 2) "Hold ◀ and ▶ to steer, ▲ to accelerate and ▼ to brake (keep holding ▼ to reverse). Keyboard arrow keys work too. PARK pulls over to the curb and gets you out. Set a destination on the map and follow the blue GPS line."
+        tip("drive", "Driving", if (settings.keyboard) "W or ▲ accelerates, S or ▼ brakes (keep holding to reverse), A and D or ◀ and ▶ steer, and Space brakes. P pulls over to the curb and parks, E gets out. Set a destination on the map and follow the blue GPS line. Watch your fuel: Fuel Up stations are on the map."
+            else if (settings.carControls == 2) "Hold ◀ and ▶ to steer, ▲ to accelerate and ▼ to brake (keep holding ▼ to reverse). Keyboard arrow keys work too. PARK pulls over to the curb and gets you out. Set a destination on the map and follow the blue GPS line."
             else if (settings.carControls == 0) "Turn the steering wheel on the left; hold GAS to accelerate and BRAKE to slow down (keep holding to reverse). PARK pulls over to the curb and gets you out. Set a destination on the map and follow the blue GPS line. Watch your fuel: Fuel Up stations are on the map."
             else "The joystick steers: push it the way you want to go and the car turns and accelerates. Hold the red pedal to brake, and keep holding to reverse. Watch your fuel; Fuel Up stations are on the map.")
         p.driving = v.id
@@ -1201,5 +1229,9 @@ class GameEngine(context: Context?) {
         val HOME_TIERS = listOf("Studio", "Apartment", "Condo", "Mansion")
         /** How fast you recover energy asleep in each kind of home. */
         val HOME_REST = doubleArrayOf(1.0, 1.1, 1.22, 1.35)
+        // held-key slots for the one-shot keys (0..4 are left, right, up, down and brake)
+        private const val KEY_USE = 5
+        private const val KEY_PARK = 6
+        private const val KEY_CAR = 7
     }
 }
