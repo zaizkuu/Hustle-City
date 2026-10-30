@@ -167,7 +167,7 @@ The banger trailer, `banger.py`, cuts the city, a police chase and a hero walk (
 
 ```bash
 HC_CINEMA=1 HC_SHOTS=n,b0 ./gradlew :app:testDebugUnitTest --tests '*cinema.CinematicTest*'
-python3 tools/cinema/banger.py --fetch audio
+python3 tools/cinema/banger.py --fetch audio                      # then the voice-over takes as audio/vo01.mp3 .. vo09.mp3
 python3 tools/cinema/banger.py frames app/build/cinema audio banger.mp4 --plan plan.txt
 xvfb-run -a ./gradlew :desktop:test --tests '*CinemaRender*' -PcinemaIn=app/build/cinema -PcinemaOut=frames -PcinemaPlan=plan.txt
 python3 tools/cinema/banger.py frames app/build/cinema audio banger.mp4

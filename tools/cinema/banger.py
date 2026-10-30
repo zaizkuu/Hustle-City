@@ -99,8 +99,7 @@ CUT = [
     (36, 38, 'n13_cafe', 10, 1, 'interior'),
     (38, 40, 'n11_gym', 10, 1, 'interior'),
     (40, 42, 'n09_van_bridge', 10, 1.3, 'day'),
-    (42, 44, 'n07_brownstones', 20, 1, 'golden'),
-    (44, 48, 'n10_news_aerial', 10, 1, 'day'),
+    (42, 48, 'n10_news_aerial', 4, 1, 'day'),
     (48, 52, 'n06_times_dusk', 0, 1.4, 'neon'),
     (52, 54, 'n12_club', 10, 1, 'club'),
     (54, 55, 'n12_club', 40, 1, 'club'),
@@ -159,16 +158,52 @@ CUT = [
     (147.5, 148, 'b03_chase_high', 62, 1, 'neon'),
 ]
 SLAMS = [(32, 35.6, 'START WITH NOTHING.'), (48, 51.6, 'BUILD AN EMPIRE.'), (64, 67.6, 'OWN THE CITY.'), (80, 83.6, 'NO DAYS OFF.')]
-NEWS = (44, 48)
-SUBS = [  # (start s, end s, speaker, line)
-    (.35, 1.55, 'LOAN OFFICER', 'Five grand and a beat-up car.'),
-    (1.75, 3.05, 'LOAN OFFICER', "That's your plan?"),
-    (3.3, 4.6, 'ALEX', "That's my start."),
-    (11.25, 12.45, 'ALEX', 'Watch me.'),
-    (38.4, 40.9, 'LOAN OFFICER', 'You know what this city does to guys like you?'),
-    (43.1, 44.3, 'ALEX', 'Yeah.'),
-    (46.1, 47.6, 'ALEX', 'It makes room.'),
+NEWS = (42, 48)
+# the voice-over: <audio dir>/voNN.mp3 (made in ElevenLabs), each line's speech starting at [at] seconds; the kind
+# sets its treatment (dry, a TV broadcast, a police radio) and how far the music dips under it
+VO = [  # (file, at, speaker (None: no subtitle), line, kind, level dBFS)
+    ('vo01', .3, 'LOAN OFFICER', 'Five grand and a beat-up car.', 'dry', -20),
+    ('vo02', 2.65, 'LOAN OFFICER', "That's your plan?", 'dry', -20),
+    ('vo03', 3.8, 'ALEX', "That's my start.", 'dry', -21),
+    ('vo04', 11.95, 'ALEX', 'Watch me.', 'dry', -22),
+    ('vo08', 16.7, None, "Who is the newcomer buying up Hell's Kitchen?", 'tv', -19),
+    ('vo05', 38.3, 'LOAN OFFICER', 'You know what this city does to people like you?', 'dry', -20),
+    ('vo09', 41.05, 'DISPATCH', 'All units, purple hypercar, southbound on Broadway.', 'radio', -23),
+    ('vo06', 44.8, 'ALEX', 'Yeah.', 'dry', -22),
+    ('vo07', 46.1, 'ALEX', 'It makes room.', 'dry', -20),
 ]
+DUCK = {'dry': 4, 'tv': 9, 'radio': 5}  # dB the music dips under a line
+
+
+def speech_span(y, sr):
+    """Where the speech in a take starts and ends, seconds: the envelope above -38 dBFS."""
+    w = sr // 100
+    env = np.sqrt(np.convolve(y * y, np.ones(w) / w, 'same'))
+    on = np.where(env > 10 ** (-38 / 20))[0]
+    return (on[0] / sr, on[-1] / sr) if len(on) else (0.0, len(y) / sr)
+
+
+def _mono(path, sr):
+    raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', path, '-f', 'f32le', '-ac', '1', '-ar', str(sr), '-'], capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.float32).copy()
+
+
+def subtitles():
+    """The subtitles, timed to the takes that are there (a line without one keeps a nominal length)."""
+    out = []
+    for name, at, who, line, kind, _ in VO:
+        if who is None: continue
+        p = os.path.join(AUDIO, name + '.mp3')
+        n = len(line.split())
+        dur = .4 + .3 * n
+        if os.path.exists(p):
+            a, b = speech_span(_mono(p, 16000), 16000)
+            dur = b - a
+        out.append((at - .06, at + dur + .35, who, line))
+    return out
+
+
+SUBS = subtitles()
 WHIPS = [40, 56, 68, 84, 137, 139]
 STUTTER = [124 + i * .5 for i in range(8)] + [146, 146.5, 147, 147.5]
 
@@ -454,13 +489,60 @@ def mix(path, sr=48000):
     m = music[:cut].copy()
     f = int(.02 * sr)
     m[-f:] *= np.linspace(1, 0, f)[:, None]
+    # the music dips under the voice-over
+    duck = np.zeros(n, np.float32)
+    lines = []
+    for name, at, who, line, kind, level in VO:
+        p = os.path.join(AUDIO, name + '.mp3')
+        if not os.path.exists(p): continue
+        raw = _mono(p, sr)
+        a0, a1 = speech_span(raw, sr)
+        y = voice(raw, sr, kind)
+        speech = y[int(a0 * sr):int(a1 * sr)]
+        y = y * (10 ** ((level - 20 * np.log10(np.sqrt((speech ** 2).mean()) + 1e-9)) / 20))
+        start = int((at - a0) * sr)
+        lines.append((start, y))
+        d = 1 - 10 ** (-DUCK[kind] / 20)
+        i0 = max(0, int((at - .08) * sr)); i1 = min(n, int((at + a1 - a0 + .12) * sr))
+        duck[i0:i1] = np.maximum(duck[i0:i1], d)
+    # smooth the dips: quick down, slower back up
+    k_dn = np.exp(-1 / (.05 * sr)); k_up = np.exp(-1 / (.25 * sr))
+    env = np.empty_like(duck); e = 0.0
+    for i in range(0, n, 64):
+        target = duck[i]
+        e = target + (e - target) * (k_dn ** 64 if target > e else k_up ** 64)
+        env[i:i + 64] = e
+    m = m * (1 - env[:len(m)])[:, None]
     out[:len(m)] += m
+    for start, y in lines:
+        a = max(0, start); b = min(n, start + len(y))
+        if b > a: out[a:b] += y[a - start:b - start, None]
     for when, name, gain in SOUND:
         s = load(os.path.join(AUDIO, name + '.mp3'), sr) * (10 ** (gain / 20))
         start = int((tb(when) - SFX_PEAK[name]) * sr)
         a = max(0, start); b = min(n, start + len(s))
         if b > a: out[a:b] += s[a - start:b - start]
     with open(path, 'wb') as fo: fo.write(out.tobytes())
+
+
+def voice(y, sr, kind):
+    """A take treated for where it's heard: dry and close, through a TV, or over a police radio."""
+    from scipy.signal import butter, sosfilt
+    a0, a1 = speech_span(y, sr)
+    y = sosfilt(butter(2, 90, 'highpass', fs=sr, output='sos'), y)
+    if kind == 'tv':
+        y = sosfilt(butter(2, [170, 7000], 'bandpass', fs=sr, output='sos'), y)
+    elif kind == 'radio':
+        y = sosfilt(butter(4, [380, 2900], 'bandpass', fs=sr, output='sos'), y)
+        y = np.tanh(y * 6) / 3
+        rng = np.random.default_rng(9)
+        hiss = sosfilt(butter(2, [800, 5000], 'bandpass', fs=sr, output='sos'), rng.standard_normal(len(y))) * .012
+        y = y + hiss
+        # the squelch: a burst of static as the key goes down and again as it comes up
+        for t in (max(0, a0 - .09), a1 + .02):
+            i = int(t * sr); k = int(.06 * sr)
+            if i + k < len(y): y[i:i + k] += rng.standard_normal(k) * .09 * np.exp(-np.arange(k) / (.02 * sr))
+    return y.astype(np.float32)
 
 
 def encode(out):

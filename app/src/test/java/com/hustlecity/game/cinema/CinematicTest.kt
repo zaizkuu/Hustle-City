@@ -893,11 +893,16 @@ class CinematicTest {
         val p = e.state.player
         val start = ny(390f, 745f)
         p.x = start[0]; p.y = start[1]
-        // walking south down Broadway, up to a low lens that waits for him, looking north up the square
+        // walking south down Broadway toward a lens at chest height a dozen meters down the street, which looks back up
+        // the square past him (its aim lands on the street far behind him) and creeps in as he comes
         val dx = -.4847f; val dy = .8747f
-        val tx = start[0] + dx * 5f; val ty = start[1] + dy * 5f
+        val pitch = 3f
+        val p0 = Math.toRadians(pitch.toDouble()).toFloat()
+        val dist = 1.5f / sin(p0)
+        val cx = start[0] + dx * 13f; val cy = start[1] + dy * 13f
         track(e, "b05_hero", 3.2f, warm = .5f, crowd = 85f, haze = .3f, each = { _, _ -> clearWeather(e); walkToward(e, dx * .3f, dy * .3f) }) { u ->
-            Key(tx, ty, lerp(5.2f, 4.6f, u), look(-dx, -dy), 5f)
+            val push = 1.6f * u
+            Key(cx - dx * (dist * cos(p0) + push), cy - dy * (dist * cos(p0) + push), dist, look(-dx, -dy), pitch)
         }
     }
 
