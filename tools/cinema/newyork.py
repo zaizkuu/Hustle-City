@@ -6,7 +6,7 @@ usage: python3 newyork.py <frames dir> <cinema dir> <score.wav> <out.mp4>
 
 Unlike the showcase cuts it has almost no captions: a subtitled conversation in the cold open, the city cut to the
 beat of newyork_score.py (100 BPM, a bar every 2.4 s from 10.8 s), three phone livestreams and a news break inside
-the montage, Alex at the waterfront, and the name on a sunset. The shots are CinematicTest's n01 .. n20, rendered
+the montage, Alex at the waterfront, and the name on a sunset. The shots are CinematicTest's n01 .. n21, rendered
 with render.mjs or the desktop's CinemaRender into <frames dir>.
 """
 import math, os, sys
@@ -63,13 +63,13 @@ EDL = [  # (start, end, kind, params); shots are 24 fps from frame f0, at [speed
     (34.8, 37.2, 'phone', dict(shot='n12_club', f0=2, look='club', handle='nightowl.nyc', viewers='12.4K',
                                caption='this club opened TWO WEEKS ago??', likes=18700)),
     (37.2, 38.4, 'shot', dict(shot='n17_snow', f0=10, look='snow')),
-    (38.4, 39.6, 'shot', dict(shot='n18_fidi_night', f0=10, look='neon')),
+    (38.4, 39.6, 'shot', dict(shot='n21_patrol', f0=6, look='neon')),
     (39.6, 42.0, 'shot', dict(shot='n19_skyline_night', f0=4, look='neon', speed=.8)),
     (42.0, 44.4, 'phone', dict(shot='n15_hypercar', f0=2, look='neon', speed=.9, handle='carspotter.nyc', viewers='48K',
                                caption='who IS this guy. 3 stores in a month and now THIS', likes=96100)),
 ]
 QUICK = [('n06_times_dusk', 40, 'neon'), ('n12_club', 40, 'club'), ('n14_rain_cross', 40, 'rain'), ('n09_van_bridge', 40, 'day'),
-         ('n11_gym', 40, 'interior'), ('n03_rush', 40, 'morning'), ('n16_river_night', 40, 'neon'), ('n04_bridge_gold', 40, 'golden')]
+         ('n18_fidi_night', 30, 'neon'), ('n03_rush', 40, 'morning'), ('n16_river_night', 40, 'neon'), ('n04_bridge_gold', 40, 'golden')]
 for i, (s, f0, look) in enumerate(QUICK):
     EDL.append((44.4 + i * .6, 45.0 + i * .6, 'shot', dict(shot=s, f0=f0, look=look)))
 EDL += [

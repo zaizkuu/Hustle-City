@@ -731,14 +731,18 @@ class CarPainter(private val scene: Scene3D) {
         scene.glow = true
         fun light(f: Float, l: Float, h: Float, r: Float, col: Int) =
             scene.blob(ox + fx * f + rx * l, oy + fy * f + ry * l, h, r, col)
-        light(.4f, -1.05f, z + 1.35f, .09f, c(0xFFFF4D4D))
-        light(.4f, 1.05f, z + 1.35f, .09f, c(0xFF2EE87A))
-        light(-7.05f, 0f, z + 1.7f, .08f, c(0xFFFFF4D6))
-        if ((clock % 1f) < .15f) light(-.5f, 0f, z + 2.45f, .13f, c(0xFFFF2E2E))
+        // bigger after dark, when they're most of what can be seen of it
+        val k = if (search) 1.8f else 1f
+        light(.4f, -1.05f, z + 1.35f, .09f * k, c(0xFFFF4D4D))
+        light(.4f, 1.05f, z + 1.35f, .09f * k, c(0xFF2EE87A))
+        light(-7.05f, 0f, z + 1.7f, .08f * k, c(0xFFFFF4D6))
+        if ((clock % 1f) < .15f) light(-.5f, 0f, z + 2.45f, .13f * k, c(0xFFFF2E2E))
+        // a white strobe on the fin, half a beat after the beacon
+        if (((clock + .5f) % 1f) < .08f) light(-7.3f, 0f, z + 3.1f, .12f * k, c(0xFFFFF4D6))
         if (search) {
             // the searchlight under the nose, its beam and the pool of light it throws
             val lx = ox + fx * 1.9f; val ly = oy + fy * 1.9f; val lz = z + .55f
-            light(1.9f, 0f, lz, .16f, c(0xFFFFF4D6))
+            light(1.9f, 0f, lz, .3f, c(0xFFFFF4D6))
             // the beam: a cone seen side on from wherever the camera is, as wide as the pool where it lands
             val bx = sx - lx; val by = sy - ly; val bz = -lz
             val vx = scene.camLX - (lx + sx) * .5f; val vy = scene.camLY - (ly + sy) * .5f; val vz = proj.camZ - lz * .5f

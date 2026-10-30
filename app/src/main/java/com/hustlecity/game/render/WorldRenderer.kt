@@ -85,6 +85,13 @@ class WorldRenderer(private val e: GameEngine) {
     private val addTrainCar: (Int, Float, Float) -> Unit = { car, x, y -> add(13, car, keyFor(x, y)) }
     private var heli: Helicopter? = null
 
+    /** Traffic car [i] of [style] as police: 0 not, 1 a patrol car, 2 one answering a call (every third). Cabs aside. */
+    private fun policeOf(i: Int, style: Int): Int {
+        val map = e.city.map
+        if (style != 0 || i % map.taxiEvery == 0 || i % map.policeEvery != 3) return 0
+        return if ((i / map.policeEvery) % 3 == 0) 2 else 1
+    }
+
     // weather particles in screen space: x, y, speed, size
     private val pX = FloatArray(420); private val pY = FloatArray(420); private val pV = FloatArray(420); private val pS = FloatArray(420)
     private var particlesInit = false
@@ -457,7 +464,7 @@ class WorldRenderer(private val e: GameEngine) {
                     // them answering a call with the lights going
                     val map = e.city.map
                     val taxi = it.style == 0 && dIdx[i] % map.taxiEvery == 0
-                    val police = if (it.style != 0 || taxi || dIdx[i] % map.policeEvery != 3) 0 else if ((dIdx[i] / map.policeEvery) % 3 == 0) 2 else 1
+                    val police = policeOf(dIdx[i], it.style)
                     val color = when {
                         taxi -> map.taxiColors[(dIdx[i] / map.taxiEvery) % map.taxiColors.size]
                         police != 0 -> map.policeColors[0]
@@ -1290,6 +1297,13 @@ class WorldRenderer(private val e: GameEngine) {
         if (dyn && !mapMode) {
             val h = heli?.takeIf { it.city === city } ?: Helicopter(city).also { heli = it }
             h.update(e.realTime)
+            // a patrol car answering a call close by has the searchlight on it
+            var near = 130f * 130f
+            for ((i, a) in e.traffic.cars.withIndex()) {
+                if (policeOf(i, a.style) != 2) continue
+                val d = (a.x - h.x) * (a.x - h.x) + (a.y - h.y) * (a.y - h.y)
+                if (d < near) { near = d; h.aim(a.x, a.y) }
+            }
             if (keyFor(h.x, h.y) < 700f * 700f || keyFor(h.spotX, h.spotY) < 500f * 500f) add(14, 0, keyFor(h.x, h.y))
         }
         val farLod = mapMode || proj.dist > 450

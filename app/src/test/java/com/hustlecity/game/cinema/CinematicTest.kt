@@ -15,6 +15,7 @@ import com.hustlecity.game.model.PlacedItem
 import com.hustlecity.game.model.Rental
 import com.hustlecity.game.model.Sky
 import com.hustlecity.game.model.WeatherSpan
+import com.hustlecity.game.render.Helicopter
 import com.hustlecity.game.render.InteriorRenderer
 import com.hustlecity.game.render.Railways
 import com.hustlecity.game.render.StreetProps
@@ -756,6 +757,38 @@ class CinematicTest {
         // back up along Roxas Boulevard, clear of the towers inland, the bay and the sun on the right
         fly(e, "m21_finale", 7.6f, listOf(Key(190f, 1150f, 150f, 3.0f, 8f), Key(191f, 1147f, 195f, 3.03f, 10f), Key(192f, 1144f, 245f, 3.06f, 12f)),
             easing = .5f, haze = .38f) { _, _ -> clearWeather(e) }
+    }
+
+    /** A call at night: the police helicopter overhead, its searchlight on a patrol car running with its lights going. */
+    @Test
+    fun n21() {
+        if (!on("n21")) { assumeTrue(false); return }
+        val e = engine("nyc", 22.2f)
+        val seconds = 1.6f; val warm = 2f
+        // the helicopter's path follows from the time, so where it will be is known before the shot starts
+        val t0 = e.realTime + warm
+        val hel = Helicopter(e.city)
+        hel.update(t0)
+        // a patrol car (traffic car 3 answers calls) on a street ahead of it, where the searchlight will find it
+        val ax = hel.x + sin(hel.heading) * 45f; val ay = hel.y - cos(hel.heading) * 45f
+        val ed = e.city.roads.edges.filter { it.cls.rank >= 1 && !it.overWater && it.len > 50f }
+            .minByOrNull { hypot((it.ax + it.bx) / 2 - ax, (it.ay + it.by) / 2 - ay) }!!
+        val cx = (ed.ax + ed.bx) / 2; val cy = (ed.ay + ed.by) / 2
+        // the camera rides behind the helicopter, looking past it down the beam at the car
+        val l = hypot(cx - hel.x, cy - hel.y).coerceAtLeast(1f)
+        val dx = (cx - hel.x) / l; val dy = (cy - hel.y) / l
+        fun at(t: Float, dist: Float, pitch: Float): Key {
+            hel.update(t)
+            val p = Math.toRadians(pitch.toDouble()).toFloat()
+            val cz = hel.z + 1.5f + sin(p) * dist
+            val s = cz / sin(p)
+            return Key(hel.x - dx * cos(p) * dist + dx * cos(p) * s, hel.y - dy * cos(p) * dist + dy * cos(p) * s, s, look(dx, dy), pitch)
+        }
+        val keys = listOf(at(t0, 52f, 40f), at(t0 + seconds / 2, 47f, 39f), at(t0 + seconds, 42f, 38f))
+        fly(e, "n21_patrol", seconds, keys, easing = 0f, warm = warm, haze = .3f, crowd = 40f) { f, _ ->
+            clearWeather(e)
+            if (f < 0 && e.traffic.cars.size > 3 && e.traffic.cars[3].edge != ed.id) e.traffic.placeCar(3, ed.id, ed.a, ed.len * .45f, 0)
+        }
     }
 
     @Test

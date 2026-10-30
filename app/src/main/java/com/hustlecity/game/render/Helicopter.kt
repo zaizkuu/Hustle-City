@@ -60,6 +60,9 @@ class Helicopter(val city: City) {
         spotX = x + sin(a) * 38f; spotY = y - cos(a) * 38f
     }
 
+    /** Turns the searchlight on ([sx], [sy]) instead, until the next [update]. */
+    fun aim(sx: Float, sy: Float) { spotX = sx; spotY = sy }
+
     private fun wrap(a: Float): Float {
         var r = a
         while (r > Math.PI) r -= (2 * Math.PI).toFloat()
