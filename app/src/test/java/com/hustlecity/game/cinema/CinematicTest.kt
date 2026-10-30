@@ -201,19 +201,24 @@ class CinematicTest {
     }
 
     /** Steers the player's car along the GPS route at about [speed] m/s. */
-    private fun drive(e: GameEngine, v: OwnedVehicle, speed: Float) {
+    private fun drive(e: GameEngine, v: OwnedVehicle, speed: Float, drift: Boolean = false) {
         val gps = e.gps
         var target: Pair<Float, Float>? = null
         if (gps.active) for (q in 1 until gps.points) {
             val x = gps.route[q * 2]; val y = gps.route[q * 2 + 1]
             if (hypot(x - v.x, y - v.y) > 16f) { target = x to y; break }
         }
+        var turn = 0f
         if (target != null) {
             val want = atan2(target.first - v.x, -(target.second - v.y))
-            e.input.steer = (wrap(want - v.heading) * 2.2f).coerceIn(-1f, 1f)
+            turn = wrap(want - v.heading)
+            e.input.steer = (turn * 2.2f).coerceIn(-1f, 1f)
         } else e.input.steer = 0f
-        e.input.gas = e.carSpeed < speed
-        e.input.brake = e.carSpeed > speed + 2f
+        // throw it sideways into the sharp turns with the handbrake, then power out
+        val sliding = drift && abs(turn) > .45f && e.carSpeed > 11f
+        e.input.handbrake = sliding
+        e.input.gas = !sliding && e.carSpeed < speed
+        e.input.brake = !sliding && e.carSpeed > speed + 2f
     }
 
     /**
@@ -222,7 +227,7 @@ class CinematicTest {
      */
     private fun chase(e: GameEngine, name: String, seconds: Float, v: OwnedVehicle, speed: Float, relYaw: (Float) -> Float, dist: (Float) -> Float,
                       pitch: (Float) -> Float, lead: Float = 2f, warm: Float = 3f, weather: Boolean = false, haze: Float = .3f,
-                      each: (Int, Float) -> Unit = { _, _ -> }) {
+                      drift: Boolean = false, after: () -> Unit = {}, each: (Int, Float) -> Unit = { _, _ -> }) {
         val out = Out(name)
         val r = WorldRenderer(e).apply { cinematic = true; cinemaHaze = haze }
         val frames = (seconds * fps).toInt()
@@ -241,11 +246,12 @@ class CinematicTest {
         place(0f, 1f)
         e.traffic.update(0f, v.x, v.y, 230f, -9999f, -9999f, initial = true)
         e.traffic.scatter(v.x, v.y, 110f, .65f)
-        repeat((warm * fps).toInt()) { drive(e, v, speed); each(-1, 0f); e.frame(1f / fps); place(0f, 1f) }
+        repeat((warm * fps).toInt()) { drive(e, v, speed, drift); each(-1, 0f); e.frame(1f / fps); after(); place(0f, 1f) }
         for (f in 0 until frames) {
             val u = f / (frames - 1f).coerceAtLeast(1f)
-            drive(e, v, speed); each(f, u)
+            drive(e, v, speed, drift); each(f, u)
             e.frame(1f / fps)
+            after()
             place(u, .12f)
             out.frame({ c -> r.draw(c, w, h, 2f) }, { c, g -> r.draw(c, w, h, 3f, g) }, weather)
             checkCamera(e, r, name, f)
@@ -788,6 +794,110 @@ class CinematicTest {
         fly(e, "n21_patrol", seconds, keys, easing = 0f, warm = warm, haze = .3f, crowd = 40f) { f, _ ->
             clearWeather(e)
             if (f < 0 && e.traffic.cars.size > 3 && e.traffic.cars[3].edge != ed.id) e.traffic.placeCar(3, ed.id, ed.a, ed.len * .45f, 0)
+        }
+    }
+
+    // ------------------------------------------------------------------ the banger trailer's action (banger.py)
+
+    /** Traffic cars that answer calls (WorldRenderer's patrol cars with their lights going), as many as there are. */
+    private fun respondingCars(e: GameEngine, n: Int): List<Int> {
+        val map = e.city.map
+        return (0 until e.traffic.cars.size).filter { it % map.taxiEvery != 0 && it % map.policeEvery == 3 && (it / map.policeEvery) % 3 == 0 }.take(n)
+    }
+
+    /**
+     * Patrol cars on [v]'s tail: each frame they take the place the player's car had [lag] frames before, [side] meters
+     * to its right, so they follow its line through the turns with their lights going. The rest of the traffic keeps
+     * out of the way (late at night the avenue is the getaway's).
+     */
+    private fun pursuers(e: GameEngine, v: OwnedVehicle, lag: IntArray, side: FloatArray = floatArrayOf(1.3f, -1.3f)): () -> Unit {
+        val ids = respondingCars(e, lag.size)
+        println("pursuers: traffic cars $ids of ${e.traffic.cars.size}")
+        val trail = ArrayList<FloatArray>()
+        return {
+            trail += floatArrayOf(v.x, v.y, v.heading, e.carSpeed)
+            for ((i, a) in e.traffic.cars.withIndex()) if (i !in ids && hypot(a.x - v.x, a.y - v.y) < 120f) { a.x = -99999f; a.y = -99999f }
+            for ((k, id) in ids.withIndex()) {
+                val a = e.traffic.cars[id]
+                val p = trail[(trail.size - 1 - lag[k]).coerceAtLeast(0)]
+                val side = side[k % side.size]
+                a.x = p[0] + cos(p[2]) * side; a.y = p[1] + sin(p[2]) * side
+                a.heading = p[2]; a.speed = p[3]; a.cruise = p[3]
+                a.style = 0; a.length = 4.7f; a.width = 1.9f; a.height = 1.45f
+            }
+        }
+    }
+
+    /** A hypercar on the run at night with two patrol cars behind; [turn] sends it off the avenue into a side street. */
+    private fun getaway(e: GameEngine, turn: Boolean): OwnedVehicle {
+        // enough traffic that two of its cars are patrol cars on a call (cars 3 and 105)
+        e.settings.busyRoads = 2.5f; e.traffic.ensure(e.settings.carCount, e.settings.pedCount)
+        val from = ny(520f, 300f)
+        val v = startCar(e, "vortex", from[0], from[1], color = 0xFF8E24AA.toInt(), minLen = 300f)
+        if (turn) {
+            // somewhere off to the right a block and a half ahead: the route turns at the next corners
+            val fx = sin(v.heading); val fy = -cos(v.heading)
+            val tx = v.x + fx * 110f - fy * 120f; val ty = v.y + fy * 110f + fx * 120f
+            e.city.buildings.filter { it.solid }.minByOrNull { hypot(it.doorX - tx, it.doorY - ty) }?.let { e.setWaypoint(it.id) }
+        }
+        return v
+    }
+
+    /** The getaway from in front, low: the hypercar coming at the lens, the patrol cars' lights right behind it. */
+    @Test
+    fun b01() {
+        if (!on("b01")) { assumeTrue(false); return }
+        val e = engine("nyc", 22.4f)
+        val v = getaway(e, false)
+        chase(e, "b01_chase_front", 3.4f, v, 24f, relYaw = { PI.toFloat() + .3f - .25f * it }, dist = { 7.5f - 1.5f * it }, pitch = { 4f + 2f * it },
+            lead = 3f, after = pursuers(e, v, intArrayOf(14, 30))) { _, _ -> clearWeather(e) }
+    }
+
+    /** The getaway throwing the hypercar sideways round a corner, from the kerb (cut before the camera meets the corner building). */
+    @Test
+    fun b02() {
+        if (!on("b02")) { assumeTrue(false); return }
+        val e = engine("nyc", 22.4f)
+        val v = getaway(e, true)
+        chase(e, "b02_chase_drift", 1.7f, v, 22f, relYaw = { .75f - .2f * it }, dist = { 11f }, pitch = { 13f }, lead = 1f, warm = 2f, drift = true,
+            after = pursuers(e, v, intArrayOf(20, 40), floatArrayOf(-1.2f, -1.2f))) { _, _ -> clearWeather(e) }
+    }
+
+    /** The getaway from high behind, the patrol cars' lights washing the avenue. */
+    @Test
+    fun b03() {
+        if (!on("b03")) { assumeTrue(false); return }
+        val e = engine("nyc", 22.4f)
+        val v = getaway(e, false)
+        chase(e, "b03_chase_high", 3.0f, v, 24f, relYaw = { .15f }, dist = { 42f - 6f * it }, pitch = { 38f }, lead = 6f,
+            after = pursuers(e, v, intArrayOf(16, 34))) { _, _ -> clearWeather(e) }
+    }
+
+    /** A racing drone's run down an avenue at golden hour, low between the towers. */
+    @Test
+    fun b04() {
+        if (!on("b04")) { assumeTrue(false); return }
+        val e = engine("nyc", 18.2f)
+        val ed = e.city.roads.edges.filter { it.cls.rank >= 2 && !it.overWater && it.len > 60f }
+            .minByOrNull { hypot((it.ax + it.bx) / 2 - ny(470f, 520f)[0], (it.ay + it.by) / 2 - ny(470f, 520f)[1]) }!!
+        val yaw = look(ed.ux, ed.uy)
+        fun k(s: Float) = Key(ed.ax + ed.ux * s, ed.ay + ed.uy * s, 30f, yaw, 10f)
+        fly(e, "b04_fpv", 2.6f, listOf(k(0f), k(80f), k(170f)), easing = 0f, haze = .35f, crowd = 80f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Alex walking out of Times Square at night, straight at a low lens, the screens blazing behind. */
+    @Test
+    fun b05() {
+        if (!on("b05")) { assumeTrue(false); return }
+        val e = engine("nyc", 21.6f)
+        val p = e.state.player
+        val start = ny(390f, 745f)
+        p.x = start[0]; p.y = start[1]
+        // walking south down Broadway, up to a low lens that waits for him, looking north up the square
+        val dx = -.4847f; val dy = .8747f
+        val tx = start[0] + dx * 5f; val ty = start[1] + dy * 5f
+        track(e, "b05_hero", 3.2f, warm = .5f, crowd = 85f, haze = .3f, each = { _, _ -> clearWeather(e); walkToward(e, dx * .3f, dy * .3f) }) { u ->
+            Key(tx, ty, lerp(5.2f, 4.6f, u), look(-dx, -dy), 5f)
         }
     }
 

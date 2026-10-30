@@ -163,6 +163,16 @@ python3 tools/cinema/newyork_score.py score.wav
 python3 tools/cinema/newyork.py frames app/build/cinema score.wav trailer.mp4
 ```
 
+The banger trailer, `banger.py`, cuts the city, a police chase and a hero walk (shots `n01`..`n21` and `b01`..`b05`) to a 152 BPM trap beat: every cut on the beat, zoom punches, shake, whip pans, slammed titles and a letterbox that snaps open on the drops. Its music and sound effects come from [Mixkit](https://mixkit.co) under their free licences (use in videos, no redistribution of the files), so the script downloads them instead of the repository keeping them:
+
+```bash
+HC_CINEMA=1 HC_SHOTS=n,b0 ./gradlew :app:testDebugUnitTest --tests '*cinema.CinematicTest*'
+python3 tools/cinema/banger.py --fetch audio
+python3 tools/cinema/banger.py frames app/build/cinema audio banger.mp4 --plan plan.txt
+xvfb-run -a ./gradlew :desktop:test --tests '*CinemaRender*' -PcinemaIn=app/build/cinema -PcinemaOut=frames -PcinemaPlan=plan.txt
+python3 tools/cinema/banger.py frames app/build/cinema audio banger.mp4
+```
+
 `CinemaRender` draws the recordings with the game's own HD renderer through the desktop build's OpenGL; `tools/cinema/render.mjs` does the same in a headless browser.
 
 *Hustle City is an independent fan project. It is not affiliated with Hovgaard Games or Big Ambitions. All names of in-game companies are fictional.*
