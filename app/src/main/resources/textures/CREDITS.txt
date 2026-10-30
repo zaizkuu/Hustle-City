@@ -1,0 +1,14 @@
+Photo materials for the HD renderer, baked by tools/assets/textures.py from scans on ambientCG,
+which are released under CC0 1.0 (public domain): https://ambientcg.com
+
+brick     Bricks059            https://ambientcg.com/view?id=Bricks059
+stone     PavingStones128      https://ambientcg.com/view?id=PavingStones128
+asphalt   Asphalt031           https://ambientcg.com/view?id=Asphalt031
+slabs     Concrete046          https://ambientcg.com/view?id=Concrete046
+grass     Grass004             https://ambientcg.com/view?id=Grass004
+wood      WoodFloor040         https://ambientcg.com/view?id=WoodFloor040
+tiles     Tiles107             https://ambientcg.com/view?id=Tiles107
+metal     CorrugatedSteel005   https://ambientcg.com/view?id=CorrugatedSteel005
+gravel    Gravel043            https://ambientcg.com/view?id=Gravel043
+plaster   Plaster001           https://ambientcg.com/view?id=Plaster001
+concrete  Concrete031          https://ambientcg.com/view?id=Concrete031

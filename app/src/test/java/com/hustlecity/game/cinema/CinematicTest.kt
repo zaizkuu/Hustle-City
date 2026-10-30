@@ -177,10 +177,11 @@ class CinematicTest {
     private fun wrap(a: Float): Float { var x = a; while (x > PI) x -= (2 * PI).toFloat(); while (x < -PI) x += (2 * PI).toFloat(); return x }
 
     /** Puts a new vehicle of [defId] in the right-hand lane of a big road near (x, y), pointing along it, and drives it. */
-    private fun startCar(e: GameEngine, defId: String, x: Float, y: Float, color: Int = 0, minRank: Int = 2, minLen: Float = 80f): OwnedVehicle {
+    private fun startCar(e: GameEngine, defId: String, x: Float, y: Float, color: Int = 0, minRank: Int = 2, minLen: Float = 80f,
+                         bridge: Boolean = false): OwnedVehicle {
         val g = e.city.roads
         // a long straight stretch of a big road near (x, y): the further, the longer it has to be
-        val ed = g.edges.filter { it.cls.rank >= minRank && !it.overWater && it.len > 60f }
+        val ed = g.edges.filter { it.cls.rank >= minRank && it.overWater == bridge && it.len > 60f }
             .minByOrNull { hypot((it.ax + it.bx) / 2 - x, (it.ay + it.by) / 2 - y) + (minLen - it.len).coerceAtLeast(0f) * 4f }!!
         val side = if (e.city.leftHand) -1f else 1f
         val s = ed.clearA + 8f
@@ -805,5 +806,288 @@ class CinematicTest {
         // over the tops of the towers the whole way: the tallest stands about 120 m
         fly(e, "e1_finale", 6.6f, listOf(Key(690f, 820f, 250f, 2.6f, 34f), Key(700f, 800f, 330f, 2.85f, 27f), Key(720f, 780f, 440f, 3.05f, 21f)),
             easing = .5f, haze = .4f) { _, _ -> clearWeather(e) }
+    }
+
+    // ------------------------------------------------------------------ the New York story trailer (n01 .. n20)
+
+    /** New York's Manhattan grid (u across the island west to east, v down it north to south) in world coordinates. */
+    private fun ny(u: Float, v: Float) = floatArrayOf(640f + u * .8747f - v * .4847f, 40f + u * .4847f + v * .8747f)
+    private fun nyKey(u: Float, v: Float, dist: Float, yaw: Float, pitch: Float) = ny(u, v).let { Key(it[0], it[1], dist, yaw, pitch) }
+    private val east = look(.8747f, .4847f)
+    private val west = look(-.8747f, -.4847f)
+    private val north = look(.4847f, -.8747f)
+    private val south = look(-.4847f, .8747f)
+
+    /**
+     * Like [fly], but the camera is whatever [cam] says at each 0..1 of the shot, so it can follow something that
+     * moves on its own (the player walking). The player stays where the game puts them.
+     */
+    private fun track(e: GameEngine, name: String, seconds: Float, warm: Float = 3f, weather: Boolean = false, haze: Float = .3f,
+                      crowd: Float = 90f, each: (Int, Float) -> Unit = { _, _ -> }, cam: (Float) -> Key) {
+        val out = Out(name)
+        val r = WorldRenderer(e).apply { cinematic = true; cinemaHaze = haze; cinemaPlayer = true }
+        val frames = (seconds * fps).toInt()
+        fun place(u: Float) {
+            val k = cam(u)
+            val c = e.camera
+            c.tx = k.x; c.ty = k.y; c.dist = k.dist; c.zoom = k.dist; c.yaw = k.yaw
+            r.cinemaPitch = Math.toRadians(k.pitch.toDouble()).toFloat()
+        }
+        place(0f)
+        e.traffic.update(0f, e.camera.tx, e.camera.ty, 230f, -9999f, -9999f, initial = true)
+        e.traffic.scatter(e.camera.tx, e.camera.ty, crowd, .65f)
+        repeat((warm * fps).toInt()) { each(-1, 0f); e.frame(1f / fps); place(0f) }
+        for (f in 0 until frames) {
+            val u = f / (frames - 1f).coerceAtLeast(1f)
+            each(f, u)
+            e.frame(1f / fps)
+            place(u)
+            out.frame({ c -> r.draw(c, w, h, 2f) }, { c, g -> r.draw(c, w, h, 3f, g) }, weather)
+            checkCamera(e, r, name, f)
+        }
+        println("$name: ${out.n} frames")
+    }
+
+    /** Joystick input that walks the player along world direction (dx, dy), whichever way the camera faces. */
+    private fun walkToward(e: GameEngine, dx: Float, dy: Float) {
+        val yaw = e.camera.yaw
+        e.input.jx = dx * cos(yaw) - dy * sin(yaw)
+        e.input.jy = dx * sin(yaw) + dy * cos(yaw)
+    }
+
+    private fun lerp(a: Float, b: Float, u: Float) = a + (b - a) * u
+
+    /** A business up and running in a vacant storefront of [w] x [d] tiles, with [staff] on every shift. */
+    private fun openBusiness(e: GameEngine, type: String, name: String, w: IntRange, d: IntRange, staff: List<StaffRole>,
+                             served: Double, furnish: (room: Int, w: Int, d: Int) -> List<PlacedItem>): InteriorScene {
+        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.placeId == null && it.gridW in w && it.gridD in d }
+        e.state.rentals += Rental(b.id, b.baseRent, 1)
+        val biz = e.startBusiness(b.id, type, name)!!
+        biz.tempClosed = false
+        biz.furniture += furnish(biz.backRoom.coerceAtLeast(0), b.gridW, b.gridD)
+        for ((pid, _) in biz.type.products) biz.stock[pid] = 400
+        for (role in staff) e.state.employees += Employee(e.state.newId(), "Kim", role, .75, 18.0, 18.0, 27, businessId = biz.id, shiftStart = 0, shiftEnd = 23, days = 127)
+        e.state.player.inBuilding = b.id
+        e.interior = InteriorScene(e, b, InteriorMode.BUSINESS)
+        e.economy.servedRate[biz.id] = served
+        return e.interior!!
+    }
+
+    /** Cold open: dawn on the Financial District from over the harbour, the towers catching the first light. */
+    @Test
+    fun n01() {
+        if (!on("n01")) { assumeTrue(false); return }
+        val e = engine("nyc", 6.7f)
+        fly(e, "n01_fidi_dawn", 3.0f, listOf(nyKey(330f, 1230f, 210f, north - .25f, 9f), nyKey(345f, 1215f, 175f, north - .12f, 11f)),
+            easing = .2f, haze = .42f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Cold open: Alex steps out of the walk-up in Hell's Kitchen and heads down the block. */
+    @Test
+    fun n02() {
+        if (!on("n02")) { assumeTrue(false); return }
+        val e = engine("nyc", 8.25f)
+        val home = e.city.building(e.state.player.home)!!
+        val p = e.state.player
+        p.x = home.doorX + home.frontX * 1.2f; p.y = home.doorY + home.frontY * 1.2f
+        // along the sidewalk, the street on the left
+        val ax = -home.frontY; val ay = home.frontX
+        track(e, "n02_hk_morning", 3.0f, warm = 3f, crowd = 50f, each = { f, _ ->
+            clearWeather(e)
+            if (f >= 0) walkToward(e, ax, ay) else { e.input.jx = 0f; e.input.jy = 0f }
+        }) { u ->
+            // beside and a little ahead of Alex, low, swinging round as he passes
+            val cx = p.x + ax * 3f + home.frontX * 2f; val cy = p.y + ay * 3f + home.frontY * 2f
+            Key(cx, cy, lerp(11f, 9f, u), look(-ax, -ay) + lerp(.9f, .45f, u), lerp(13f, 10f, u))
+        }
+    }
+
+    /** Cold open: the morning rush in Midtown, from above the crossing. ("Everybody in this city has a plan.") */
+    @Test
+    fun n03() {
+        if (!on("n03")) { assumeTrue(false); return }
+        val e = engine("nyc", 8.6f)
+        fly(e, "n03_rush", 3.0f, listOf(nyKey(390f, 620f, 40f, south + .12f, 68f), nyKey(390f, 620f, 35f, south + .22f, 72f)),
+            easing = .2f, warm = 6f, haze = .2f, crowd = 75f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The Brooklyn Bridge at golden hour, low over the East River. */
+    @Test
+    fun n04() {
+        if (!on("n04")) { assumeTrue(false); return }
+        val e = engine("nyc", 18.15f)
+        fly(e, "n04_bridge_gold", 2.8f, listOf(nyKey(845f, 1092f, 100f, north + .55f, 9f), nyKey(855f, 1088f, 92f, north + .42f, 10f)),
+            easing = .2f, haze = .38f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The lake in Central Park at golden hour, Midtown's towers beyond the trees. */
+    @Test
+    fun n05() {
+        if (!on("n05")) { assumeTrue(false); return }
+        val e = engine("nyc", 17.9f)
+        fly(e, "n05_lake", 2.8f, listOf(nyKey(392f, 150f, 125f, south - .15f, 9f), nyKey(390f, 158f, 115f, south - .05f, 10f)),
+            easing = .2f, haze = .4f, crowd = 50f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Times Square as the screens come on, from above the crossroads. */
+    @Test
+    fun n06() {
+        if (!on("n06")) { assumeTrue(false); return }
+        val e = engine("nyc", 19.55f)
+        fly(e, "n06_times_dusk", 2.6f, listOf(nyKey(390f, 760f, 85f, north, 23f), nyKey(390f, 752f, 76f, north + .05f, 21f)),
+            easing = .2f, warm = 5f, haze = .25f, crowd = 80f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Brownstones on the Upper West Side at sunset, the light raking down the block. */
+    @Test
+    fun n07() {
+        if (!on("n07")) { assumeTrue(false); return }
+        val e = engine("nyc", 18.3f)
+        fly(e, "n07_brownstones", 2.6f, listOf(nyKey(140f, 186f, 46f, east + .04f, 11f), nyKey(160f, 186f, 42f, east + .02f, 10f)),
+            easing = .2f, haze = .3f, crowd = 50f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Brooklyn's warehouses at sunset, Manhattan on the skyline behind them. */
+    @Test
+    fun n08() {
+        if (!on("n08")) { assumeTrue(false); return }
+        val e = engine("nyc", 18.5f)
+        fly(e, "n08_brooklyn", 2.6f, listOf(Key(1150f, 1060f, 115f, look(-1f, -.15f), 15f), Key(1140f, 1050f, 105f, look(-1f, -.05f), 15f)),
+            easing = .2f, haze = .35f) { _, _ -> clearWeather(e) }
+    }
+
+    /** A delivery van crossing the Manhattan Bridge in the afternoon. */
+    @Test
+    fun n09() {
+        if (!on("n09")) { assumeTrue(false); return }
+        val e = engine("nyc", 16.6f)
+        val from = ny(855f, 915f)
+        val v = startCar(e, "hauler", from[0], from[1], color = 0xFFF2C94C.toInt(), minRank = 2, minLen = 250f, bridge = true)
+        chase(e, "n09_van_bridge", 2.6f, v, 12f, relYaw = { u -> .55f - .3f * u }, dist = { 18f }, pitch = { u -> 9f + 2f * u }, lead = 1f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Midtown from the air at midday, under the news. */
+    @Test
+    fun n10() {
+        if (!on("n10")) { assumeTrue(false); return }
+        val e = engine("nyc", 11.5f)
+        fly(e, "n10_news_aerial", 2.6f, listOf(nyKey(420f, 620f, 360f, south + 2.2f, 38f), nyKey(420f, 620f, 350f, south + 2.32f, 37f)),
+            easing = .1f, haze = .3f) { _, _ -> clearWeather(e) }
+    }
+
+    /** A gym at full stretch: every treadmill, bike and rower taken. */
+    @Test
+    fun n11() {
+        if (!on("n11")) { assumeTrue(false); return }
+        val e = engine("nyc", 18.4f)
+        val sc = openBusiness(e, "gym", "Iron Works", 12..16, 9..11, listOf(StaffRole.GYM_TRAINER, StaffRole.GYM_TRAINER), 240.0) { room, w, d ->
+            listOf(PlacedItem("treadmill", 1, room + 1, 0), PlacedItem("treadmill", 3, room + 1, 0), PlacedItem("treadmill", 5, room + 1, 0),
+                PlacedItem("treadmill", 7, room + 1, 0), PlacedItem("exercise_bike", 1, room + 4, 0), PlacedItem("exercise_bike", 3, room + 4, 0),
+                PlacedItem("rowing_machine", 5, room + 4, 0), PlacedItem("rowing_machine", 7, room + 4, 0), PlacedItem("gym_locker", w - 3, room, 0),
+                PlacedItem("shower", w - 1, room, 0), PlacedItem("fitness_board", w - 4, room, 0), PlacedItem("drinks_fridge", w - 2, d - 2, 0))
+        }
+        inside(e, "n11_gym", 2.6f, { u -> floatArrayOf(sc.w * (.35f + .08f * u), sc.d * .45f, 12f - 1.5f * u, -.9f + .25f * u, 36f) }, warm = 30f)
+    }
+
+    /** A nightclub at midnight: the floor packed, the DJ on, the bar three deep. */
+    @Test
+    fun n12() {
+        if (!on("n12")) { assumeTrue(false); return }
+        val e = engine("nyc", 23.6f)
+        val sc = openBusiness(e, "nightclub", "Club Neon", 12..16, 9..11, listOf(StaffRole.DJ, StaffRole.CUSTOMER_SERVICE, StaffRole.CUSTOMER_SERVICE), 300.0) { room, w, d ->
+            listOf(PlacedItem("dj_booth", 4, room, 0), PlacedItem("dance_floor", 3, room + 2, 0), PlacedItem("dance_floor", 6, room + 2, 0),
+                PlacedItem("cocktail_bar", w - 4, room, 0), PlacedItem("stage_lights", 2, room, 0), PlacedItem("stage_lights", 7, room, 0),
+                PlacedItem("lounge_sofa", 0, d - 2, 0), PlacedItem("lounge_sofa", w - 3, d - 2, 0))
+        }
+        inside(e, "n12_club", 2.6f, { u -> floatArrayOf(sc.w * .42f, sc.d * (.42f + .05f * u), 11f - 1.5f * u, .45f - .3f * u, 34f) }, warm = 30f)
+    }
+
+    /** A café on 10th Avenue with a line out the door (the phone clip). */
+    @Test
+    fun n13() {
+        if (!on("n13")) { assumeTrue(false); return }
+        val e = engine("nyc", 9.1f)
+        val sc = openBusiness(e, "coffee", "Tenth & Bean", 10..14, 8..10, listOf(StaffRole.CUSTOMER_SERVICE, StaffRole.CUSTOMER_SERVICE), 260.0) { room, w, d ->
+            listOf(PlacedItem("coffee_machine", 1, room, 0), PlacedItem("coffee_machine", 3, room, 0), PlacedItem("pastry_case", 5, room, 0),
+                PlacedItem("cash_register", 7, room, 0), PlacedItem("table_set", 1, room + 4, 0), PlacedItem("table_set", 4, room + 4, 0),
+                PlacedItem("table_set", 7, room + 4, 0), PlacedItem("plant_large", w - 1, d - 1, 0), PlacedItem("floor_lamp", 0, d - 1, 0))
+        }
+        inside(e, "n13_cafe", 2.6f, { u -> floatArrayOf(sc.w * .5f, sc.d * .5f, 10f - 1f * u, 2.6f + .25f * u, 30f) }, warm = 30f)
+    }
+
+    /** A rainy night crossing in Midtown: umbrellas, headlights, the street a mirror. */
+    @Test
+    fun n14() {
+        if (!on("n14")) { assumeTrue(false); return }
+        val e = engine("nyc", 21.5f, Sky.RAIN)
+        fly(e, "n14_rain_cross", 2.6f, listOf(nyKey(520f, 682f, 40f, south + .12f, 32f), nyKey(520f, 682f, 36f, south + .22f, 29f)),
+            easing = .2f, warm = 5f, weather = true, haze = .4f, crowd = 70f) { _, _ -> e.skyVis.rain = .9f; e.skyVis.cloud = .9f; e.skyVis.wet = 1f }
+    }
+
+    /** A hypercar down an empty avenue at night, low and fast. */
+    @Test
+    fun n15() {
+        if (!on("n15")) { assumeTrue(false); return }
+        val e = engine("nyc", 22.3f)
+        e.settings.busyRoads = 1.2f; e.traffic.ensure(e.settings.carCount, e.settings.pedCount)
+        val from = ny(520f, 300f)
+        val v = startCar(e, "vortex", from[0], from[1], color = 0xFF8E24AA.toInt(), minLen = 300f)
+        chase(e, "n15_hypercar", 2.6f, v, 20f, relYaw = { u -> -2.3f + .7f * u }, dist = { u -> 9f + 1.5f * u }, pitch = { 7f }, lead = .5f, haze = .25f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The East River at night, the Manhattan and Brooklyn bridges lit end to end. */
+    @Test
+    fun n16() {
+        if (!on("n16")) { assumeTrue(false); return }
+        val e = engine("nyc", 21.7f)
+        fly(e, "n16_river_night", 2.6f, listOf(nyKey(858f, 860f, 260f, south + .15f, 11f), nyKey(858f, 875f, 245f, south + .05f, 12f)),
+            easing = .2f, haze = .4f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Snow on a Hell's Kitchen street. */
+    @Test
+    fun n17() {
+        if (!on("n17")) { assumeTrue(false); return }
+        val e = engine("nyc", 11.0f, Sky.SNOW)
+        e.state.snowCover = 1.0
+        fly(e, "n17_snow", 2.6f, listOf(nyKey(100f, 620f, 48f, east + .06f, 20f), nyKey(120f, 620f, 44f, east + .02f, 18f)), easing = .2f, weather = true,
+            haze = .45f, crowd = 60f) { _, _ -> e.state.snowCover = 1.0; e.skyVis.snow = .85f; e.skyVis.cloud = .85f }
+    }
+
+    /** Down into the Financial District at night: light trails between the towers. */
+    @Test
+    fun n18() {
+        if (!on("n18")) { assumeTrue(false); return }
+        val e = engine("nyc", 21.9f)
+        fly(e, "n18_fidi_night", 2.6f, listOf(nyKey(420f, 1170f, 140f, north + 1.6f, 52f), nyKey(420f, 1170f, 120f, north + 1.85f, 50f)),
+            easing = .2f, haze = .3f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The whole skyline at night from over the Hudson. */
+    @Test
+    fun n19() {
+        if (!on("n19")) { assumeTrue(false); return }
+        val e = engine("nyc", 21.2f)
+        fly(e, "n19_skyline_night", 2.8f, listOf(nyKey(260f, 760f, 520f, east - .2f, 12f), nyKey(260f, 720f, 500f, east - .05f, 13f)),
+            easing = .2f, haze = .45f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Finale: sunset from the Brooklyn shore. Alex looks across the river at Manhattan, and the camera rises past him. */
+    @Test
+    fun n20() {
+        if (!on("n20")) { assumeTrue(false); return }
+        val e = engine("nyc", 18.55f)
+        val p = e.state.player
+        val spot = ny(936f, 980f)
+        p.x = spot[0]; p.y = spot[1]
+        p.heading = atan2(-.8747f, .4847f) // facing west, across the river
+        // the camera looks over his shoulder at the skyline, pulling up and back
+        val wx = -.8747f; val wy = -.4847f
+        track(e, "n20_finale", 8.0f, warm = 3f, crowd = 20f, haze = .4f, each = { _, _ -> clearWeather(e); p.x = spot[0]; p.y = spot[1]; e.input.jx = 0f; e.input.jy = 0f }) { u ->
+            val k = ease(u, .7f)
+            // the target runs out over the river as the camera rises, so the camera itself stays over the open waterfront
+            // low at first, Alex on the left third against the skyline; then up and away over the river
+            Key(spot[0] + wx * lerp(7f, 135f, k), spot[1] + wy * lerp(7f, 135f, k), lerp(12f, 145f, k), west + lerp(.25f, .03f, k), lerp(6f, 10f, k))
+        }
     }
 }

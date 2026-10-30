@@ -775,7 +775,7 @@ fun SettingsPanel(e: GameEngine) {
             }
             if (st.keyboard) {
                 Text("W A S D or the arrow keys walk and drive. E goes in a door or gets in and out of your car (F gets in the car " +
-                    "when you're at a door too), Space brakes, P parks. Esc goes back.", style = HT.small, color = HC.InkSoft)
+                    "when you're at a door too), Space is the handbrake, P parks. Esc goes back.", style = HT.small, color = HC.InkSoft)
             } else {
                 Text("CAR CONTROLS", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
                 Row {
@@ -828,7 +828,7 @@ fun HelpPanel(e: GameEngine) {
 
 private val HELP = listOf(
     "Moving around" to "Use the joystick to walk. Walk up to a door and tap ENTER. Near your car, tap GET IN — the joystick then steers and accelerates, the red pedal brakes and reverses. Drag the city to look around, pinch to zoom and twist with two fingers to rotate. Taxis (from any building card or Maps) save time.",
-    "Keyboard and mouse" to "Choose Keyboard under Walking and driving in Settings. W A S D or the arrow keys walk; E goes in the door you're at or gets in your car, and F gets in the car when you're at a door too. In the car, W or ▲ accelerates, S or ▼ brakes and reverses, A and D or ◀ and ▶ steer, Space brakes, P parks at the curb and E gets out. Esc goes back and closes menus. Drag the city to look around, turn the mouse wheel to zoom and drag with the right button to rotate.",
+    "Keyboard and mouse" to "Choose Keyboard under Walking and driving in Settings. W A S D or the arrow keys walk; E goes in the door you're at or gets in your car, and F gets in the car when you're at a door too. In the car, W or ▲ accelerates, S or ▼ brakes and reverses, A and D or ◀ and ▶ steer, P parks at the curb and E gets out. Space is the handbrake: hold it in a turn at speed and the back end slides round. Driving fast, the camera looks further down the road. Esc goes back and closes menus. Drag the city to look around, turn the mouse wheel to zoom and drag with the right button to rotate.",
     "Your needs" to "Energy, hunger and happiness are shown top-left. Sleep at home, eat from your fridge (buy groceries at supermarkets) or at restaurants and cafés. Let energy hit zero and you'll wake up in hospital with a bill.",
     "Starting a business" to "1) Rent a retail building in the Realty app. 2) Go inside and pick a business type. 3) Buy the required furniture (BizHub lists requirements) at Essentials Appliances, Prime Kitchen Supply, Lux Interiors or OfficePlus: walk around the store, pick things off the displays and pay at the checkout. 4) Push your cart out to your car and load it with MANAGE STORAGE (or pay for delivery), drive to your store, carry the boxes in and place them with the Interior Designer. 5) Buy stock at Metro Wholesale or CityDistro, unload it. 6) Turn off Temporarily Closed and start working the register.",
     "Carrying boxes" to "Bare hands hold 1 box. Stores lend you a flatbed cart by the entrance that holds 8, but it has to stay in their parking lot. A hand truck (Essentials Appliances, OfficePlus) carries 4, folds into any vehicle and takes one cargo slot. Next to your vehicle, MANAGE STORAGE moves boxes between the trunk and what you carry. Parked by your store or home, CARRY INSIDE takes a trip per load, so a hand truck saves a lot of time.",

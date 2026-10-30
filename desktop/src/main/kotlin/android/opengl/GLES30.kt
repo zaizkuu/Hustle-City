@@ -31,7 +31,10 @@ object GLES30 {
     const val GL_COMPILE_STATUS = GL33C.GL_COMPILE_STATUS
     const val GL_LINK_STATUS = GL33C.GL_LINK_STATUS
     const val GL_TEXTURE_2D = GL33C.GL_TEXTURE_2D
+    const val GL_TEXTURE_2D_ARRAY = GL33C.GL_TEXTURE_2D_ARRAY
     const val GL_TEXTURE0 = GL33C.GL_TEXTURE0
+    const val GL_TEXTURE1 = GL33C.GL_TEXTURE1
+    const val GL_TEXTURE2 = GL33C.GL_TEXTURE2
     const val GL_TEXTURE_MIN_FILTER = GL33C.GL_TEXTURE_MIN_FILTER
     const val GL_TEXTURE_MAG_FILTER = GL33C.GL_TEXTURE_MAG_FILTER
     const val GL_TEXTURE_WRAP_S = GL33C.GL_TEXTURE_WRAP_S
@@ -40,10 +43,15 @@ object GLES30 {
     const val GL_TEXTURE_COMPARE_FUNC = GL33C.GL_TEXTURE_COMPARE_FUNC
     const val GL_COMPARE_REF_TO_TEXTURE = GL33C.GL_COMPARE_REF_TO_TEXTURE
     const val GL_LINEAR = GL33C.GL_LINEAR
+    const val GL_LINEAR_MIPMAP_LINEAR = GL33C.GL_LINEAR_MIPMAP_LINEAR
+    const val GL_REPEAT = GL33C.GL_REPEAT
+    const val GL_UNPACK_ALIGNMENT = GL33C.GL_UNPACK_ALIGNMENT
     const val GL_NEAREST = GL33C.GL_NEAREST
     const val GL_CLAMP_TO_EDGE = GL33C.GL_CLAMP_TO_EDGE
     const val GL_DEPTH_COMPONENT = GL33C.GL_DEPTH_COMPONENT
     const val GL_DEPTH_COMPONENT24 = GL33C.GL_DEPTH_COMPONENT24
+    const val GL_RED = GL33C.GL_RED
+    const val GL_R8 = GL33C.GL_R8
     const val GL_RGBA = GL33C.GL_RGBA
     const val GL_RGBA8 = GL33C.GL_RGBA8
     const val GL_FRAMEBUFFER = GL33C.GL_FRAMEBUFFER
@@ -123,6 +131,11 @@ object GLES30 {
     @JvmStatic fun glTexImage2D(target: Int, level: Int, internalformat: Int, width: Int, height: Int, border: Int, format: Int, type: Int, pixels: Buffer?) =
         GL33C.nglTexImage2D(target, level, internalformat, width, height, border, format, type,
             if (pixels == null) MemoryUtil.NULL else MemoryUtil.memAddress0(pixels) + byteOffset(pixels))
+    @JvmStatic fun glTexImage3D(target: Int, level: Int, internalformat: Int, width: Int, height: Int, depth: Int, border: Int, format: Int, type: Int, pixels: Buffer?) =
+        GL33C.nglTexImage3D(target, level, internalformat, width, height, depth, border, format, type,
+            if (pixels == null) MemoryUtil.NULL else MemoryUtil.memAddress0(pixels) + byteOffset(pixels))
+    @JvmStatic fun glGenerateMipmap(target: Int) = GL33C.glGenerateMipmap(target)
+    @JvmStatic fun glPixelStorei(pname: Int, param: Int) = GL33C.glPixelStorei(pname, param)
     @JvmStatic fun glGenFramebuffers(n: Int, framebuffers: IntArray, offset: Int) { for (i in 0 until n) framebuffers[offset + i] = GL33C.glGenFramebuffers() }
     @JvmStatic fun glDeleteFramebuffers(n: Int, framebuffers: IntArray, offset: Int) { for (i in 0 until n) GL33C.glDeleteFramebuffers(framebuffers[offset + i]) }
     @JvmStatic fun glBindFramebuffer(target: Int, framebuffer: Int) = GL33C.glBindFramebuffer(target, framebuffer)

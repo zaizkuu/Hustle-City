@@ -5,7 +5,7 @@ canvas{position:absolute;left:0;top:0}
 </style></head><body>
 <canvas id="gl"></canvas>
 <script>
-// Renders frame sequences written by CinemaWriter, mirroring GlWorldView.Renderer: the cached city geometry (uploaded
+// Renders frame sequences written by CinemaWriter, mirroring GpuRenderer: the cached city geometry (uploaded
 // once per cache version), then each frame's own geometry, with the sun's shadow map, sky, fog and materials.
 let gl, world, sky, shadowProg, skyBuf, shadowTex, fbo, shadowSizeNow = 0;
 const stat = { version: null, vbo: [], ibo: [], n: [0, 0, 0] };
@@ -44,8 +44,32 @@ window.init = async (shaders, w, h, o) => {
   shadowProg = program(await txt(shaders + '/shadow.vs'), await txt(shaders + '/shadow.fs'));
   skyBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, skyBuf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
   shadowTex = gl.createTexture(); fbo = gl.createFramebuffer();
+  photos = opts.photos === false ? null : await loadPhotos(shaders + '/textures');
   return 'ok';
 };
+// the photo materials (PhotoMaterials.kt): a detail and a bump texture array, a layer per material, rows bottom up
+let photos = null;
+async function loadPhotos(base) {
+  let names;
+  try { names = JSON.parse(await txt(base + '/materials.json')); } catch (e) { return null; }
+  const arrays = [];
+  for (const [kind, fmt, ifmt] of [['detail', gl.RED, gl.R8], ['bump', gl.RGBA, gl.RGBA8]]) {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
+    gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, ifmt, 512, 512, names.length, 0, fmt, gl.UNSIGNED_BYTE, null);
+    for (let i = 0; i < names.length; i++) {
+      const r = await fetch(`${base}/${names[i]}_${kind}.jpg`);
+      const img = await createImageBitmap(await r.blob(), { imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+      gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, i, 512, 512, 1, fmt, gl.UNSIGNED_BYTE, img);
+    }
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+    arrays.push(t);
+  }
+  return arrays;
+}
 function ensureShadow(size) {
   if (size === shadowSizeNow) return;
   shadowSizeNow = size;
@@ -129,6 +153,9 @@ window.renderFrame = async (base, staticBase) => {
   gl.uniform4f(U(world, 'uShadow'), ...f.shadow);
   v3(world, 'uSkyTop', f.skyTop); v3(world, 'uSkyHorizon', f.skyHorizon);
   gl.uniform1f(U(world, 'uTime'), f.time);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D_ARRAY, photos ? photos[0] : null); gl.uniform1i(U(world, 'uDetail'), 1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D_ARRAY, photos ? photos[1] : null); gl.uniform1i(U(world, 'uBump'), 2);
+  gl.uniform1f(U(world, 'uTex'), photos ? 1 : 0);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, shadowTex); gl.uniform1i(U(world, 'uShadowMap'), 0);
   gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   // ground layers in order without depth, then solid geometry, then see-through

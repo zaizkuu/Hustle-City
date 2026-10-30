@@ -1,0 +1,9 @@
+Car models for the HD renderer, baked by tools/assets/cars.py from the Cars Pack by Quaternius,
+released under CC0 1.0 (public domain): https://quaternius.com/packs/cars.html
+
+NormalCar1
+NormalCar2
+SportsCar
+SportsCar2
+SUV
+Taxi

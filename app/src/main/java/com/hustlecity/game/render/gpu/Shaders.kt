@@ -69,6 +69,10 @@ uniform vec3 uSkyHorizon;
 uniform vec4 uShadow;    // strength, normal offset, texel size, enabled
 uniform float uTime;
 uniform sampler2DShadow uShadowMap;
+// photo materials (CC0 scans from ambientCG, see PhotoMaterials): one layer per material
+uniform mediump sampler2DArray uDetail;  // brightness pattern the colour is multiplied by (0.5 = unchanged)
+uniform mediump sampler2DArray uBump;    // normal tilt (0.5 = flat) and roughness
+uniform float uTex;                      // 1 when they're loaded (medium and high quality)
 out vec4 oColor;
 
 vec3 toLinear(vec3 c) { return c * c; }
@@ -97,6 +101,24 @@ vec2 planar(vec3 p, vec3 n) {
 
 // pattern contrast fades out where the pattern gets smaller than a pixel (no shimmering far away)
 float fadeFor(vec2 uv) { vec2 w = fwidth(uv); return 1.0 - smoothstep(0.18, 0.55, max(w.x, w.y)); }
+
+// the surface coordinates' screen gradients (taken before any branching, so mipmaps pick the right level) and the
+// directions they run along on the surface
+vec2 gX; vec2 gY; vec3 T; vec3 B;
+float photoRough = 0.5;
+bool photoHit = false;
+
+// a photo material [size] metres across: returns its detail for the albedo and tilts n by its bumps
+float photo(float layer, vec2 st, float size, inout vec3 n) {
+    vec3 c = vec3(st / size, layer);
+    vec2 dx = gX / size; vec2 dy = gY / size;
+    vec3 b = textureGrad(uBump, c, dx, dy).rgb;
+    vec2 t = b.xy * 2.0 - 1.0;
+    n = normalize(n + T * t.x + B * t.y);
+    photoRough = b.z;
+    photoHit = true;
+    return textureGrad(uDetail, c, dx, dy).r * 2.0;
+}
 
 float shadowAt() {
     if (uShadow.w < 0.5) return 1.0;
@@ -133,7 +155,21 @@ void main() {
     float reflectAmt = 0.0;
     vec2 uv = planar(vPos, N);
     bool wall = abs(N.z) < 0.5;
-    if (mat == 1 && wall) {            // brick: staggered courses with mortar joints
+    gX = dFdx(uv); gY = dFdy(uv);
+    bool horiz = abs(N.z) > 0.7;
+    T = horiz ? vec3(1.0, 0.0, 0.0) : vec3(normalize(vec2(-N.y, N.x) + vec2(1e-5, 0.0)), 0.0);
+    B = horiz ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+    bool tex = uTex > 0.5;
+    if (mat == 1 && wall && tex) {     // brick, stone, metal and plaster walls in photo materials
+        albedo *= photo(0.0, uv, 2.2, N);
+    } else if (mat == 2 && wall && tex) {
+        albedo *= photo(1.0, uv, 3.6, N);
+    } else if (mat == 9 && wall && tex) {
+        albedo *= photo(7.0, uv, 1.6, N);
+        spec = 0.35; gloss = 60.0;
+    } else if (mat == 12 && wall && tex) {
+        albedo *= photo(9.0, uv, 2.5, N);
+    } else if (mat == 1 && wall) {     // brick: staggered courses with mortar joints
         vec2 b = uv * vec2(1.0 / 0.46, 1.0 / 0.16);
         float row = floor(b.y);
         b.x += mod(row, 2.0) * 0.5;
@@ -153,19 +189,26 @@ void main() {
         spec = 0.9; gloss = 140.0;
         if (wall) albedo *= 0.85 + 0.25 * noise(vec2(floor(uv.x / 1.5), floor(uv.y / 3.3)) * 3.1);
     } else if (mat == 4) {             // asphalt: grain and worn patches
-        albedo *= 0.86 + 0.22 * fbm(vPos.xy * 0.18) + 0.1 * (noise(vPos.xy * 9.0) - 0.5) * fadeFor(vPos.xy * 9.0);
+        if (tex) albedo *= photo(2.0, uv, 4.0, N) * (0.88 + 0.22 * fbm(vPos.xy * 0.18));
+        else albedo *= 0.86 + 0.22 * fbm(vPos.xy * 0.18) + 0.1 * (noise(vPos.xy * 9.0) - 0.5) * fadeFor(vPos.xy * 9.0);
         spec = 0.04 + 0.3 * uMisc.y; gloss = 40.0 + 80.0 * uMisc.y;
     } else if (mat == 5) {             // sidewalk slabs
         vec2 b = vPos.xy / 1.5;
         vec2 f = fract(b);
         float line = 1.0 - step(0.03, f.x) * step(0.03, f.y);
-        albedo *= mix(1.0, mix(0.95 + 0.08 * hash(floor(b)), 0.78, line), fadeFor(b)) * (0.96 + 0.08 * fbm(vPos.xy * 0.5));
-    } else if (mat == 6) {             // grass
+        albedo *= mix(1.0, mix(0.95 + 0.08 * hash(floor(b)), 0.78, line), fadeFor(b))
+            * (tex ? photo(3.0, uv, 3.0, N) : 0.96 + 0.08 * fbm(vPos.xy * 0.5));
+    } else if (mat == 6 && tex) {      // grass
+        albedo *= photo(4.0, uv, 2.0, N) * (0.84 + 0.32 * fbm(vPos.xy * 0.35));
+    } else if (mat == 6) {
         float g = fbm(vPos.xy * 0.6);
         albedo *= 0.78 + 0.42 * g;
         albedo.r *= 0.92 + 0.2 * noise(vPos.xy * 0.13);
         albedo *= 0.94 + 0.12 * (noise(vPos.xy * 6.0) - 0.5) * fadeFor(vPos.xy * 6.0) + 0.06;
-    } else if (mat == 7) {             // wood planks
+    } else if (mat == 7 && tex) {      // wood planks
+        albedo *= photo(5.0, uv, 2.0, N);
+        spec = 0.12; gloss = 50.0;
+    } else if (mat == 7) {
         vec2 b = vec2(uv.x * 6.0, uv.y * 0.8);
         float plank = floor(b.x);
         b.y += hash(vec2(plank, 3.0)) * 7.0;
@@ -174,14 +217,16 @@ void main() {
         albedo *= mix(1.0, (0.86 + 0.2 * hash(vec2(plank, floor(b.y)))) * (0.9 + 0.2 * grain) * (1.0 - 0.35 * seam), fadeFor(b));
         spec = 0.12; gloss = 50.0;
     } else if (mat == 8) {             // floor tiles: polished with speckles
-        albedo *= 0.95 + 0.1 * noise(vPos.xy * 14.0) * fadeFor(vPos.xy * 14.0);
+        if (tex) albedo *= photo(6.0, uv, 4.0, N);
+        else albedo *= 0.95 + 0.1 * noise(vPos.xy * 14.0) * fadeFor(vPos.xy * 14.0);
         spec = 0.25; gloss = 70.0;
     } else if (mat == 9 && wall) {     // corrugated metal
         float r = sin(uv.x * 6.2832 / 0.35);
         albedo *= mix(1.0, 0.86 + 0.14 * r, fadeFor(uv / 0.35));
         spec = 0.35; gloss = 60.0;
     } else if (mat == 10) {            // roof gravel and membrane
-        albedo *= 0.88 + 0.2 * fbm(vPos.xy * 0.9) + 0.08 * (hash(floor(vPos.xy * 6.0)) - 0.5) * fadeFor(vPos.xy * 6.0);
+        if (tex) albedo *= photo(8.0, uv, 2.0, N) * (0.92 + 0.16 * fbm(vPos.xy * 0.9));
+        else albedo *= 0.88 + 0.2 * fbm(vPos.xy * 0.9) + 0.08 * (hash(floor(vPos.xy * 6.0)) - 0.5) * fadeFor(vPos.xy * 6.0);
     } else if (mat == 11) {            // water: moving ripples that reflect the sky
         vec2 q = vPos.xy * 0.08 + vec2(uTime * 0.03, uTime * 0.02);
         float e = 0.5;
@@ -202,10 +247,13 @@ void main() {
         vec2 b = uv / vec2(3.0, 3.3);
         vec2 f = fract(b);
         float joint = 1.0 - step(0.012, f.x) * step(0.015, f.y);
-        albedo *= mix(1.0, mix(0.96 + 0.06 * hash(floor(b)), 0.8, joint), fadeFor(b)) * (0.94 + 0.12 * fbm(uv * 1.3));
+        albedo *= mix(1.0, mix(0.96 + 0.06 * hash(floor(b)), 0.8, joint), fadeFor(b))
+            * (tex ? photo(10.0, uv, 3.0, N) : 0.94 + 0.12 * fbm(uv * 1.3));
     } else {
         albedo *= 0.97 + 0.06 * fbm(uv * 0.9);
     }
+    // a scan's rough parts shine less, its smooth parts more
+    if (photoHit) spec *= mix(1.5, 0.55, photoRough);
 
     vec3 col;
     if (emissive) {

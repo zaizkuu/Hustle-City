@@ -2,7 +2,7 @@
 
 A business life-simulation game for Android and Windows, inspired by *Big Ambitions*. Start with a small apartment, a beat-up car and $5,000. Rent a storefront, furnish it, stock it, hire staff, and grow a business empire in a living 3D city.
 
-Native Kotlin + Jetpack Compose with a custom 3D engine. In HD mode the world is drawn by an OpenGL ES 3 renderer with per-pixel lighting, real-time sun shadows, procedural materials (brick, stone, glass that reflects the sky, asphalt, sidewalk slabs, grass, water, wood) and 4x anti-aliasing; a lightweight Canvas renderer is the fallback for older devices.
+Native Kotlin + Jetpack Compose with a custom 3D engine. In HD mode the world is drawn by an OpenGL ES 3 renderer with per-pixel lighting, real-time sun shadows, photo materials scanned from real surfaces (brick, stone, asphalt, concrete, sidewalk slabs, grass, wood, tiles, corrugated metal, gravel, plaster) with bump maps, glass and water that reflect the sky, modelled cars, and 4x anti-aliasing; a lightweight Canvas renderer with procedural materials is the fallback for older devices.
 
 The Windows version is built from the same code with Compose Multiplatform: same game, same saves format, with keyboard and mouse controls and an interface that scales to the monitor.
 
@@ -20,7 +20,8 @@ Saves and settings are kept in `%APPDATA%\HustleCity`.
 | --- | --- |
 | Walk | W A S D or the arrow keys |
 | Go in a door / get in or out of the car | E (F gets in the car when you're at a door too) |
-| Drive | W / ▲ gas, S / ▼ brake (hold to reverse), A D / ◀ ▶ steer, Space brake |
+| Drive | W / ▲ gas, S / ▼ brake (hold to reverse), A D / ◀ ▶ steer |
+| Handbrake | Space: hold it in a turn at speed and the back end slides round |
 | Park | P |
 | Back / close a menu | Esc |
 | Look around | Drag with the left mouse button |
@@ -35,7 +36,7 @@ Saves and settings are kept in `%APPDATA%\HustleCity`.
 **The city**
 - Procedural Manhattan-style grid: 6 neighborhoods (Garment District, Hell's Kitchen, Midtown, Murray Hill, Lower Manhattan, Industry City), about 600 buildings with addresses, parks, parking lots and gas stations.
 - Buildings with personality: brick walk-ups with fire escapes and water towers, brownstones with stoops and bay windows, art deco towers with setbacks and spires, glass skyscrapers, stone offices, modern blocks with balconies and industrial sheds with sawtooth roofs. Storefronts dress up for their business (striped awnings, neon, cinema marquees, window displays, sidewalk tables) and close their shutters at night.
-- Street life in detail: lamp posts that light the street, hydrants, benches, bus shelters, newspaper boxes, bike racks and planters; parks with fountains; trees that blossom in spring, turn red and gold in autumn and stand bare in winter. Cars have wheels, lights and brake lights, and taxis cruise the avenues.
+- Street life in detail: lamp posts that light the street, hydrants, benches, bus shelters, newspaper boxes, bike racks and planters; parks with fountains; trees that blossom in spring, turn red and gold in autumn and stand bare in winter. Cars have wheels, lights and brake lights, and taxis cruise the avenues; in HD the sedans, taxis, SUVs and sports cars near the camera are detailed low-poly models in each car's own paint.
 - A day/night cycle with sun-tracking shadows, lit windows and glowing street lamps.
 - Traffic with traffic lights: cars plan their turns and take smooth arcs, keep their distance and give way to pedestrians. Pedestrians cross on the walk signal, step aside for each other and walk into open shops. Buildings turn see-through when they block your view.
 - Walk with the on-screen joystick, or drive your own car with fuel, condition and cargo space. Taxis are available from any building card.
@@ -137,5 +138,30 @@ desktop/src/main/kotlin/
 ```
 
 The desktop module compiles `app/src/main/java` itself, so a change to the game lands in both versions. Only `MainActivity.kt`, `render/gpu/GlWorldView.kt` and `ui/GpuHost.kt` are Android-only; the desktop has its own versions of them.
+
+## Free assets
+
+Everything else in the game is generated in code. These came from free libraries, with their licences:
+
+| What | From | Licence | Baked by |
+| --- | --- | --- | --- |
+| HD photo materials (11 surfaces) | [ambientCG](https://ambientcg.com) | CC0 (public domain) | `tools/assets/textures.py` into `app/src/main/resources/textures/` |
+| Car models (sedans, taxi, SUV, sports cars) | [Quaternius Cars Pack](https://quaternius.com/packs/cars.html) | CC0 (public domain) | `tools/assets/cars.py` into `app/src/main/resources/models/cars.bin` |
+| Trailer logo type: Anton | [Google Fonts](https://fonts.google.com/specimen/Anton) | SIL Open Font License | `tools/cinema/fonts/` (trailer tools only) |
+
+The scripts download their sources (with each site's own download links) and can be re-run to rebake. Each resource folder has a `CREDITS.txt` listing the exact assets.
+
+## Trailers
+
+`tools/cinema/` cuts the trailers from shots flown through the real game (`CinematicTest`). The New York story trailer is `newyork.py` with its song `newyork_score.py`:
+
+```bash
+HC_CINEMA=1 HC_SHOTS=n ./gradlew :app:testDebugUnitTest --tests '*cinema.CinematicTest*'   # record the shots
+xvfb-run -a ./gradlew :desktop:test --tests '*CinemaRender*' -PcinemaIn=app/build/cinema -PcinemaOut=frames -PcinemaShots=n
+python3 tools/cinema/newyork_score.py score.wav
+python3 tools/cinema/newyork.py frames app/build/cinema score.wav trailer.mp4
+```
+
+`CinemaRender` draws the recordings with the game's own HD renderer through the desktop build's OpenGL; `tools/cinema/render.mjs` does the same in a headless browser.
 
 *Hustle City is an independent fan project. It is not affiliated with Hovgaard Games or Big Ambitions. All names of in-game companies are fictional.*

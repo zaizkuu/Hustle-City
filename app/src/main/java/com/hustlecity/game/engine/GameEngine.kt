@@ -44,6 +44,8 @@ class Input {
     /** Steering wheel -1 (full left) .. 1 (full right) and the gas pedal, for wheel-and-pedal driving. */
     var steer = 0f
     var gas = false
+    /** The handbrake (Space): at speed the car turns tighter and its rear slides out. */
+    var handbrake = false
 }
 
 class CameraRig {
@@ -91,11 +93,16 @@ class GameEngine(context: Context?) {
     private var objectivesWereOpen = true
     private var keySteer = 0f
     private val heldKeys = HashSet<Int>()
+    /** Which way the car is actually moving, which trails its heading in a handbrake slide. */
+    private var travel = Float.NaN
+    /** How far ahead of the car the camera looks (smoothed). */
+    private var lookX = 0f
+    private var lookY = 0f
 
     /**
      * Hardware keyboard: arrow keys (and W A S D when no menu is open) walk, or steer, accelerate and brake while
-     * driving. With no menu open, Space also brakes, E goes in the door you're at or gets in or out of the car, F gets
-     * in the car (when you're at a door too), and P parks. Returns true when the key was used.
+     * driving. With no menu open, Space is the handbrake, E goes in the door you're at or gets in or out of the car, F
+     * gets in the car (when you're at a door too), and P parks. Returns true when the key was used.
      */
     fun onKey(keyCode: Int, down: Boolean): Boolean {
         if (!hasGame || ui.screen != Screen.GAME || state.player.inBuilding >= 0) return false
@@ -130,10 +137,11 @@ class GameEngine(context: Context?) {
         if (down) heldKeys += k else heldKeys -= k
         val x = (if (1 in heldKeys) 1f else 0f) - (if (0 in heldKeys) 1f else 0f)
         val y = (if (3 in heldKeys) 1f else 0f) - (if (2 in heldKeys) 1f else 0f)
-        if (state.player.driving >= 0 && (settings.keyboard || settings.carControls != 1)) {
+        if (state.player.driving >= 0 && keyDriving) {
             input.steer = x
             input.gas = 2 in heldKeys
-            input.brake = 3 in heldKeys || 4 in heldKeys
+            input.brake = 3 in heldKeys
+            input.handbrake = 4 in heldKeys
         } else {
             input.jx = x; input.jy = y
             if (state.player.driving >= 0) input.brake = false
@@ -824,14 +832,14 @@ class GameEngine(context: Context?) {
         var throttle = 0f
         var steer = 0f
         var wheel = Float.NaN
-        if (settings.carControls != 1) {
+        if (keyDriving) {
             // wheel and pedals, or arrow keys: gas accelerates, brake slows down and, once stopped, reverses
             if (v.fuel <= 0.0) {
                 if (crashCooldown <= 0f && input.gas) { toast("Out of fuel! Call roadside assistance from the dashboard.", ToastKind.BAD); crashCooldown = 4f }
             } else if (input.gas) throttle = 1f
             val target = input.steer.coerceIn(-1f, 1f)
-            // arrow keys are all-or-nothing, so ease the wheel toward full lock (and back) like a driver would
-            keySteer = if (settings.carControls == 2) keySteer + (target - keySteer).coerceIn(-5f * dt, 5f * dt) else target
+            // keys are all-or-nothing, so ease the wheel toward full lock (and back) like a driver would
+            keySteer = if (settings.keyboard || settings.carControls == 2) keySteer + (target - keySteer).coerceIn(-5f * dt, 5f * dt) else target
             wheel = keySteer
         } else if (v.fuel <= 0.0) {
             if (crashCooldown <= 0f && mag > .2f) { toast("Out of fuel! Call roadside assistance from the vehicle panel.", ToastKind.BAD); crashCooldown = 4f }
@@ -858,6 +866,12 @@ class GameEngine(context: Context?) {
                 if (wheel.isNaN()) steer = 0f
             }
         } else stoppedFor = 0f
+        // the handbrake locks the rear wheels: speed bleeds off and, turning at speed, the back end steps out
+        val sliding = input.handbrake && abs(carSpeed) > 5f
+        if (input.handbrake) {
+            throttle = 0f
+            carSpeed = if (carSpeed > 0) max(0f, carSpeed - 7f * dt) else min(0f, carSpeed + 7f * dt)
+        }
         val maxSpeed = def.maxSpeed * (.75f + .25f * v.condition.toFloat())
         if (throttle != 0f) {
             carSpeed += throttle * def.accel * dt
@@ -869,14 +883,18 @@ class GameEngine(context: Context?) {
         if (!wheel.isNaN()) {
             // the wheel turns the car like a real one: harder at low speed, and the other way in reverse
             val grip = min(1f, abs(carSpeed) / 3f) * (1f - .35f * min(1f, abs(carSpeed) / maxSpeed))
-            v.heading = wrap(v.heading + wheel * 1.9f * grip * dt * (if (carSpeed >= 0) 1f else -1f))
+            v.heading = wrap(v.heading + wheel * (if (sliding) 3.1f else 1.9f) * grip * dt * (if (carSpeed >= 0) 1f else -1f))
         } else {
             val turnRate = 2.3f * min(1f, abs(carSpeed) / 5f) * dt
             v.heading = wrap(v.heading + steer.coerceIn(-turnRate, turnRate) * (if (carSpeed >= 0) 1f else -1f).let { if (throttle < 0) 1f else it })
         }
+        // the car travels where its tyres point, except in a slide, where the way it's going lags behind the nose
+        if (travel.isNaN()) travel = v.heading
+        val lag = wrap(v.heading - travel)
+        travel = wrap(travel + lag * (1f - exp(-dt * (if (sliding) 2.2f else 14f))))
         val ox = v.x; val oy = v.y
-        val nx = v.x + sin(v.heading) * carSpeed * dt
-        val ny = v.y - cos(v.heading) * carSpeed * dt
+        val nx = v.x + sin(travel) * carSpeed * dt
+        val ny = v.y - cos(travel) * carSpeed * dt
         // two collision circles along the body
         val off = def.length * .28f
         val r = def.width * .55f
@@ -903,7 +921,14 @@ class GameEngine(context: Context?) {
 
     private fun updateCamera(dt: Float) {
         val k = 1f - exp(-dt * 6f)
-        val (fx, fy) = focusPoint()
+        var (fx, fy) = focusPoint()
+        // driving, the camera looks ahead down the road, further the faster you go
+        val car = state.vehicle(state.player.driving)
+        val leadX = if (car != null) (sin(car.heading) * carSpeed * .75f).coerceIn(-22f, 22f) else 0f
+        val leadY = if (car != null) (-cos(car.heading) * carSpeed * .75f).coerceIn(-22f, 22f) else 0f
+        val kl = 1f - exp(-dt * 1.3f)
+        lookX += (leadX - lookX) * kl; lookY += (leadY - lookY) * kl
+        fx += lookX; fy += lookY
         val moving = hypot(input.jx, input.jy) > .1f || abs(carSpeed) > 1f
         if (moving) {
             val decay = exp(-dt * 2.5f)
@@ -918,10 +943,14 @@ class GameEngine(context: Context?) {
     // ------------------------------------------------------------------ vehicles
 
     fun resetInput() {
-        input.jx = 0f; input.jy = 0f; input.brake = false; input.steer = 0f; input.gas = false
+        input.jx = 0f; input.jy = 0f; input.brake = false; input.steer = 0f; input.gas = false; input.handbrake = false
         keySteer = 0f
+        travel = Float.NaN
         heldKeys.clear()
     }
+
+    /** Keys (or the wheel and pedals, or on-screen arrows) drive the car, rather than the joystick. */
+    private val keyDriving: Boolean get() = settings.keyboard || settings.carControls != 1
 
     /** Gets out where the car stands (it has to be stopped). */
     fun getOutOfCar(): Boolean {
@@ -980,7 +1009,7 @@ class GameEngine(context: Context?) {
         if (!loadForDriving(v)) return
         resetInput()
         Audio.play(Sfx.CAR_DOOR)
-        tip("drive", "Driving", if (settings.keyboard) "W or ▲ accelerates, S or ▼ brakes (keep holding to reverse), A and D or ◀ and ▶ steer, and Space brakes. P pulls over to the curb and parks, E gets out. Set a destination on the map and follow the blue GPS line. Watch your fuel: Fuel Up stations are on the map."
+        tip("drive", "Driving", if (settings.keyboard) "W or ▲ accelerates, S or ▼ brakes (keep holding to reverse), A and D or ◀ and ▶ steer. Space is the handbrake: hold it in a turn at speed to slide round the corner. P pulls over to the curb and parks, E gets out. Set a destination on the map and follow the blue GPS line. Watch your fuel: Fuel Up stations are on the map."
             else if (settings.carControls == 2) "Hold ◀ and ▶ to steer, ▲ to accelerate and ▼ to brake (keep holding ▼ to reverse). Keyboard arrow keys work too. PARK pulls over to the curb and gets you out. Set a destination on the map and follow the blue GPS line."
             else if (settings.carControls == 0) "Turn the steering wheel on the left; hold GAS to accelerate and BRAKE to slow down (keep holding to reverse). PARK pulls over to the curb and gets you out. Set a destination on the map and follow the blue GPS line. Watch your fuel: Fuel Up stations are on the map."
             else "The joystick steers: push it the way you want to go and the car turns and accelerates. Hold the red pedal to brake, and keep holding to reverse. Watch your fuel; Fuel Up stations are on the map.")

@@ -48,6 +48,9 @@ class DesktopGpuView(private val e: GameEngine, private val quality: Int, privat
 
     override val glFps: Float get() = gpu?.fps ?: 0f
 
+    /** The renderer is running with the photo materials. */
+    val photoMaterials: Boolean get() = gpu?.photoMaterials == true
+
     @Volatile override var renderScale = 1f
         private set
 
@@ -60,6 +63,7 @@ class DesktopGpuView(private val e: GameEngine, private val quality: Int, privat
             try {
                 samples = minOf(when (quality) { 2 -> 4; 1 -> 2; else -> 0 }, DesktopGl.maxSamples)
                 gpu = GpuRenderer(quality).also { it.init() }
+                System.err.println("HD renderer started: quality $quality, ${samples}x MSAA, photo materials ${if (photoMaterials) "on" else "off"}")
             } catch (t: Throwable) {
                 System.err.println("HD renderer failed to start: $t")
                 fail()

@@ -18,6 +18,8 @@ val androidOnly = listOf(
 sourceSets.main {
     kotlin.srcDir("../app/src/main/java")
     kotlin.exclude(androidOnly)
+    // the photo materials and anything else the game loads as a resource
+    resources.srcDir("../app/src/main/resources")
 }
 
 java {
@@ -97,5 +99,8 @@ tasks.test {
     systemProperty("snapshots.dir", layout.buildDirectory.dir("snapshots").get().asFile.absolutePath)
     // -PgpuTest also runs the HD renderer through OpenGL (needs a display and an OpenGL 3.3 driver)
     if (project.hasProperty("gpuTest")) systemProperty("hustle.gpuTest", "true")
+    // -PcinemaIn=... renders recorded trailer shots with the desktop GL (see CinemaRender)
+    for ((k, prop) in listOf("cinemaIn" to "cinema.in", "cinemaOut" to "cinema.out", "cinemaShots" to "cinema.shots", "cinemaFrames" to "cinema.frames", "cinemaPlan" to "cinema.plan"))
+        project.findProperty(k)?.let { systemProperty(prop, rootProject.file(it.toString()).takeIf { _ -> k == "cinemaIn" || k == "cinemaOut" || k == "cinemaPlan" }?.absolutePath ?: it.toString()) }
     testLogging { showStandardStreams = true }
 }

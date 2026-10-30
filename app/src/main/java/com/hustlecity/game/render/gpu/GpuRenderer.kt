@@ -46,6 +46,11 @@ class GpuRenderer(
         private set
     private val u = HashMap<String, Int>()
     private val us = HashMap<String, Int>()
+    /** The photo materials' detail and bump texture arrays, when loaded (medium and high quality). */
+    private val photoTex = IntArray(2)
+    private var photos = false
+    /** True once the photo materials are on the GPU. */
+    val photoMaterials: Boolean get() = photos
 
     private fun direct(ints: Int): IntBuffer = ByteBuffer.allocateDirect(ints * 4).order(ByteOrder.nativeOrder()).asIntBuffer()
 
@@ -59,7 +64,7 @@ class GpuRenderer(
         GLES30.glGenFramebuffers(1, shadowFbo, 0)
         shadowAlloc = 0
         for (name in listOf("uCam", "uRight", "uUp", "uFwd", "uProj", "uViewport", "uNearFar", "uSunDir", "uSunColor", "uSkyAmb", "uGroundAmb",
-                "uFogColor", "uFog", "uMisc", "uLight", "uShadow", "uSkyTop", "uSkyHorizon", "uTime", "uShadowMap"))
+                "uFogColor", "uFog", "uMisc", "uLight", "uShadow", "uSkyTop", "uSkyHorizon", "uTime", "uShadowMap", "uDetail", "uBump", "uTex"))
             u[name] = GLES30.glGetUniformLocation(world, name)
         for (name in listOf("uRight", "uUp", "uFwd", "uProj", "uViewport", "uSkyTop", "uSkyHorizon", "uFogColor", "uSunDir", "uSunColor", "uMisc"))
             us[name] = GLES30.glGetUniformLocation(sky, name)
@@ -74,6 +79,28 @@ class GpuRenderer(
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vbo[3])
         GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, 24, tri, GLES30.GL_STATIC_DRAW)
         lastUploaded = -1L
+        photos = quality >= 1 && uploadPhotos()
+    }
+
+    /** Loads the photo materials into two texture arrays; false (the shader keeps its procedural patterns) if not. */
+    private fun uploadPhotos(): Boolean {
+        val maps = PhotoMaterials.load() ?: return false
+        val size = PhotoMaterials.SIZE
+        val layers = PhotoMaterials.NAMES.size
+        GLES30.glGenTextures(2, photoTex, 0)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
+        for (i in 0 until 2) {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D_ARRAY, photoTex[i])
+            if (i == 0) GLES30.glTexImage3D(GLES30.GL_TEXTURE_2D_ARRAY, 0, GLES30.GL_R8, size, size, layers, 0, GLES30.GL_RED, GLES30.GL_UNSIGNED_BYTE, maps.detail)
+            else GLES30.glTexImage3D(GLES30.GL_TEXTURE_2D_ARRAY, 0, GLES30.GL_RGBA8, size, size, layers, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, maps.bump)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D_ARRAY, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR_MIPMAP_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D_ARRAY, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D_ARRAY, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_REPEAT)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D_ARRAY, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_REPEAT)
+            GLES30.glGenerateMipmap(GLES30.GL_TEXTURE_2D_ARRAY)
+        }
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 4)
+        return true
     }
 
     private fun shader(type: Int, src: String): Int {
@@ -292,6 +319,14 @@ class GpuRenderer(
         GLES30.glUniform4f(u["uShadow"]!!, f.shadowStrength, f.shadowOffset, f.shadowTexel, if (f.shadowOn) 1f else 0f)
         v3(u, "uSkyTop", f.skyTop); v3(u, "uSkyHorizon", f.skyHorizon)
         GLES30.glUniform1f(u["uTime"]!!, f.time)
+        // the photo materials on units 1 and 2 (bound even when unused: samplers of different kinds can't share a unit)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D_ARRAY, photoTex[0])
+        GLES30.glUniform1i(u["uDetail"]!!, 1)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D_ARRAY, photoTex[1])
+        GLES30.glUniform1i(u["uBump"]!!, 2)
+        GLES30.glUniform1f(u["uTex"]!!, if (photos) 1f else 0f)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shadowTex[0])
         GLES30.glUniform1i(u["uShadowMap"]!!, 0)
@@ -323,5 +358,6 @@ class GpuRenderer(
         GLES30.glDeleteFramebuffers(1, shadowFbo, 0)
         GLES30.glDeleteBuffers(4, vbo, 0); GLES30.glDeleteBuffers(3, ibo, 0)
         GLES30.glDeleteBuffers(3, svbo, 0); GLES30.glDeleteBuffers(3, sibo, 0)
+        if (photos) GLES30.glDeleteTextures(2, photoTex, 0)
     }
 }

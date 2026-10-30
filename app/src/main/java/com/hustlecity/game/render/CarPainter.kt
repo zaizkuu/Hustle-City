@@ -9,7 +9,8 @@ import kotlin.math.sqrt
 /**
  * Low-poly vehicles built from extruded side profiles: sedans with a hood and trunk, pickups with a bed, vans,
  * sports cars, taxis with a roof sign, and the city's own rides: Manila's jeepneys and tricycles, boxy kei cars and
- * city buses. Wheels, lights, bumpers and a contact shadow up close; plain boxes far away.
+ * city buses. Wheels, lights, bumpers and a contact shadow up close; plain boxes far away. In HD, near sedans, taxis,
+ * sports cars and SUVs are the modelled cars of [CarModels] instead.
  */
 class CarPainter(private val scene: Scene3D) {
     private val proj get() = scene.proj
@@ -40,6 +41,8 @@ class CarPainter(private val scene: Scene3D) {
         /** Lit bus windows at night and the amber destination display. */
         val LIT_WINDOW = c(0xFFFFE3A0)
         val LED = c(0xFFFFD34D)
+        /** The modelled cars' wheels and trim. */
+        private val MODEL_TRIM = c(0xFF6E747B)
         private val SKIN = intArrayOf(c(0xFFC68B59), c(0xFF8D5524), c(0xFFE0AC69))
         private val SHIRTS = intArrayOf(c(0xFFEB5757), c(0xFF2F80ED), c(0xFFF2F2F2), c(0xFF27AE60), c(0xFF333333), c(0xFFF2C94C))
     }
@@ -72,7 +75,10 @@ class CarPainter(private val scene: Scene3D) {
         val nearSide = if (camL >= 0f) 1 else -1
         // the smallest trim (ornaments, mirrors, lettering) only close to the camera
         val fine = proj.camZOf(x, y, 1f) < 42f
-        when (style) {
+        // in HD, the near cars (how near depends on the quality setting) are the CC0 models
+        val model = if (scene.gpu != null) modelFor(style, taxi, color) else null
+        if (model != null) modelled(model, len, wid, hgt, body, night, braking)
+        else when (style) {
             4 -> jeepney(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
             5 -> tricycle(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
             6 -> kei(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
@@ -93,6 +99,53 @@ class CarPainter(private val scene: Scene3D) {
             scene.glowOval(bx, by, .04f, 1.5f, 1.15f, fx, fy, c(0xFFFF3B30), .15f)
             scene.glow = false
         }
+    }
+
+    /** The CC0 model a vehicle of [style] is drawn with up close in HD, or null to build it from profiles. */
+    private fun modelFor(style: Int, taxi: Boolean, color: Int): CarModels.Model? {
+        // two models per kind, picked by the paint so a street of sedans isn't all the same car
+        val alt = (color xor (color ushr 9)) and 1 == 1
+        return when {
+            style == 0 && taxi -> CarModels.get("Taxi")
+            style == 0 -> CarModels.get(if (alt) "NormalCar2" else "NormalCar1")
+            style == 3 -> CarModels.get(if (alt) "SportsCar2" else "SportsCar")
+            style == 9 -> CarModels.get("SUV")
+            else -> null
+        }
+    }
+
+    private var mx = FloatArray(16); private var my = FloatArray(16); private var mz = FloatArray(16)
+
+    /** Draws [m] stretched to [len] x [wid] x [hgt] in the current frame: the paint in [body], the lights lit at night. */
+    private fun modelled(m: CarModels.Model, len: Float, wid: Float, hgt: Float, body: Int, night: Boolean, braking: Boolean) {
+        if (mx.size < m.maxCorners) { mx = FloatArray(m.maxCorners); my = FloatArray(m.maxCorners); mz = FloatArray(m.maxCorners) }
+        val paint2 = scene.mix(body, 0xFF000000.toInt(), .3f)
+        val head = if (night) HEAD else c(0xFFE8ECEF)
+        val tail = if (braking) c(0xFFFF2E2E) else if (night) c(0xFFE53935) else TAIL
+        var k = 0
+        for (p in 0 until m.polygons) {
+            val n = m.sizes[p].toInt() and 255
+            for (i in 0 until n) {
+                val v = m.corners[k + i]
+                val f = m.f[v] * len; val r = m.r[v] * wid; val z = m.u[v] * hgt
+                mx[i] = ox + fx * f + rx * r; my[i] = oy + fy * f + ry * r
+                // the body leans on its springs; the wheels stay on the road
+                mz[i] = if (z < .25f) z else z + f * tiltF + r * tiltL
+            }
+            k += n
+            val role = m.roles[p].toInt()
+            scene.material = if (role == CarModels.PAINT || role == CarModels.PAINT2) Mat.PAINT else Mat.PLAIN
+            scene.poly(n, mx, my, mz, when (role) {
+                CarModels.PAINT -> body
+                CarModels.PAINT2 -> paint2
+                CarModels.GLASS -> GLASS
+                CarModels.HEAD -> head
+                CarModels.TAIL -> tail
+                CarModels.DARK -> TIRE
+                else -> MODEL_TRIM
+            })
+        }
+        scene.material = Mat.PAINT
     }
 
     private fun frame(x: Float, y: Float, heading: Float) {

@@ -48,6 +48,17 @@ class DesktopGpuTest {
             File(outDir, "desktop_street_hd.png").writeBytes(png)
             assertTrue(png.size > 40_000)
             println("HD renderer: ${DesktopGl.renderer}, ${e.gpuFps} fps at ${e.renderScale}")
+            // close up, low sun: the photo materials' detail and bumps
+            e.camera.zoom = 26f
+            e.camera.yaw = .6f
+            repeat(24) {
+                e.frame(1 / 30f)
+                scene.render(t)
+                t += 33_000_000L
+                Thread.sleep(60)
+                javax.swing.SwingUtilities.invokeAndWait { }
+            }
+            File(outDir, "desktop_street_hd_close.png").writeBytes(scene.render(t).encodeToData(EncodedImageFormat.PNG)!!.bytes)
         }
     }
 }

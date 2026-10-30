@@ -154,7 +154,7 @@ fun KeyHints(e: GameEngine, modifier: Modifier = Modifier) {
             KeyRow(listOf("W", "▲"), "Gas")
             KeyRow(listOf("S", "▼"), "Brake, hold to reverse")
             KeyRow(listOf("A", "D"), "Steer")
-            KeyRow(listOf("Space"), "Brake")
+            KeyRow(listOf("Space"), "Handbrake")
             KeyRow(listOf("P"), "Park")
             KeyRow(listOf("E"), "Get out")
         } else {

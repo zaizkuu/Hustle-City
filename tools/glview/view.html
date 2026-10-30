@@ -93,6 +93,8 @@ function program(gl, vs, fs) {
     gl.uniform4f(U(world, 'uShadow'), ...f.shadow);
     v3(world, 'uSkyTop', f.skyTop); v3(world, 'uSkyHorizon', f.skyHorizon);
     gl.uniform1f(U(world, 'uTime'), f.time);
+    // the photo materials' samplers need units of their own even unused (this viewer keeps the procedural look)
+    gl.uniform1i(U(world, 'uDetail'), 1); gl.uniform1i(U(world, 'uBump'), 2); gl.uniform1f(U(world, 'uTex'), 0);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, shadowTex); gl.uniform1i(U(world, 'uShadowMap'), 0);
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     function draw(i) {

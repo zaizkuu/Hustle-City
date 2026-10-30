@@ -55,8 +55,11 @@ class KeyboardControlsTest {
         Keys.handle(e, Key.W, true)
         assertTrue(e.input.gas)
         Keys.handle(e, Key.W, false)
-        Keys.handle(e, Key.Spacebar, true)
+        Keys.handle(e, Key.S, true)
         assertTrue(e.input.brake)
+        Keys.handle(e, Key.S, false)
+        Keys.handle(e, Key.Spacebar, true)
+        assertTrue(e.input.handbrake)
         Keys.handle(e, Key.Spacebar, false)
         Keys.handle(e, Key.A, true)
         assertEquals(-1f, e.input.steer)
@@ -64,6 +67,41 @@ class KeyboardControlsTest {
         // standing still, E gets out
         assertTrue(press(e, Key.E))
         assertTrue(e.state.player.driving < 0)
+    }
+
+    @Test
+    fun keysDriveWhateverTheTouchSetting() {
+        val e = game()
+        e.settings.carControls = 1 // the on-screen joystick
+        assertTrue(press(e, Key.F))
+        Keys.handle(e, Key.W, true)
+        repeat(30) { e.frame(1 / 30f) }
+        assertTrue("W should accelerate (speed ${e.carSpeed})", e.carSpeed > 2f)
+    }
+
+    /** How far the car turns in half a second of steering left at speed, with or without the handbrake. */
+    private fun turn(handbrake: Boolean): Float {
+        val e = game()
+        press(e, Key.F)
+        val v = e.state.vehicle(e.state.player.driving)!!
+        Keys.handle(e, Key.W, true)
+        repeat(60) { e.frame(1 / 30f) }
+        Keys.handle(e, Key.W, false)
+        val h0 = v.heading
+        Keys.handle(e, Key.A, true)
+        if (handbrake) Keys.handle(e, Key.Spacebar, true)
+        repeat(15) { e.frame(1 / 30f) }
+        var d = v.heading - h0
+        while (d > Math.PI) d -= (2 * Math.PI).toFloat()
+        while (d < -Math.PI) d += (2 * Math.PI).toFloat()
+        return kotlin.math.abs(d)
+    }
+
+    @Test
+    fun theHandbrakeTurnsTighter() {
+        val plain = turn(false)
+        val slide = turn(true)
+        assertTrue("handbrake turn $slide vs $plain", slide > plain * 1.25f)
     }
 
     @Test

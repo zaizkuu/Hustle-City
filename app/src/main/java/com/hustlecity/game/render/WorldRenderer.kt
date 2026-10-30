@@ -157,6 +157,8 @@ class WorldRenderer(private val e: GameEngine) {
      */
     var cinematic = false
     var cinemaPitch = Float.NaN
+    /** Film mode still shows the player (without the marker), for shots that follow them. */
+    var cinemaPlayer = false
     /** Atmospheric haze for film shots: distance fades softly into the sky. */
     var cinemaHaze = .3f
 
@@ -1296,7 +1298,7 @@ class WorldRenderer(private val e: GameEngine) {
             }
         }
         if (dyn) for (v in e.state.vehicles) if (!e.ops.away(v) && v.x in bbox[0] - 5..bbox[2] + 5 && v.y in bbox[1] - 5..bbox[3] + 5) add(5, v.id, keyFor(v.x, v.y))
-        if (dyn && e.hasGame && p.driving < 0 && p.inBuilding < 0 && !mapMode && !cinematic) add(4, 0, playerKey)
+        if (dyn && e.hasGame && p.driving < 0 && p.inBuilding < 0 && !mapMode && (!cinematic || cinemaPlayer)) add(4, 0, playerKey)
     }
 
     private fun sortDrawables() {
@@ -1559,7 +1561,7 @@ class WorldRenderer(private val e: GameEngine) {
 
     private fun drawPlayer() {
         val p = e.state.player
-        scene.disc(p.x, p.y, .04f, 1f, 1f, 14, scene.withAlpha(c(0xFF27AE60), .55f))
+        if (!cinematic) scene.disc(p.x, p.y, .04f, 1f, 1f, 14, scene.withAlpha(c(0xFF27AE60), .55f))
         people.draw(p.x, p.y, 0f, p.heading, e.walkPhase, e.walkAmount, SHIRT_COLORS[p.shirt % SHIRT_COLORS.size], PersonPainter.PANTS[1],
             SKIN_TONES[p.skin % SKIN_TONES.size], PersonPainter.HAIR[p.skin % PersonPainter.HAIR.size], 1.12f,
             carry = e.carryPose(), load = p.hand.size)

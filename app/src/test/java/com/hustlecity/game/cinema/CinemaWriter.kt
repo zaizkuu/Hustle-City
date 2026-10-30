@@ -2,6 +2,7 @@ package com.hustlecity.game.cinema
 
 import android.graphics.Bitmap
 import com.hustlecity.game.render.gpu.GpuFrame
+import com.hustlecity.game.render.gpu.PhotoMaterials
 import com.hustlecity.game.render.gpu.Shaders
 import java.io.DataOutputStream
 import java.io.File
@@ -23,6 +24,13 @@ class CinemaWriter(val dir: File) {
         File(sh, "world.vs").writeText(Shaders.WORLD_VS); File(sh, "world.fs").writeText(Shaders.WORLD_FS)
         File(sh, "sky.vs").writeText(Shaders.SKY_VS); File(sh, "sky.fs").writeText(Shaders.SKY_FS)
         File(sh, "shadow.vs").writeText(Shaders.SHADOW_VS); File(sh, "shadow.fs").writeText(Shaders.SHADOW_FS)
+        // the photo materials the world shader samples, and their layer order
+        val tx = File(sh, "textures").apply { mkdirs() }
+        for (name in PhotoMaterials.NAMES) for (kind in listOf("detail", "bump")) {
+            val res = PhotoMaterials::class.java.getResourceAsStream("/textures/${name}_$kind.jpg") ?: continue
+            res.use { input -> File(tx, "${name}_$kind.jpg").outputStream().use { input.copyTo(it) } }
+        }
+        File(tx, "materials.json").writeText(PhotoMaterials.NAMES.joinToString(",", "[", "]") { "\"$it\"" })
     }
 
     var frames = 0
