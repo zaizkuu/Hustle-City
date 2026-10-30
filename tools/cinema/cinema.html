@@ -109,7 +109,9 @@ window.renderFrame = async (base, staticBase) => {
   const f = JSON.parse(await txt(base + '/frame.json'));
   if (opts.shadow && opts.shadow !== f.shadowSize) { f.shadow[1] *= f.shadowSize / opts.shadow; f.shadow[2] = 1 / opts.shadow; f.shadowSize = opts.shadow; }
   if (opts.noShadow) f.shadow[3] = 0;
-  if (f.static >= 0 && stat.version !== f.static) { await upload(stat, staticBase + '/static_' + f.static); stat.version = f.static; }
+  // each recording numbers its cached cities from 1: key them by the shot's folder too, so one shot's never carries over
+  const key = staticBase + '/static_' + f.static;
+  if (f.static >= 0 && stat.version !== key) { await upload(stat, key); stat.version = key; }
   if (f.static < 0) { stat.n = [0, 0, 0]; stat.version = null; }
   await upload(dyn, base);
   const skip = f.skip || [];

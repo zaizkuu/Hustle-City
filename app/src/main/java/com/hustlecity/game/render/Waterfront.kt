@@ -32,6 +32,10 @@ class Waterfront(private val city: City) {
         private val LAWN = c(0xFF6A9A55)
         private val GATE = c(0xFFB5A588)
         private val LAMP = c(0xFF2F3A35)
+        /** How far out from a quay the foam and shallows reach, meters. */
+        private const val SHORE_WIDTH = 6f
+        /** The shore band's corners: full strength at the wall, none out on the water (the shader reads the alpha). */
+        private val SHORE = intArrayOf(0xFFFFFFFF.toInt(), 0xFFFFFFFF.toInt(), 0x00FFFFFF, 0x00FFFFFF)
     }
 
     // ------------------------------------------------------------------ quays
@@ -274,6 +278,22 @@ class Waterfront(private val city: City) {
             val sh = scene.sideShade(-lx, -ly)
             scene.quad(x0, y0, 0f, x1, y1, 0f, x1, y1, -d + .55f, x0, y0, -d + .55f, scene.lit(QUAY, sh))
             scene.quad(x0, y0, -d + .55f, x1, y1, -d + .55f, x1, y1, -d, x0, y0, -d, scene.lit(QUAY_WET, sh))
+        }
+        // foam and shallows where the water meets them (GPU only): at the foot of the walls seen across the water, and
+        // along the edge of the bank the camera stands on
+        if (scene.gpu != null && !mapMode) {
+            scene.material = Mat.SHORE
+            for (k in 0 until quayCount) {
+                val o = k * 7
+                val x0 = quay[o]; val y0 = quay[o + 1]; val x1 = quay[o + 2]; val y1 = quay[o + 3]
+                if (max(x0, x1) < bbox[0] || min(x0, x1) > bbox[2] || max(y0, y1) < bbox[1] || min(y0, y1) > bbox[3]) continue
+                val lx = quay[o + 4]; val ly = quay[o + 5]; val d = quay[o + 6]
+                val facing = (camX - (x0 + x1) * .5f) * lx + (camY - (y0 + y1) * .5f) * ly < 0f
+                val z = if (facing) -d + .03f else .02f
+                val wx = -lx * SHORE_WIDTH; val wy = -ly * SHORE_WIDTH
+                scene.shadedQuad(x0, y0, z, x1, y1, z, x1 + wx, y1 + wy, z, x0 + wx, y0 + wy, z, SHORE)
+            }
+            scene.material = Mat.STONE
         }
         // bridges: the side facing the camera, with arches between the piers
         val water = ARCH_SHADOW

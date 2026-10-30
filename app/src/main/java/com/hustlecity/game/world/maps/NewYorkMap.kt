@@ -135,4 +135,6 @@ object NewYorkMap : PlannedMap("nyc", "New York", "Manhattan's tilted grid, Cent
     private val mta = intArrayOf(c(0xFFF4F5F2), c(0xFF1C5DAA), c(0xFFF4F5F2), c(0xFF1C5DAA), c(0xFF2F6FC0), c(0xFFF4F5F2))
     override fun livery(style: Int) = if (style == 7) mta else null
     override val taxiEvery = 2
+    /** Patrol cars in white with blue bodies. */
+    override val policeColors = intArrayOf(c(0xFFF4F6F8), c(0xFF223B78))
 }

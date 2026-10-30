@@ -207,6 +207,29 @@ class GpuFrame {
         s.ni = k
     }
 
+    /** Appends a convex polygon whose colour runs smoothly between its corners' colours [cols]. */
+    fun shaded(stream: Int, n: Int, xs: FloatArray, ys: FloatArray, zs: FloatArray, cols: IntArray, emissive: Boolean, material: Int = 0) {
+        if (n < 3 || !normalOf(n, xs, ys, zs)) return
+        val s = streams[stream]
+        s.ensure(n, (n - 2) * 3)
+        val base = s.nv
+        val fl = java.lang.Float.floatToRawIntBits(flags(emissive, material))
+        val bnx = java.lang.Float.floatToRawIntBits(nx); val bny = java.lang.Float.floatToRawIntBits(ny); val bnz = java.lang.Float.floatToRawIntBits(nz)
+        var o = base * STRIDE
+        val v = s.v
+        for (i in 0 until n) {
+            v[o] = java.lang.Float.floatToRawIntBits(xs[i]); v[o + 1] = java.lang.Float.floatToRawIntBits(ys[i]); v[o + 2] = java.lang.Float.floatToRawIntBits(zs[i])
+            v[o + 3] = bnx; v[o + 4] = bny; v[o + 5] = bnz
+            v[o + 6] = rgba(cols[i]); v[o + 7] = fl
+            o += STRIDE
+        }
+        s.nv += n
+        val idx = s.idx
+        var k = s.ni
+        for (i in 1 until n - 1) { idx[k++] = base; idx[k++] = base + i; idx[k++] = base + i + 1 }
+        s.ni = k
+    }
+
     /**
      * Appends a flat oval whose color fades smoothly from [inner] at the centre through [mid] at [midFrac] of the
      * radius to [outer] at the rim: a soft pool of light rather than stepped rings. [rx] runs along the unit direction

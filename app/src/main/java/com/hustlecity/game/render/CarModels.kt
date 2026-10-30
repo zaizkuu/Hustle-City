@@ -16,6 +16,9 @@ object CarModels {
     const val TAIL = 4
     const val DARK = 5
     const val TRIM = 6
+    /** A police light bar's red and blue halves. */
+    const val BEACON_RED = 7
+    const val BEACON_BLUE = 8
 
     /**
      * Polygon p has [sizes][p] corners and role [roles][p]; its corners are the next entries of [corners], which

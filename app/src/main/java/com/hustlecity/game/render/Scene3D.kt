@@ -432,6 +432,23 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         batch.poly(sx, sy, m, if (fog > 0f) fogged(color, depth) else color)
     }
 
+    /**
+     * A quad in world coordinates whose colour runs between its corners' colours [cols]. GPU only, where the shader
+     * reads the colours as data (the Canvas has nothing to draw it with): false without one.
+     */
+    fun shadedQuad(x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float, x2: Float, y2: Float, z2: Float, x3: Float, y3: Float, z3: Float, cols: IntArray): Boolean {
+        val g = gpu ?: return false
+        wx[0] = x0; wy[0] = y0; wz[0] = z0
+        wx[1] = x1; wy[1] = y1; wz[1] = z1
+        wx[2] = x2; wy[2] = y2; wz[2] = z2
+        wx[3] = x3; wy[3] = y3; wz[3] = z3
+        var behind = 0
+        for (i in 0 until 4) if (proj.camZOf(wx[i], wy[i], wz[i]) < proj.near) behind++
+        if (behind == 4) return true
+        g.shaded(streamFor(cols[0]), 4, wx, wy, wz, cols, false, material)
+        return true
+    }
+
     fun quad(x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float, x2: Float, y2: Float, z2: Float, x3: Float, y3: Float, z3: Float, color: Int) {
         wx[0] = x0; wy[0] = y0; wz[0] = z0
         wx[1] = x1; wy[1] = y1; wz[1] = z1
@@ -582,4 +599,6 @@ object Mat {
     const val CONCRETE = 14
     const val FABRIC = 15
     const val PAINT = 16
+    /** Where water meets a quay: foam and shallows, their strength in the vertex alpha (1 at the wall, 0 out on the water). */
+    const val SHORE = 17
 }

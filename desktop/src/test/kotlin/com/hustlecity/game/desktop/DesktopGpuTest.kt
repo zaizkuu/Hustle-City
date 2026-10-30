@@ -33,13 +33,17 @@ class DesktopGpuTest {
         e.newGame("Alex Rivera", 1, 2, 1)
         ImageComposeScene(1600, 900, Density(1f)) { HustleCityApp(e, onExit = {}) }.use { scene ->
             var t = 0L
-            // the GL thread draws each frame after it's submitted and the window shows it on the next one
-            repeat(40) {
+            // the GL thread draws each frame after it's submitted and the window shows it on the next one; a software
+            // renderer on a small CI machine takes a while over the city's first upload, so give it time to settle
+            val deadline = System.nanoTime() + 60_000_000_000L
+            var n = 0
+            while (n < 40 || (e.gpuFps <= 0f && !e.settings.gpuFailed && DesktopGl.failure == null && System.nanoTime() < deadline)) {
                 e.frame(1 / 30f)
                 scene.render(t)
                 t += 33_000_000L
                 Thread.sleep(60)
                 javax.swing.SwingUtilities.invokeAndWait { }
+                n++
             }
             assertTrue("no GL context: ${DesktopGl.failure}", DesktopGl.failure == null)
             assertFalse("the HD renderer gave up", e.settings.gpuFailed)

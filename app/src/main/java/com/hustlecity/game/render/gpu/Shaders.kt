@@ -120,6 +120,38 @@ float photo(float layer, vec2 st, float size, inout vec3 n) {
     return textureGrad(uDetail, c, dx, dy).r * 2.0;
 }
 
+// open water: wind waves of a few lengths running roughly downwind, each fading out once it gets smaller than a few
+// pixels ([px] metres per pixel) so distant water calms instead of shimmering. Returns the surface slope; h is the
+// height, about -1..1.
+#ifdef FAST
+const int WAVES = 4;
+#else
+const int WAVES = 7;
+#endif
+// direction (radians off the wind), wavelength (m), slope, height share
+const vec4 WAVE[7] = vec4[7](vec4(0.0, 17.0, 0.055, 0.30), vec4(0.7, 10.3, 0.05, 0.22), vec4(-0.8, 6.1, 0.048, 0.16),
+    vec4(0.3, 3.7, 0.045, 0.12), vec4(-0.45, 2.3, 0.04, 0.09), vec4(1.2, 1.45, 0.036, 0.06), vec4(-1.35, 0.9, 0.03, 0.05));
+vec2 waves(vec2 p, float t, float px, out float h) {
+    vec2 g = vec2(0.0);
+    h = 0.0;
+    // the waves bend around a slowly drifting warp, so they never line up into a regular pattern
+    vec2 q = p + vec2(noise(p * 0.031 + t * 0.02), noise(p * 0.029 + 7.3 - t * 0.02)) * 11.0;
+    for (int i = 0; i < WAVES; i++) {
+        vec4 w = WAVE[i];
+        float a = 0.6 + w.x;
+        vec2 d = vec2(cos(a), sin(a));
+        float k = 6.2832 / w.y;
+        // deep water runs at sqrt(g / k); a city river is calmer, so slower
+        float ph = k * dot(d, q) - sqrt(9.81 * k) * 0.55 * t + float(i) * 1.7;
+        // gusts: patches where each wave is stronger or weaker
+        float gust = 0.45 + 1.1 * noise(p * (0.012 + 0.004 * float(i)) + vec2(float(i) * 3.1, t * 0.03));
+        float f = (1.0 - smoothstep(w.y * 0.12, w.y * 0.35, px)) * gust;
+        g += d * (cos(ph) * w.z * f);
+        h += sin(ph) * w.w * f;
+    }
+    return g;
+}
+
 float shadowAt() {
     if (uShadow.w < 0.5) return 1.0;
     vec3 c = vLight.xyz / vLight.w * 0.5 + 0.5;
@@ -153,6 +185,8 @@ void main() {
     float spec = 0.06;
     float gloss = 28.0;
     float reflectAmt = 0.0;
+    float alpha = vColor.a;
+    float glitter = 0.0;     // water: a sharp second highlight that breaks the sun's reflection into sparkles
     vec2 uv = planar(vPos, N);
     bool wall = abs(N.z) < 0.5;
     gX = dFdx(uv); gY = dFdy(uv);
@@ -227,13 +261,44 @@ void main() {
     } else if (mat == 10) {            // roof gravel and membrane
         if (tex) albedo *= photo(8.0, uv, 2.0, N) * (0.92 + 0.16 * fbm(vPos.xy * 0.9));
         else albedo *= 0.88 + 0.2 * fbm(vPos.xy * 0.9) + 0.08 * (hash(floor(vPos.xy * 6.0)) - 0.5) * fadeFor(vPos.xy * 6.0);
-    } else if (mat == 11) {            // water: moving ripples that reflect the sky
-        vec2 q = vPos.xy * 0.08 + vec2(uTime * 0.03, uTime * 0.02);
-        float e = 0.5;
-        vec2 grad = vec2(fbm(q + vec2(e, 0.0)) - fbm(q - vec2(e, 0.0)), fbm(q + vec2(0.0, e)) - fbm(q - vec2(0.0, e)));
-        N = normalize(vec3(-grad * 0.9, 1.0));
-        reflectAmt = 0.25 + 0.55 * pow(1.0 - max(dot(N, V), 0.0), 3.0);
-        spec = 1.2; gloss = 220.0;
+    } else if (mat == 11) {            // water: wind waves mirroring the sky by Fresnel, a glittering sun path, whitecaps
+        float px = max(length(gX), length(gY));
+        // puddles and fountains (above the street) only ripple
+        float calm = vPos.z > 0.02 ? 0.3 : 1.0;
+        float h;
+        vec2 g = waves(vPos.xy, uTime, px, h) * calm;
+        // and a fine chop over the waves, close up
+        vec2 q = vPos.xy * 0.9 + vec2(uTime * 0.25, uTime * 0.17);
+        float e = 0.35;
+        g += vec2(noise(q + vec2(e, 0.0)) - noise(q - vec2(e, 0.0)), noise(q + vec2(0.0, e)) - noise(q - vec2(0.0, e))) * 0.12 * fadeFor(q);
+        N = normalize(vec3(-g, 1.0));
+        float ndv = max(dot(N, V), 0.0);
+        // light scattered inside the crests turns them a little green
+        albedo = mix(albedo, albedo * vec3(0.75, 1.3, 1.2), clamp(h * 0.9 + 0.35, 0.0, 1.0) * 0.55 * calm);
+        // whitecaps on the highest crests: a rare one in fair weather, more when it rains
+        float cap = smoothstep(0.95, 1.25, h + 0.3 * noise(vPos.xy * 0.7 + uTime * 0.1)) * (0.15 + 0.85 * uMisc.y) * calm
+            * (1.0 - smoothstep(0.15, 0.6, px));
+        albedo = mix(albedo, vec3(0.8, 0.84, 0.86), cap * 0.75);
+        reflectAmt = (0.2 + 0.72 * pow(1.0 - ndv, 5.0)) * (1.0 - cap);
+        spec = 1.2; gloss = 260.0;
+        // the moon glitters too, more softly
+        glitter = (1.0 - cap) * calm * mix(0.3, 1.0, uMisc.x);
+    } else if (mat == 17) {            // the shore: foam lapping at the quay, paler shallows behind it
+        float d = 1.0 - vColor.a;      // 0 at the wall, 1 out on the water
+        float px = max(length(gX), length(gY));
+        vec2 p = vPos.xy;
+        float n = fbm(p * 0.45 + vec2(uTime * 0.05, -uTime * 0.04));
+        float edge = 1.0 - smoothstep(0.02, 0.1 + 0.14 * n, d);
+        // lines of foam rolling in toward the wall, thinning as they come
+        float lap = fract(d * 2.6 + uTime * 0.22 + n * 0.9);
+        float line = smoothstep(0.74, 0.88, lap) * (1.0 - smoothstep(0.9, 1.0, lap)) * (1.0 - d) * (1.0 - d) * (1.0 - smoothstep(0.1, 0.35, px));
+        float lace = smoothstep(0.3, 0.75, noise(p * 2.2 + vec2(uTime * 0.3, uTime * 0.21)));
+        float foam = clamp(edge * mix(1.0, lace, 0.4) + line * lace * 1.2, 0.0, 1.0);
+        float shallow = (1.0 - d) * (1.0 - d) * 0.32;
+        albedo = mix(toLinear(vec3(0.3, 0.5, 0.53)), toLinear(vec3(0.93, 0.96, 0.97)), foam / max(foam + shallow, 0.001));
+        alpha = foam + shallow * (1.0 - foam);
+        N = vec3(0.0, 0.0, 1.0);
+        spec = 0.15; gloss = 30.0;
     } else if (mat == 12 && wall) {    // painted plaster
         albedo *= 0.96 + 0.07 * fbm(uv * 3.0);
     } else if (mat == 13) {            // leafy canopy clumps
@@ -272,6 +337,7 @@ void main() {
         float s = pow(max(dot(N, H), 0.0), gloss + 120.0 * wetSpec) * (spec + 0.6 * wetSpec);
         vec3 direct = uSunColor * mix(ndl, wrap, 0.25) * sh;
         col = albedo * (amb * ao + direct) + uSunColor * s * ndl * sh;
+        if (glitter > 0.0) col += uSunColor * pow(max(dot(N, H), 0.0), 2400.0) * 9.0 * glitter * sh * step(0.0, uSunDir.z);
         if (reflectAmt > 0.0) {
             vec3 R = reflect(-V, N);
             vec3 sky = toLinear(mix(uSkyHorizon, uSkyTop, smoothstep(-0.05, 0.6, R.z)));
@@ -288,7 +354,7 @@ void main() {
         float t = clamp((dist - uFog.x) / max(uFog.y - uFog.x, 1.0), 0.0, 1.0) * uFog.z;
         col = mix(col, toLinear(uFogColor), t);
     }
-    oColor = vec4(toDisplay(col), vColor.a);
+    oColor = vec4(toDisplay(col), alpha);
 }
 """
 

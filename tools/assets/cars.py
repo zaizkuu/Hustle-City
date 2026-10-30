@@ -25,13 +25,27 @@ FILES = {
     'SportsCar2': ('1o9cgFWD966s-EZ2dILZH7Yig3yNkGR3C', '151D-fvhc-Eq5h_Kq37-sX10pWjXMDvG9'),
     'SUV': ('1_26j_0vooPFidwFSlHRWlF1ifphQZemK', '12V4PUvyNhfAPA9VejWYFsbniXd9Twsnt'),
     'Taxi': ('1UMriCC_JWsDfpTh5tBjQdhAj9_lJeuR2', '1vnTRCYyHM_-IiE_XetjJMHdxD_yE4GZu'),
+    'Cop': ('1acEdJqBQMZn0z3yBGPHbbqtk4Kk4UhNT', '1njOt3T2iDdyWvyknxPhqyrEQElxXstiA'),
 }
 
 # roles, as CarModels.kt numbers them
-PAINT, PAINT2, GLASS, HEAD, TAIL, DARK, TRIM = range(7)
+PAINT, PAINT2, GLASS, HEAD, TAIL, DARK, TRIM, BEACON_RED, BEACON_BLUE = range(9)
 ROLES = {'Windows': GLASS, 'Headlights': HEAD, 'TailLights': TAIL, 'Black': DARK, 'Grey': TRIM,
          'DarkOrange': PAINT2, 'Material.007': PAINT2}
 PAINTS = {'Blue', 'LightBlue', 'Orange', 'Yellow', 'White'}
+
+
+def role_of(name, obj, mat, up):
+    """A face's role from its model, object and material; [up] is its height in the model, 0..1."""
+    if name == 'Cop':
+        # the livery: white door panels (the car's paint) on a black body (its second colour), and a light bar of
+        # red, white and blue on the roof; the wheels are their own objects in black and grey
+        body = obj.startswith('Cop_Cube')
+        if mat == 'Black': return PAINT2 if body else DARK
+        if mat == 'BlueLights': return BEACON_BLUE
+        if mat == 'TailLights' and up > .9: return BEACON_RED
+        if mat == 'WhiteLights': return HEAD
+    return PAINT if mat in PAINTS else ROLES.get(mat, TRIM)
 
 CELL = (.02, .045, .06)  # clustering grid in model units (about 8 cm on a 4 m car)
 
@@ -46,11 +60,12 @@ def fetch(name):
 
 
 def load(path):
-    vs, faces, mat = [], [], None
+    vs, faces, mat, obj = [], [], None, ''
     for line in open(path):
         if line.startswith('v '): vs.append(tuple(map(float, line.split()[1:4])))
+        elif line.startswith('o '): obj = line.split()[1]
         elif line.startswith('usemtl'): mat = line.split()[1]
-        elif line.startswith('f '): faces.append((mat, [int(t.split('/')[0]) - 1 for t in line.split()[1:]]))
+        elif line.startswith('f '): faces.append((mat, obj, [int(t.split('/')[0]) - 1 for t in line.split()[1:]]))
     return vs, faces
 
 
@@ -72,7 +87,7 @@ def bake(name):
         rep.append(tuple(sum(local[m][a] for m in members) / len(members) for a in range(3)))
         for m in members: index[m] = n
     polys, seen = [], set()
-    for mat, f in faces:
+    for mat, obj, f in faces:
         ring = []
         for v in f:
             r = index[v]
@@ -82,8 +97,8 @@ def bake(name):
         key = tuple(sorted(ring))
         if key in seen: continue
         seen.add(key)
-        role = PAINT if mat in PAINTS else ROLES.get(mat, TRIM)
-        polys.append((role, ring))
+        up = sum(local[v][2] for v in f) / len(f)
+        polys.append((role_of(name, obj, mat, up), ring))
     used = sorted({v for _, r in polys for v in r})
     remap = {v: i for i, v in enumerate(used)}
     out = struct.pack('>H', len(polys)) + struct.pack('>H', len(used))

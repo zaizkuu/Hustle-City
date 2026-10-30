@@ -52,6 +52,8 @@ class CinemaRender {
         val gl = Gl()
         try {
             for (shot in shots) {
+                // each recording numbers its cached cities from 1, so one shot's city must never carry into the next
+                static = null; staticId = -1L
                 val want = plan?.get(shot.name) ?: pick
                 val frames = shot.listFiles()!!.filter { it.name.matches(Regex("\\d{4}")) && (want == null || it.name.toInt() in want) }.sortedBy { it.name }
                 val dir = File(out, shot.name).apply { mkdirs() }

@@ -83,6 +83,7 @@ class WorldRenderer(private val e: GameEngine) {
         get() = featCache?.takeIf { it.city === e.city } ?: CityFeatures(e.city).also { featCache = it }
     private val addFeature: (Int, Float) -> Unit = { part, key -> add(12, part, key) }
     private val addTrainCar: (Int, Float, Float) -> Unit = { car, x, y -> add(13, car, keyFor(x, y)) }
+    private var heli: Helicopter? = null
 
     // weather particles in screen space: x, y, speed, size
     private val pX = FloatArray(420); private val pY = FloatArray(420); private val pV = FloatArray(420); private val pS = FloatArray(420)
@@ -452,12 +453,19 @@ class WorldRenderer(private val e: GameEngine) {
                 }
                 1 -> drawTree(dIdx[i])
                 2 -> e.traffic.cars.getOrNull(dIdx[i])?.let {
-                    // some of the sedans are cabs, in the city's colors
+                    // some of the sedans are cabs, in the city's colors, and a few are patrol cars, one in three of
+                    // them answering a call with the lights going
                     val map = e.city.map
                     val taxi = it.style == 0 && dIdx[i] % map.taxiEvery == 0
-                    val color = if (taxi) map.taxiColors[(dIdx[i] / map.taxiEvery) % map.taxiColors.size] else it.color
+                    val police = if (it.style != 0 || taxi || dIdx[i] % map.policeEvery != 3) 0 else if ((dIdx[i] / map.policeEvery) % 3 == 0) 2 else 1
+                    val color = when {
+                        taxi -> map.taxiColors[(dIdx[i] / map.taxiEvery) % map.taxiColors.size]
+                        police != 0 -> map.policeColors[0]
+                        else -> it.color
+                    }
                     drawCar(it.x, it.y, it.heading, it.length, it.width, it.height, color, it.style, false,
-                        taxi = taxi, braking = it.speed < it.cruise * .45f, accent = it.accent, pitch = it.pitch, roll = it.roll)
+                        taxi = taxi, braking = it.speed < it.cruise * .45f, accent = if (police != 0) map.policeColors[1] else it.accent,
+                        pitch = it.pitch, roll = it.roll, police = police)
                 }
                 3 -> e.traffic.peds.getOrNull(dIdx[i])?.let { drawPed(it, dIdx[i]) }
                 4 -> drawPlayer()
@@ -478,6 +486,10 @@ class WorldRenderer(private val e: GameEngine) {
                 }
                 12 -> features.draw(scene, dIdx[i], e.realTime, scene.gpu == null, mapMode, if (e.hasGame) e.state.hour else 12)
                 13 -> features.drawCar(scene, dIdx[i])
+                14 -> heli?.let { h ->
+                    cars.clock = e.realTime
+                    cars.helicopter(h.x, h.y, h.z, h.heading, h.pitch, h.roll, e.realTime * 9f, scene.daylight < .5f, h.spotX, h.spotY)
+                }
             }
         }
     }
@@ -1274,6 +1286,12 @@ class WorldRenderer(private val e: GameEngine) {
         // so a view packed with props and people never runs out of room for a landmark.
         features.collect(bbox, proj.camX, proj.camY, stat, mode == DYNAMIC, mapMode, addFeature)
         if (mode == DYNAMIC && !mapMode) features.forCars(e.realTime, bbox, addTrainCar)
+        // the police helicopter, whenever it's within sight
+        if (dyn && !mapMode) {
+            val h = heli?.takeIf { it.city === city } ?: Helicopter(city).also { heli = it }
+            h.update(e.realTime)
+            if (keyFor(h.x, h.y) < 700f * 700f || keyFor(h.spotX, h.spotY) < 500f * 500f) add(14, 0, keyFor(h.x, h.y))
+        }
         val farLod = mapMode || proj.dist > 450
         if (!farLod && stat) {
             for ((i, t) in city.trees.withIndex()) {
@@ -1409,11 +1427,12 @@ class WorldRenderer(private val e: GameEngine) {
     }
 
     private fun drawCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int, owned: Boolean,
-                        taxi: Boolean = false, braking: Boolean = false, accent: Int = 0, pitch: Float = 0f, roll: Float = 0f) {
+                        taxi: Boolean = false, braking: Boolean = false, accent: Int = 0, pitch: Float = 0f, roll: Float = 0f, police: Int = 0) {
         val lod = when (e.settings.quality) { 0 -> 45f; 1 -> 80f; else -> 120f }
         val near = !mapMode && keyFor(x, y) < lod * lod
         cars.leftHand = e.city.leftHand
-        cars.draw(x, y, heading, len, wid, hgt, color, style, near, taxi, braking, accent, pitch, roll)
+        cars.clock = e.realTime
+        cars.draw(x, y, heading, len, wid, hgt, color, style, near, taxi, braking, accent, pitch, roll, police)
     }
 
     /** Body lean of the player's own cars, kept between frames. */

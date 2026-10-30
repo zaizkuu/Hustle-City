@@ -185,4 +185,5 @@ object ManilaMap : PlannedMap("manila", "Manila", "Manila Bay, the Pasig River, 
     override fun livery(style: Int) = when (style) { 4 -> jeepneys; 5 -> tricycles; 7 -> buses; 11 -> modernJeeps; 12 -> mopeds; else -> null }
     override val taxiEvery = 3
     override val taxiColors = intArrayOf(c(0xFFF4F4F2))
+    override val policeColors = intArrayOf(c(0xFFF4F6F8), c(0xFF1F4C9E))
 }

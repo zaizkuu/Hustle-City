@@ -25,6 +25,9 @@ class CarPainter(private val scene: Scene3D) {
     /** Traffic keeps left: bus doors and tricycle sidecars go on the left. */
     var leftHand = false
 
+    /** Seconds, for flashing lights. */
+    var clock = 0f
+
     companion object {
         private val HEAD_GLOW = c(0xFFFFEBA8)
         val GLASS = c(0xFF26313D)
@@ -38,6 +41,15 @@ class CarPainter(private val scene: Scene3D) {
         /** Open window holes and doorways: the dim inside of a jeepney or a sidecar. */
         val INSIDE = c(0xFF2B2622)
         val BUS_ROOF = c(0xFFE4E7EA)
+        /** A police light bar, off and flashing. */
+        private val BEACON_RED = c(0xFF7A1C1C)
+        private val BEACON_BLUE = c(0xFF1C2F7A)
+        private val FLASH_RED = c(0xFFFF2E2E)
+        private val FLASH_BLUE = c(0xFF5FE3FF)
+        private val FLASH_GLOW_RED = c(0xFFFF4D4D)
+        private val FLASH_GLOW_BLUE = c(0xFF4D7BFF)
+        private val HELI_BODY = c(0xFF1F3463)
+        private val SEARCH = c(0xFFFFF1C9)
         /** Lit bus windows at night and the amber destination display. */
         val LIT_WINDOW = c(0xFFFFE3A0)
         val LED = c(0xFFFFD34D)
@@ -51,17 +63,26 @@ class CarPainter(private val scene: Scene3D) {
      * Draws a vehicle. [style] 0 sedan, 1 pickup, 2 van, 3 sports, 4 jeepney, 5 tricycle, 6 kei car, 7 city bus,
      * 8 motorbike, 9 SUV, 10 box truck, 11 modern jeepney, 12 moped.
      * [near] adds wheels, lights and trim. [braking] brightens the tail lights; [taxi] adds the roof sign. [accent]
-     * is a livery's second color (stripes, a two-tone roof); 0 lets the painter pick one.
+     * is a livery's second color (stripes, a two-tone roof); 0 lets the painter pick one. [police] makes a sedan a
+     * patrol car (1) in [color] doors on an [accent] body, with its light bar going when it answers a call (2).
      */
     fun draw(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int,
-             near: Boolean, taxi: Boolean = false, braking: Boolean = false, accent: Int = 0, pitch: Float = 0f, roll: Float = 0f) {
+             near: Boolean, taxi: Boolean = false, braking: Boolean = false, accent: Int = 0, pitch: Float = 0f, roll: Float = 0f,
+             police: Int = 0) {
         val night = scene.daylight < .5f
         // headlights go on after dark, and in rain or fog
         val lights = night || scene.rain > .3f
         frame(x, y, heading)
+        // a call: red and blue in turn, each in a double flash
+        val ph = (clock * 1.6f + (x + y) * .013f) % 1f
+        val flash = if (police != 2) 0 else if (ph < .5f) (if ((ph * 8f).toInt() % 2 == 0) 1 else 0) else (if ((ph * 8f).toInt() % 2 == 0) 2 else 0)
         if (!near) {
-            farCar(len, wid, hgt, color, style, accent)
+            if (police != 0) {
+                farCar(len, wid, hgt, accent, style, color)
+                if (flash != 0) lightBar(len, hgt, flash)
+            } else farCar(len, wid, hgt, color, style, accent)
             if (lights) headGlow(x, y, heading, len)
+            if (flash != 0) flashGlow(x, y, flash)
             return
         }
         tiltF = pitch; tiltL = roll
@@ -76,9 +97,15 @@ class CarPainter(private val scene: Scene3D) {
         // the smallest trim (ornaments, mirrors, lettering) only close to the camera
         val fine = proj.camZOf(x, y, 1f) < 42f
         // in HD, the near cars (how near depends on the quality setting) are the CC0 models
-        val model = if (scene.gpu != null) modelFor(style, taxi, color) else null
-        if (model != null) modelled(model, len, wid, hgt, body, night, braking)
-        else when (style) {
+        val model = if (scene.gpu != null) modelFor(style, taxi, police != 0, color) else null
+        if (model != null) modelled(model, len, wid, hgt, body, night, braking, if (police != 0) accent else 0, flash)
+        else if (police != 0) {
+            classic(hl, hw, len, wid, hgt, accent, 0, false, night, braking, camF, nearSide)
+            frame(x, y, heading)
+            // the doors in the livery's other colour, and the light bar
+            sideRect(-hl * .45f, hl * .3f, .4f, hgt * .55f, hw + .01f, body)
+            lightBar(len, hgt, flash)
+        } else when (style) {
             4 -> jeepney(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
             5 -> tricycle(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
             6 -> kei(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
@@ -92,6 +119,7 @@ class CarPainter(private val scene: Scene3D) {
         tiltF = 0f; tiltL = 0f
         scene.material = Mat.PLAIN
         if (lights) headGlow(x, y, heading, len)
+        if (flash != 0) flashGlow(x, y, flash)
         if (braking) {
             // brake lights wash the road behind red, fading out softly
             val bx = x - fx * (hl + .7f); val by = y - fy * (hl + .7f)
@@ -102,10 +130,11 @@ class CarPainter(private val scene: Scene3D) {
     }
 
     /** The CC0 model a vehicle of [style] is drawn with up close in HD, or null to build it from profiles. */
-    private fun modelFor(style: Int, taxi: Boolean, color: Int): CarModels.Model? {
+    private fun modelFor(style: Int, taxi: Boolean, police: Boolean, color: Int): CarModels.Model? {
         // two models per kind, picked by the paint so a street of sedans isn't all the same car
         val alt = (color xor (color ushr 9)) and 1 == 1
         return when {
+            police -> CarModels.get("Cop")
             style == 0 && taxi -> CarModels.get("Taxi")
             style == 0 -> CarModels.get(if (alt) "NormalCar2" else "NormalCar1")
             style == 3 -> CarModels.get(if (alt) "SportsCar2" else "SportsCar")
@@ -116,10 +145,13 @@ class CarPainter(private val scene: Scene3D) {
 
     private var mx = FloatArray(16); private var my = FloatArray(16); private var mz = FloatArray(16)
 
-    /** Draws [m] stretched to [len] x [wid] x [hgt] in the current frame: the paint in [body], the lights lit at night. */
-    private fun modelled(m: CarModels.Model, len: Float, wid: Float, hgt: Float, body: Int, night: Boolean, braking: Boolean) {
+    /**
+     * Draws [m] stretched to [len] x [wid] x [hgt] in the current frame: the paint in [body] (and [second], or a darker
+     * shade of it), the lights lit at night, a light bar's red (flash 1) or blue (2) half lit.
+     */
+    private fun modelled(m: CarModels.Model, len: Float, wid: Float, hgt: Float, body: Int, night: Boolean, braking: Boolean, second: Int = 0, flash: Int = 0) {
         if (mx.size < m.maxCorners) { mx = FloatArray(m.maxCorners); my = FloatArray(m.maxCorners); mz = FloatArray(m.maxCorners) }
-        val paint2 = scene.mix(body, 0xFF000000.toInt(), .3f)
+        val paint2 = if (second != 0) second else scene.mix(body, 0xFF000000.toInt(), .3f)
         val head = if (night) HEAD else c(0xFFE8ECEF)
         val tail = if (braking) c(0xFFFF2E2E) else if (night) c(0xFFE53935) else TAIL
         var k = 0
@@ -135,6 +167,8 @@ class CarPainter(private val scene: Scene3D) {
             k += n
             val role = m.roles[p].toInt()
             scene.material = if (role == CarModels.PAINT || role == CarModels.PAINT2) Mat.PAINT else Mat.PLAIN
+            val lit = (role == CarModels.BEACON_RED && flash == 1) || (role == CarModels.BEACON_BLUE && flash == 2)
+            if (lit) scene.glow = true
             scene.poly(n, mx, my, mz, when (role) {
                 CarModels.PAINT -> body
                 CarModels.PAINT2 -> paint2
@@ -142,8 +176,11 @@ class CarPainter(private val scene: Scene3D) {
                 CarModels.HEAD -> head
                 CarModels.TAIL -> tail
                 CarModels.DARK -> TIRE
+                CarModels.BEACON_RED -> if (lit) FLASH_RED else BEACON_RED
+                CarModels.BEACON_BLUE -> if (lit) FLASH_BLUE else BEACON_BLUE
                 else -> MODEL_TRIM
             })
+            scene.glow = false
         }
         scene.material = Mat.PAINT
     }
@@ -647,6 +684,89 @@ class CarPainter(private val scene: Scene3D) {
         frontRect(-hl - .11f, -hw + .12f, -hw + .45f, z - .08f, z + .06f, tail, rear = true)
         frontRect(-hl - .11f, hw - .45f, hw - .12f, z - .08f, z + .06f, tail, rear = true)
         frontRect(-hl - .11f, -.25f, .25f, z - .02f, z + .12f, c(0xFFF0F0E8), rear = true)
+    }
+
+    /**
+     * A police helicopter, skids at height [z]: a rounded cabin with a long tail boom, the main rotor turning by
+     * [rotor] radians, nav lights and a blinking beacon; after dark, [search] lights the street at ([sx], [sy]).
+     */
+    fun helicopter(x: Float, y: Float, z: Float, heading: Float, pitch: Float, roll: Float, rotor: Float, search: Boolean, sx: Float, sy: Float) {
+        frame(x, y, heading)
+        tiltF = pitch; tiltL = roll
+        val body = HELI_BODY
+        val dark = c(0xFF22262B)
+        scene.material = Mat.PAINT
+        // skids on their struts
+        for (s in -1..1 step 2) {
+            val l = s * 1.05f
+            slab(-1.7f, 1.9f, l - .06f, l + .06f, z, z + .1f, dark)
+            slab(1.9f, 2.25f, l - .06f, l + .06f, z + .05f, z + .28f, dark)
+            for (f in floatArrayOf(-1f, 1.1f)) slab(f - .05f, f + .05f, l * .9f - .04f, l * .9f + .04f, z + .1f, z + .6f, dark)
+        }
+        // tail boom, fin, stabilizer
+        P(0, -1.9f, z + 1.3f); P(1, -6.9f, z + 1.55f); P(2, -6.9f, z + 1.8f); P(3, -1.9f, z + 1.95f)
+        prism(4, -.26f, .26f, body, body)
+        P(0, -6.3f, z + 1.6f); P(1, -7.05f, z + 1.6f); P(2, -7.45f, z + 3.05f); P(3, -6.95f, z + 3.05f)
+        prism(4, -.06f, .06f, body, body)
+        slab(-5.7f, -5.2f, -1.15f, 1.15f, z + 1.6f, z + 1.67f, body)
+        // the cabin: a raked windscreen, side windows and a white band
+        P(0, -1.6f, z + .6f); P(1, 1.75f, z + .6f); P(2, 2.35f, z + 1.1f); P(3, 1.65f, z + 1.95f); P(4, -1.3f, z + 2.08f); P(5, -2.05f, z + 1.4f)
+        prism(6, -.98f, .98f, body, body, glassIdx = 2)
+        sideRect(.15f, 1.55f, z + 1.2f, z + 1.8f, .98f, GLASS)
+        sideRect(-1.85f, 2.1f, z + .92f, z + 1.06f, .98f, c(0xFFF2F4F6))
+        // engine cowling and mast
+        slab(-1.35f, .45f, -.58f, .58f, z + 2.02f, z + 2.4f, body)
+        slab(-.12f, .12f, -.12f, .12f, z + 2.4f, z + 2.62f, dark)
+        tiltF = 0f; tiltL = 0f
+        scene.material = Mat.PLAIN
+        val hz = z + 2.66f
+        // the rotor: a faint disc where the blades blur, and four blades
+        scene.disc(x, y, hz, 5.4f, 5.4f, 20, scene.withAlpha(dark, .16f))
+        for (k in 0 until 4) {
+            frame(x, y, heading + rotor + k * (Math.PI / 2).toFloat())
+            slab(.2f, 5.4f, -.15f, .15f, hz, hz + .05f, dark)
+        }
+        frame(x, y, heading)
+        // lights: red and green on the flanks, a red beacon on top blinking once a second, white on the tail
+        scene.glow = true
+        fun light(f: Float, l: Float, h: Float, r: Float, col: Int) =
+            scene.blob(ox + fx * f + rx * l, oy + fy * f + ry * l, h, r, col)
+        light(.4f, -1.05f, z + 1.35f, .09f, c(0xFFFF4D4D))
+        light(.4f, 1.05f, z + 1.35f, .09f, c(0xFF2EE87A))
+        light(-7.05f, 0f, z + 1.7f, .08f, c(0xFFFFF4D6))
+        if ((clock % 1f) < .15f) light(-.5f, 0f, z + 2.45f, .13f, c(0xFFFF2E2E))
+        if (search) {
+            // the searchlight under the nose, its beam and the pool of light it throws
+            val lx = ox + fx * 1.9f; val ly = oy + fy * 1.9f; val lz = z + .55f
+            light(1.9f, 0f, lz, .16f, c(0xFFFFF4D6))
+            // the beam: a cone seen side on from wherever the camera is, as wide as the pool where it lands
+            val bx = sx - lx; val by = sy - ly; val bz = -lz
+            val vx = scene.camLX - (lx + sx) * .5f; val vy = scene.camLY - (ly + sy) * .5f; val vz = proj.camZ - lz * .5f
+            var px = by * vz - bz * vy; var py = bz * vx - bx * vz; var pz = bx * vy - by * vx
+            val pl = sqrt(px * px + py * py + pz * pz).coerceAtLeast(.001f)
+            px *= 9f / pl; py *= 9f / pl; pz *= 9f / pl
+            scene.quad(lx, ly, lz, lx, ly, lz, sx + px, sy + py, .1f + pz, sx - px, sy - py, .1f - pz, scene.withAlpha(SEARCH, .1f))
+            scene.glowDisc(sx, sy, .07f, 11f, SEARCH, .75f)
+        }
+        scene.glow = false
+    }
+
+    /** A light bar across the roof, its red (flash 1) or blue (2) half lit. */
+    private fun lightBar(len: Float, hgt: Float, flash: Int) {
+        val f = -len * .08f
+        scene.glow = flash == 1
+        slab(f - .18f, f + .18f, -.62f, -.04f, hgt, hgt + .14f, if (flash == 1) FLASH_RED else BEACON_RED)
+        scene.glow = flash == 2
+        slab(f - .18f, f + .18f, .04f, .62f, hgt, hgt + .14f, if (flash == 2) FLASH_BLUE else BEACON_BLUE)
+        scene.glow = false
+    }
+
+    /** The flashing lights washing the street around a patrol car, strongest at night. */
+    private fun flashGlow(x: Float, y: Float, flash: Int) {
+        val night = (1f - scene.daylight).coerceIn(0f, 1f)
+        scene.glow = true
+        scene.glowOval(x, y, .06f, 6.5f, 6.5f, 1f, 0f, if (flash == 1) FLASH_GLOW_RED else FLASH_GLOW_BLUE, .08f + .3f * night)
+        scene.glow = false
     }
 
     /** Headlight beams on the road: a soft oval of light ahead of the car, brightest near the bumper. */

@@ -59,6 +59,9 @@ abstract class MapDef(val id: String, val title: String, val blurb: String) {
     /** Every [taxiEvery]th sedan is a cab, painted in one of [taxiColors]. */
     open val taxiEvery = 6
     open val taxiColors: IntArray = intArrayOf(c(0xFFF2C230))
+    /** Every [policeEvery]th sedan (cabs aside) is a patrol car: [policeColors] are its doors and roof, then its body. */
+    open val policeEvery = 17
+    open val policeColors: IntArray = intArrayOf(c(0xFFF4F6F8), c(0xFF17191D))
 }
 
 object Maps {
