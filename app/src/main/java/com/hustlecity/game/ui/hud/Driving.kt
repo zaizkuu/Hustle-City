@@ -392,40 +392,6 @@ private fun Pedal(label: String, glow: Color, brake: Boolean, set: (Boolean) -> 
     }
 }
 
-// ------------------------------------------------------------------ GPS
-
-/** Turn-by-turn directions while a destination is set. */
-@Composable
-fun GpsBanner(e: GameEngine, modifier: Modifier = Modifier) {
-    val gps = e.gps
-    if (!gps.active || e.state.player.inBuilding >= 0) return
-    val dest = e.city.building(e.state.player.waypoint) ?: return
-    Row(
-        modifier.widthIn(max = 380.dp).shadow(5.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp)).background(Color(0xF01C64C8)).padding(horizontal = 10.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        GIcon(when (gps.turn) { -1 -> "turn_left"; 1 -> "turn_right"; else -> "arrive" }, 28.dp)
-        Column(Modifier.padding(start = 8.dp).weight(1f, fill = false)) {
-            Text(
-                if (gps.turn == 0) "${meters(gps.distance)} to ${e.buildingName(dest)}" else "In ${meters(gps.turnDistance)}: ${gps.instruction()}",
-                color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            )
-            Text("${e.buildingName(dest)} · ${meters(gps.distance)} · ${eta(e, gps.distance)}", color = Color(0xDDFFFFFF), fontSize = 10.sp, maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-        }
-        GIcon("close", 22.dp,
-            modifier = Modifier.padding(start = 10.dp).clip(CircleShape).clickable { e.state.player.waypoint = -1; e.gps.clear(); e.bump() }.padding(4.dp))
-    }
-}
-
-private fun meters(m: Float) = if (m >= 1000) "%.1f km".format(m / 1000f) else "${(m / 10f).roundToInt() * 10} m"
-
-private fun eta(e: GameEngine, m: Float): String {
-    val speed = if (e.state.player.driving >= 0) 10f else 4.5f
-    val s = (m / speed).roundToInt()
-    return if (s < 60) "${s}s" else "${s / 60} min"
-}
-
 // ------------------------------------------------------------------ minimap
 
 /** A small map that turns with the camera: roads, your businesses, the GPS route and your destination. Tap to open Maps. */

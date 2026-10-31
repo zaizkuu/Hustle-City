@@ -626,16 +626,16 @@ class WorldRenderer(private val e: GameEngine) {
 
     private val triX = FloatArray(3); private val triY = FloatArray(3); private val triZ = FloatArray(3)
 
-    /** The GPS route as a blue band along the roads with white arrows pointing the way. */
+    /** The GPS route as a blue band down the player's lane with white arrows pointing the way. */
     private fun drawRoute() {
         if (cinematic) return
         val gps = e.gps
-        if (!gps.active) return
-        val r = gps.route
-        val wide = if (mapMode) max(7f, proj.dist / 60f) else 2.6f
+        if (!gps.active || gps.lanePoints < 2) return
+        val r = gps.lane
+        val wide = if (mapMode) max(7f, proj.dist / 60f) else 2.4f
         val col = scene.withAlpha(c(0xFF2F80ED), if (mapMode) .92f else .62f)
         val arrow = scene.withAlpha(0xFFFFFFFF.toInt(), .9f)
-        for (q in 0 until gps.points - 1) {
+        for (q in 0 until gps.lanePoints - 1) {
             val x0 = r[q * 2]; val y0 = r[q * 2 + 1]; val x1 = r[q * 2 + 2]; val y1 = r[q * 2 + 3]
             if (max(x0, x1) < bbox[0] - wide || min(x0, x1) > bbox[2] + wide || max(y0, y1) < bbox[1] - wide || min(y0, y1) > bbox[3] + wide) continue
             val dx = x1 - x0; val dy = y1 - y0
@@ -1766,7 +1766,7 @@ class WorldRenderer(private val e: GameEngine) {
         }
         // waypoint
         val wp = e.city.building(s.player.waypoint)
-        // with GPS on, the banner shows the way; the label marks the place only once it's in view
+        // with GPS on, the blue trail shows the way; the label marks the place only once it's in view
         val inView = wp != null && proj.project(wp.doorX, wp.doorY, wp.height + 4f, tmp) && tmp[0] in 0f..w.toFloat() && tmp[1] in 0f..h.toFloat()
         if (wp != null && (!e.gps.active || mapMode || inView)) {
             val (fx, fy) = e.focusPoint()

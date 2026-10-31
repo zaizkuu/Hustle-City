@@ -2,11 +2,12 @@ package com.hustlecity.game.engine
 
 import com.hustlecity.game.world.RoadHit
 import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.sqrt
 
 /**
- * Turn-by-turn navigation to the waypoint: the shortest way over the road network (Dijkstra over the junctions),
- * joined to the player's position and to the destination's front door.
+ * Navigation to the waypoint: the shortest way over the road network (Dijkstra over the junctions), joined to the
+ * player's position and to the destination's front door, and the same way laid along the player's lane for the trail.
  */
 class Gps(private val e: GameEngine) {
     /** Route polyline as x, y pairs, from the player to the door. */
@@ -25,6 +26,15 @@ class Gps(private val e: GameEngine) {
     var roadName = ""
         private set
     val active get() = points >= 2 && e.state.player.waypoint >= 0
+    /**
+     * The route as it's painted on the road, x, y pairs: down the middle of the player's own lane (on the right, or the
+     * left where traffic keeps left; before a turn, the lane the turn is made from), curving through the junctions,
+     * from the player to the door.
+     */
+    var lane = FloatArray(0)
+        private set
+    var lanePoints = 0
+        private set
 
     private var lastX = Float.NaN
     private var lastY = Float.NaN
@@ -43,7 +53,7 @@ class Gps(private val e: GameEngine) {
     private val hitA = RoadHit()
     private val hitB = RoadHit()
 
-    fun clear() { points = 0; distance = 0f; lastTarget = -1 }
+    fun clear() { points = 0; lanePoints = 0; distance = 0f; lastTarget = -1 }
 
     /** Recomputes the route a couple of times a second, or right away when the destination changes. */
     fun update(dt: Float) {
@@ -121,8 +131,11 @@ class Gps(private val e: GameEngine) {
         add(px, py, -1)
         add(hitA.x, hitA.y, hitA.edge)
         val ea = g.edges[hitA.edge]; val eb = g.edges[hitB.edge]
+        // the stretches of road driven, for painting the route in the lane
+        val legs = ArrayList<Leg>()
         if (ea.id == eb.id) {
             add(hitB.x, hitB.y, -1)
+            legs += Leg(ea.id, hitA.s, hitB.s, false, false)
         } else {
             val n = g.nodes.size
             if (dist.size < n) { dist = FloatArray(n); prevNode = IntArray(n); prevEdge = IntArray(n); done = BooleanArray(n) }
@@ -165,12 +178,104 @@ class Gps(private val e: GameEngine) {
                 add(g.nodes[c].x, g.nodes[c].y, nextEdge)
             }
             add(hitB.x, hitB.y, -1)
+            legs += Leg(ea.id, hitA.s, if (chain[0] == ea.a) 0f else ea.len, false, true)
+            for (k in 0 until chain.size - 1) {
+                val ed = g.edges[prevEdge[chain[k + 1]]]
+                val fwd = chain[k] == ed.a
+                legs += Leg(ed.id, if (fwd) 0f else ed.len, if (fwd) ed.len else 0f, true, true)
+            }
+            legs += Leg(eb.id, if (chain.last() == eb.a) 0f else eb.len, hitB.s, true, false)
         }
         add(dx, dy, -1)
         route = out.toFloatArray()
         segEdge = edgeOf.toIntArray()
         points = route.size / 2
         directions()
+        laneRoute(px, py, dx, dy, legs)
+    }
+
+    /** A stretch of the route along road [edge], from [s0] to [s1] meters from its start, from and to a junction or not. */
+    private class Leg(val edge: Int, val s0: Float, val s1: Float, val fromJunction: Boolean, val toJunction: Boolean)
+
+    private val laneOut = ArrayList<Float>()
+
+    /** Lays the route along the lanes: each road in the lane on the driver's side, joined by curves through the junctions. */
+    private fun laneRoute(px: Float, py: Float, dx: Float, dy: Float, legs: List<Leg>) {
+        val g = e.city.roads
+        val left = e.city.leftHand
+        val out = laneOut
+        out.clear()
+        fun add(x: Float, y: Float) {
+            if (out.size >= 2 && abs(out[out.size - 2] - x) + abs(out[out.size - 1] - y) < .05f) return
+            out += x; out += y
+        }
+        // (a stretch of no length, where the route starts or ends right at a junction, has no direction to go by)
+        val legsUsed = legs.filter { abs(it.s1 - it.s0) > .01f }.ifEmpty { legs.take(1) }
+        // to start with, the lane the player is in, if they're on their side of the first road
+        var laneNo = 0
+        legsUsed.firstOrNull()?.let { l ->
+            val ed = g.edges[l.edge]
+            val sg = if (l.s1 >= l.s0) 1f else -1f
+            val side = ((px - ed.ax) * -ed.uy * sg + (py - ed.ay) * ed.ux * sg) * (if (left) -1f else 1f)
+            if (side > 0f) laneNo = floor(side / ed.cls.laneWidth).toInt().coerceIn(0, ed.cls.lanes - 1)
+        }
+        var lastX = 0f; var lastY = 0f; var lastDx = 0f; var lastDy = 0f
+        for ((i, l) in legsUsed.withIndex()) {
+            val ed = g.edges[l.edge]
+            val sg = if (l.s1 >= l.s0) 1f else -1f
+            val ux = ed.ux * sg; val uy = ed.uy * sg
+            // the lane: a turn toward the near side is made from the outer lane, toward the far side from the inner one
+            legsUsed.getOrNull(i + 1)?.let { n ->
+                val ne = g.edges[n.edge]
+                val nsg = if (n.s1 >= n.s0) 1f else -1f
+                val cross = ux * ne.uy * nsg - uy * ne.ux * nsg
+                val nearSide = if (left) cross < -.5f else cross > .5f
+                val farSide = if (left) cross > .5f else cross < -.5f
+                if (nearSide) laneNo = ed.cls.lanes - 1 else if (farSide) laneNo = 0
+            }
+            val off = (laneNo.coerceIn(0, ed.cls.lanes - 1) + .5f) * ed.cls.laneWidth * (if (left) -1f else 1f)
+            // right of travel in a y-down world is (-uy, ux)
+            val rx = -uy * off; val ry = ux * off
+            // short of the junctions at either end, where the curves take over
+            var sa = l.s0; var sb = l.s1
+            if (l.fromJunction) sa += sg * (if (l.s0 < ed.len * .5f) ed.clearA else ed.clearB)
+            if (l.toJunction) sb -= sg * (if (l.s1 < ed.len * .5f) ed.clearA else ed.clearB)
+            if ((sb - sa) * sg < 0f) { val m = (sa + sb) * .5f; sa = m; sb = m }
+            val x0 = ed.ax + ed.ux * sa + rx; val y0 = ed.ay + ed.uy * sa + ry
+            val x1 = ed.ax + ed.ux * sb + rx; val y1 = ed.ay + ed.uy * sb + ry
+            if (i == 0) { add(px, py); add(x0, y0) } else curve(lastX, lastY, lastDx, lastDy, x0, y0, ux, uy, ::add)
+            add(x1, y1)
+            lastX = x1; lastY = y1; lastDx = ux; lastDy = uy
+        }
+        if (legsUsed.isEmpty()) add(px, py)
+        add(dx, dy)
+        if (lane.size < out.size) lane = FloatArray(out.size + 32)
+        for (k in out.indices) lane[k] = out[k]
+        lanePoints = out.size / 2
+    }
+
+    /**
+     * From (x1, y1) heading (d1x, d1y) to (x2, y2) heading (d2x, d2y): a curve through the corner where the two lanes
+     * would meet, or straight across when they run on (or back) in line.
+     */
+    private fun curve(x1: Float, y1: Float, d1x: Float, d1y: Float, x2: Float, y2: Float, d2x: Float, d2y: Float, add: (Float, Float) -> Unit) {
+        val gx = x2 - x1; val gy = y2 - y1
+        val gap = sqrt(gx * gx + gy * gy)
+        val cr = d1x * d2y - d1y * d2x
+        if (gap > .3f && abs(cr) > .17f) {
+            // where the lanes cross: (x1, y1) + d1 t = (x2, y2) + d2 u, ahead of the one and behind the other
+            val t = (gx * d2y - gy * d2x) / cr
+            val u = (gx * d1y - gy * d1x) / cr
+            if (t > 0f && u < 0f && t < gap * 2f) {
+                val cx = x1 + d1x * t; val cy = y1 + d1y * t
+                for (k in 1..8) {
+                    val q = k / 8f; val a = (1f - q) * (1f - q); val b = 2f * q * (1f - q); val c = q * q
+                    add(a * x1 + b * cx + c * x2, a * y1 + b * cy + c * y2)
+                }
+                return
+            }
+        }
+        add(x2, y2)
     }
 
     /** Distance left and the next turn, measured along the route. */
@@ -202,7 +307,7 @@ class Gps(private val e: GameEngine) {
         return sqrt(dx * dx + dy * dy)
     }
 
-    /** Short instruction for the banner. */
+    /** The next turn in words. */
     fun instruction(): String = when {
         !active -> ""
         turn == 0 -> "Continue to your destination"
