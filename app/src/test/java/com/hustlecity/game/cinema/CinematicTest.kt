@@ -1163,6 +1163,33 @@ class CinematicTest {
         inside(e, "n13_cafe", 2.6f, { u -> floatArrayOf(sc.w * .5f, sc.d * .5f, 10f - 1f * u, 2.6f + .25f * u, 30f) }, warm = 30f)
     }
 
+    /** The goods on the shelves, store by store, close up: a frame or two each (a check on the HD product shapes). */
+    @Test
+    fun p1() {
+        if (!on("p1")) { assumeTrue(false); return }
+        val stores = listOf(
+            "supermarket" to listOf("drinks_fridge", "shelf", "ice_cream_freezer", "shelf"),
+            "liquor" to listOf("drinks_fridge", "shelf", "shelf"),
+            "produce" to listOf("produce", "produce", "produce"),
+            "florist" to listOf("flower_stand", "flower_stand", "flower_stand"),
+            "coffee" to listOf("coffee_machine", "pastry_case", "pastry_case"),
+            "fastfood" to listOf("grill", "fryer", "pizza_oven", "drinks_fridge"),
+            "cinema" to listOf("concession_stand", "concession_stand"),
+            "nightclub" to listOf("cocktail_bar"),
+        )
+        for ((type, pieces) in stores) {
+            val e = engine("nyc", 11f)
+            val sc = openBusiness(e, type, "Shop", 10..22, 7..16, emptyList(), 0.0) { room, _, _ ->
+                var x = 1
+                pieces.map { id -> PlacedItem(id, x, room + 1, 0).also { x += (Catalog.item(id)?.w ?: 1) + 1 } }
+            }
+            val biz = e.state.businessAt(sc.building.id)!!
+            for ((pid, _) in biz.type.products) biz.stock[pid] = 400
+            val span = pieces.sumOf { (Catalog.item(it)?.w ?: 1) + 1 }.toFloat()
+            inside(e, "p1_$type", .1f, { _ -> floatArrayOf(1f + span * .5f, biz.backRoom.coerceAtLeast(0) + 2.2f, 4.6f, .45f, 38f) }, warm = 1f)
+        }
+    }
+
     /** A rainy night crossing in Midtown: umbrellas, headlights, the street a mirror. */
     @Test
     fun n14() {

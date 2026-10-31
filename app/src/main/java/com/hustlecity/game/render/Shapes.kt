@@ -54,3 +54,40 @@ fun Scene3D.alongBox(x: Float, y: Float, face: Int, along: Float, across: Float,
         else -> box(x - hc + shiftOut, y - ha, z0, x + hc + shiftOut, y + ha, z1, top, side)
     }
 }
+
+/**
+ * A turned shape (bottles, cans, fruit, cups, buns): rings of radius [rs] (times [rx] along x and [ry] along y, so it
+ * can be oval) at heights [zs], bottom to top, [sides] around. Band i, between rings i and i + 1, is [colors] i (the last
+ * color carries on); a flat cap in [cap] closes the top when the last ring is open. Faces turned from the camera are left out.
+ */
+fun Scene3D.lathe(cx: Float, cy: Float, rx: Float, ry: Float, rs: FloatArray, zs: FloatArray, colors: IntArray, sides: Int = 8,
+                   cap: Int = colors.last(), count: Int = rs.size) {
+    val n = sides.coerceIn(3, 16)
+    val scale = (rx + ry) * .5f
+    for (b in 0 until count - 1) {
+        val r0 = rs[b]; val r1 = rs[b + 1]; val z0 = zs[b]; val z1 = zs[b + 1]
+        if (r0 <= 0f && r1 <= 0f) continue
+        val color = colors[b.coerceAtMost(count - 1)]
+        val dz = z1 - z0; val dr = (r0 - r1) * scale
+        for (i in 0 until n) {
+            val a0 = i * 6.2832f / n; val a1 = (i + 1) * 6.2832f / n
+            val c0 = cos(a0); val s0 = sin(a0); val c1 = cos(a1); val s1 = sin(a1)
+            val am = (a0 + a1) * .5f; val nx = cos(am); val ny = sin(am)
+            val mr = (r0 + r1) * .5f
+            val mx = cx + nx * mr * rx; val my = cy + ny * mr * ry; val mz = (z0 + z1) * .5f
+            if ((camLX - mx) * nx * dz + (camLY - my) * ny * dz + (proj.camZ - mz) * dr <= 0f) continue
+            val col = lit(color, sideShade(nx, ny) * (if (dr > dz) 1.08f else 1f))
+            var k = 0
+            sx[k] = cx + c0 * r0 * rx; sy[k] = cy + s0 * r0 * ry; sz[k] = z0; k++
+            if (r0 > 0f) { sx[k] = cx + c1 * r0 * rx; sy[k] = cy + s1 * r0 * ry; sz[k] = z0; k++ }
+            sx[k] = cx + c1 * r1 * rx; sy[k] = cy + s1 * r1 * ry; sz[k] = z1; k++
+            if (r1 > 0f) { sx[k] = cx + c0 * r1 * rx; sy[k] = cy + s0 * r1 * ry; sz[k] = z1; k++ }
+            poly(k, sx, sy, sz, col)
+        }
+    }
+    val top = count - 1
+    if (rs[top] > 0f && proj.camZ > zs[top]) {
+        for (i in 0 until n) { val a = i * 6.2832f / n; sx[i] = cx + cos(a) * rs[top] * rx; sy[i] = cy + sin(a) * rs[top] * ry; sz[i] = zs[top] }
+        poly(n, sx, sy, sz, lit(cap, 1f))
+    }
+}
