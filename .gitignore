@@ -9,6 +9,8 @@ captures/
 .cxx/
 *.keystore
 !debug.keystore
+*.jks
+keystore.properties
 dist/
 
 # agent worktrees

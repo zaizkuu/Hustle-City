@@ -35,7 +35,22 @@ jobs:
           sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri
           xvfb-run -a -s "-screen 0 1920x1080x24" ./gradlew :desktop:test -PgpuTest --stacktrace
 
+      # the permanent release key, from the repository's secrets (HUSTLE_KEYSTORE_B64: the .jks file in base64;
+      # HUSTLE_KEYSTORE_PASSWORD: its password). Without them the release APK gets a throwaway debug key.
+      - name: Release signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.HUSTLE_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "HUSTLE_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No HUSTLE_KEYSTORE_B64 secret: app-release.apk is signed with a throwaway debug key and can't update an installed copy"
+          fi
+
       - name: Build APKs
+        env:
+          HUSTLE_KEYSTORE_PASSWORD: ${{ secrets.HUSTLE_KEYSTORE_PASSWORD }}
         run: ./gradlew assembleDebug assembleRelease --stacktrace
 
       - name: Upload APKs
