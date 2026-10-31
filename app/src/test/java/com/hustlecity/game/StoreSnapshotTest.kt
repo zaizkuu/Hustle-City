@@ -36,7 +36,7 @@ class StoreSnapshotTest {
 
     private class Shop(val e: GameEngine, val b: Building, val biz: Business, val sc: InteriorScene)
 
-    private fun shop(typeId: String, depths: IntRange = 9..10, furnish: (Business, Int, Int, Int) -> Unit): Shop {
+    private fun shop(typeId: String, depths: IntRange = 9..13, furnish: (Business, Int, Int, Int) -> Unit): Shop {
         val e = GameEngine(null)
         e.newGame("Tester", 1, 0, 1)
         e.ui.tip = null
@@ -197,7 +197,7 @@ class StoreSnapshotTest {
         val label = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); textSize = 26f }
         for ((k, entry) in stores.withIndex()) {
             val (type, pieces) = entry
-            val s = shop(type, 8..10) { biz, _, _, room ->
+            val s = shop(type, 8..13) { biz, _, _, room ->
                 var x = 1
                 for (id in pieces) {
                     val def = Catalog.item(id)!!

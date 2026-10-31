@@ -58,7 +58,7 @@ class UiSnapshotTest {
     private fun game(): GameEngine = GameEngine(null).also { it.newGame("Alex Rivera", 1, 2, 1) }
 
     private fun withBusiness(e: GameEngine, type: String = "coffee"): Int {
-        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.area in 70..140 && it.neighborhood == 0 }
+        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.area in 70..260 && it.neighborhood == 0 }
         e.state.rentals += Rental(b.id, b.baseRent, 1)
         val biz = e.startBusiness(b.id, type, "Golden Bean")!!
         biz.furniture += PlacedItem("cash_register", 1, 1, 0)
@@ -198,7 +198,7 @@ class UiSnapshotTest {
 
     /** A gift shop with a back room: its shelves stocked, a storage shelf of spare boxes, and a shelf's stock card open. */
     private fun giftShop(e: GameEngine): com.hustlecity.game.world.Building {
-        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.placeId == null && it.gridW in 12..15 && it.gridD in 8..10 }
+        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.placeId == null && it.gridW in 12..15 && it.gridD in 8..13 }
         e.state.rentals += Rental(b.id, b.baseRent, 1)
         val biz = e.startBusiness(b.id, "giftshop", "Gift Corner")!!
         val y = biz.backRoom + 1

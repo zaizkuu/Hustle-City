@@ -157,7 +157,7 @@ class TrailerTest {
         e.newGame("Alex Rivera", 1, 2, 1)
         e.ui.tip = null
         e.state.minute = 13L * 60 + 30
-        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.placeId == null && it.gridW in 13..16 && it.gridD in 9..10 }
+        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.placeId == null && it.gridW in 13..16 && it.gridD in 9..13 }
         e.state.rentals += Rental(b.id, b.baseRent, 1)
         val biz = e.startBusiness(b.id, "supermarket", "Corner Market")!!
         biz.tempClosed = false

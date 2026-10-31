@@ -69,8 +69,10 @@ class InteriorSoakTest {
                 if (!v.x.isFinite() || !v.y.isFinite()) { bad++; note("$typeId: $who at a bad position"); continue }
                 // the door is in the front wall, at y = d: people come and go through it
                 if (v.x < -.05f || v.x > sc.w + .05f || v.y < -.05f || v.y > sc.d + 1.6f) { outside++; note("$typeId: $who outside the room at %.1f,%.1f".format(v.x, v.y)) }
+                // inside a piece of furniture, not just up against it (browsing a shelf means standing at its edge)
                 val tx = v.x.toInt(); val ty = v.y.toInt()
-                val onItem = tx in 0 until sc.w && ty in 0 until sc.d && solid[ty * sc.w + tx]
+                val fx = v.x - tx; val fy = v.y - ty
+                val onItem = tx in 0 until sc.w && ty in 0 until sc.d && solid[ty * sc.w + tx] && fx in .1f..(.9f) && fy in .1f..(.9f)
                 if (onItem && v.seat == null && !v.seated && v.ghost <= 0f && v.moving > .5f) {
                     inFurniture++; note("$typeId: $who walking through furniture at %.1f,%.1f (stage ${v.stage})".format(v.x, v.y))
                 }

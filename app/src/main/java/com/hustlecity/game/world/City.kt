@@ -134,9 +134,37 @@ class Building(
         }
     val value: Double get() = (baseRent * 140 / 1000.0).roundToInt() * 1000.0
 
-    /** Interior grid size in 1 m tiles. */
-    val gridW: Int get() = (sqrt(area * 1.6).roundToInt()).coerceIn(6, 22)
-    val gridD: Int get() = (area / gridW.toFloat()).roundToInt().coerceIn(5, 16)
+    /** Interior grid size in 1 m tiles: the room's shape from [fitRooms], or (games saved before it) from the area. */
+    val gridW: Int get() = if (roomW > 0) roomW else (sqrt(area * 1.6).roundToInt()).coerceIn(6, 22)
+    val gridD: Int get() = if (roomD > 0) roomD else (area / gridW.toFloat()).roundToInt().coerceIn(5, 16)
+    private var roomW = 0
+    private var roomD = 0
+
+    /**
+     * Gives the building rooms of its own shape: a shop as wide as its frontage and as deep as the share of the
+     * building it takes (deep buildings, deep shops; never less than 7 m, so there's room for a back room), an
+     * apartment as wide as the frontage, offices and warehouses the whole floor. The area (and so the rent) becomes
+     * the room's.
+     */
+    fun fitRooms() {
+        val front = (w - 1f).roundToInt()
+        val back = (d - 1f).roundToInt()
+        when (kind) {
+            BKind.RETAIL -> {
+                roomW = front.coerceIn(6, 22)
+                // the generator's depth for the shop (3.5 to 9 m of frontage) picks how much of the building it takes
+                val share = .5f + .35f * ((area / max(w, 1f) - 3.5f) / 5.5f).coerceIn(0f, 1f)
+                roomD = (back * share).roundToInt().coerceIn(7, max(7, min(16, back)))
+            }
+            BKind.RESIDENTIAL -> {
+                roomW = front.coerceIn(6, 16)
+                roomD = (area / roomW.toFloat()).roundToInt().coerceIn(5, max(5, min(12, back)))
+            }
+            BKind.OFFICE, BKind.WAREHOUSE -> { roomW = front.coerceIn(6, 24); roomD = back.coerceIn(6, 18) }
+            else -> return
+        }
+        area = roomW * roomD
+    }
 
     fun contains(x: Float, y: Float): Boolean { val lx = lx(x, y); val ly = ly(x, y); return lx in 0f..w && ly in 0f..d }
     fun distToDoor(x: Float, y: Float): Float { val dx = x - doorX; val dy = y - doorY; return sqrt(dx * dx + dy * dy) }
@@ -342,6 +370,7 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC, val layout: Int = L
         walls = layout.walls
         neighborhoods = layout.neighborhoods
         bounds = layout.bounds
+        if (this.layout >= 3) for (b in buildings) b.fitRooms()
         paved = bounds.copyOf().also { p ->
             for (e in roads.edges) {
                 val m = e.cls.outer + 3f
@@ -530,9 +559,10 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC, val layout: Int = L
     companion object {
         /**
          * Revision of the city generator new games get. 1: as first played; 2: dead ends that ran on into a river
-         * stop at the bank (which moves lots, so games saved on 1 keep it).
+         * stop at the bank (which moves lots, so games saved on 1 keep it); 3: rooms in the building's own shape
+         * ([Building.fitRooms]), so furniture placed in older games still fits theirs.
          */
-        const val LAYOUT = 2
+        const val LAYOUT = 3
         /** City walls are 6 m thick on their centre line; trees and street furniture keep this far from it. */
         const val WALL_BAND = 6f
         private val ROOFS = intArrayOf(c(0xFF6E7378), c(0xFF5F6368), c(0xFF7D8085), c(0xFF8A8D91), c(0xFF55595E))

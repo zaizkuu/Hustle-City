@@ -50,8 +50,8 @@ class ShelfStockTest {
         }
     }
 
-    /** A freshly rented store (a typical retail unit of the classic city: 8 to 10 tiles deep). */
-    private fun store(typeId: String = "giftshop", minW: Int = 12, depths: IntRange = 8..10): Store {
+    /** A freshly rented store (a typical retail unit of the classic city: 12 tiles or so deep). */
+    private fun store(typeId: String = "giftshop", minW: Int = 12, depths: IntRange = 8..12): Store {
         val e = GameEngine(null)
         e.newGame("T", 0, 0, 1)
         e.state.player.money = 100_000.0
@@ -174,7 +174,8 @@ class ShelfStockTest {
         var carried = false
         var waited = false
         val seen = ArrayList<Int>()
-        run(sc, 25f) {
+        // (a deep store is a long walk from the back room)
+        run(sc, 40f) {
             if (sc.staff.any { it.carry == 1 }) carried = true
             if (shelf.waiting(i) && shelf.visible(i) == 0) waited = true
             seen += shelf.visible(i)

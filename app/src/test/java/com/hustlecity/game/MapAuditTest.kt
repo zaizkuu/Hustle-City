@@ -39,6 +39,11 @@ class MapAuditTest {
         val then = City(1337L, Maps.NYC, 1)
         val now = City(1337L, Maps.NYC)
         assertTrue("the old layout is still generated as it was", then.buildings.size == 816)
+        // and layout 2 (the river fix) has the same city as today, with the area-sized rooms it was played with
+        val two = City(1337L, Maps.NYC, 2)
+        assertTrue(two.buildings.size == now.buildings.size && two.buildings.zip(now.buildings).all { (a, b) -> a.cx == b.cx && a.cy == b.cy })
+        val shop = two.buildings.indices.first { two.buildings[it].kind == com.hustlecity.game.world.BKind.RETAIL }
+        assertTrue("layout 2 keeps its rooms", two.buildings[shop].gridW != now.buildings[shop].gridW || two.buildings[shop].gridD != now.buildings[shop].gridD || two.buildings[shop].area != now.buildings[shop].area)
         assertTrue("the layouts differ (or this test can go)", then.buildings.size != now.buildings.size || then.roads.edges.size != now.roads.edges.size)
         val again = City(old.seed, old.mapId, old.layout)
         for (i in then.buildings.indices) assertTrue(then.buildings[i].cx == again.buildings[i].cx && then.buildings[i].cy == again.buildings[i].cy)

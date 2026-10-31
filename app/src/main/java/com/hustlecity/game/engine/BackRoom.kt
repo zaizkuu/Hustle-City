@@ -67,15 +67,18 @@ class BackRoom(val depth: Int, val doorX: Int, val doorW: Int) {
 
         /**
          * Lays out a back room around a store's furniture: the deepest room from the preferred depth down to 3 rows, with
-         * the doorway near the right wall (or the left, or the middle), whose wall cuts through nothing, whose doorway is
-         * clear and that leaves every piece customers use out front. Returns (depth, doorX), or null when that can't be
+         * the doorway in the middle of a wide store (else near the right wall, the left, or a quarter of the way along),
+         * whose wall cuts through nothing, whose doorway is clear and that leaves every piece customers use out front. Returns (depth, doorX), or null when that can't be
          * done without moving furniture.
          */
         fun fit(items: List<PlacedItem>, w: Int, d: Int): Pair<Int, Int>? {
             val top = preferredDepth(w, d)
             if (top < 3) return null
             val dw = doorWidth(w)
-            val doors = listOf(w - dw - 1, 1, w / 4, (w * 3) / 4 - dw).filter { it in 0..w - dw }.distinct()
+            // in a wide store the middle of the back wall first, so no corner of the floor is a long walk from the stock
+            val middle = (w - dw) / 2
+            val doors = (if (w >= 12) listOf(middle, w - dw - 1, 1, w / 4, (w * 3) / 4 - dw) else listOf(w - dw - 1, 1, w / 4, (w * 3) / 4 - dw))
+                .filter { it in 0..w - dw }.distinct()
             for (depth in top downTo 3) for (door in doors) {
                 if (allows(BackRoom(depth, door, dw), items)) return depth to door
             }
