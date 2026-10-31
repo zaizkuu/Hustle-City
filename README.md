@@ -34,7 +34,8 @@ Saves and settings are kept in `%APPDATA%\HustleCity`.
 ## Features
 
 **The city**
-- Procedural Manhattan-style grid: 6 neighborhoods (Garment District, Hell's Kitchen, Midtown, Murray Hill, Lower Manhattan, Industry City), about 600 buildings with addresses, parks, parking lots and gas stations.
+- Five cities to start in: New York (Manhattan's tilted grid, Central Park, Broadway and Brooklyn across the East River), Manila (Manila Bay, the Pasig River, Intramuros, Binondo and Makati), Tokyo (the palace and its moat, Shinjuku, Shibuya's scramble, Ginza and Akihabara, with traffic on the left), Seoul (the Han River and its bridges, Gyeongbokgung, Namsan Tower, Myeongdong and Gangnam), and Hustle City, the original grid.
+- Hustle City, the original: a procedural Manhattan-style grid with 6 neighborhoods (Garment District, Hell's Kitchen, Midtown, Murray Hill, Lower Manhattan, Industry City), about 600 buildings with addresses, parks, parking lots and gas stations.
 - Buildings with personality: brick walk-ups with fire escapes and water towers, brownstones with stoops and bay windows, art deco towers with setbacks and spires, glass skyscrapers, stone offices, modern blocks with balconies and industrial sheds with sawtooth roofs. Storefronts dress up for their business (striped awnings, neon, cinema marquees, window displays, sidewalk tables) and close their shutters at night.
 - Street life in detail: lamp posts that light the street, hydrants, benches, bus shelters, newspaper boxes, bike racks and planters; parks with fountains; trees that blossom in spring, turn red and gold in autumn and stand bare in winter. Cars have wheels, lights and brake lights, and taxis cruise the avenues; in HD the sedans, taxis, SUVs and sports cars near the camera are detailed low-poly models in each car's own paint.
 - A day/night cycle with sun-tracking shadows, lit windows and glowing street lamps.
@@ -43,7 +44,7 @@ Saves and settings are kept in `%APPDATA%\HustleCity`.
 - Walk with the on-screen joystick, or drive your own car with fuel, condition and cargo space. Taxis are available from any building card.
 - Car controls with a steering wheel and gas/brake pedals (or a joystick), a speedometer dashboard, and Park (pulls over to the curb) and Get out buttons.
 - A minimap that turns with the camera, a full city map, and GPS navigation: a blue route line on the road and the maps, plus turn-by-turn directions with the distance and time left.
-- 3D people built from boxes, with walking, sitting, dancing and treadmill-running animations. Pedestrians carry umbrellas in the rain.
+- 3D people: in HD, 13 low-poly characters that walk, run, sit, carry boxes and dance, each in their own colours (light box figures in the classic renderer and far from the camera). Pedestrians carry umbrellas in the rain.
 - Dynamic weather that follows the seasons (the game starts in April): clear, cloudy, rain, thunderstorms with lightning and thunder, snow that settles on roofs and sidewalks, and fog. Streets look wet after rain, and the top bar shows a three-day forecast.
 
 **Your character**

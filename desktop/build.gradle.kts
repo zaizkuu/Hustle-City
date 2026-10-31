@@ -99,6 +99,8 @@ tasks.test {
     systemProperty("snapshots.dir", layout.buildDirectory.dir("snapshots").get().asFile.absolutePath)
     // -PgpuTest also runs the HD renderer through OpenGL (needs a display and an OpenGL 3.3 driver)
     if (project.hasProperty("gpuTest")) systemProperty("hustle.gpuTest", "true")
+    // -PstoreShots=<folder> renders the store-page screenshots (see StoreShots), the same way
+    project.findProperty("storeShots")?.let { systemProperty("hustle.storeShots", rootProject.file(it.toString()).absolutePath) }
     // -PcinemaIn=... renders recorded trailer shots with the desktop GL (see CinemaRender)
     for ((k, prop) in listOf("cinemaIn" to "cinema.in", "cinemaOut" to "cinema.out", "cinemaShots" to "cinema.shots", "cinemaFrames" to "cinema.frames", "cinemaPlan" to "cinema.plan"))
         project.findProperty(k)?.let { systemProperty(prop, rootProject.file(it.toString()).takeIf { _ -> k == "cinemaIn" || k == "cinemaOut" || k == "cinemaPlan" }?.absolutePath ?: it.toString()) }

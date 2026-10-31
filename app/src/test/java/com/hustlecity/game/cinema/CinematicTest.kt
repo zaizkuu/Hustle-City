@@ -529,7 +529,7 @@ class CinematicTest {
         // the walk signal comes on three seconds before the shot, after a long red has gathered people at every corner
         val warm = 26f
         e.traffic.lightClock = ((34.5f - node.phase - (warm - 3f)) % Traffic.SCRAMBLE_CYCLE + Traffic.SCRAMBLE_CYCLE) % Traffic.SCRAMBLE_CYCLE
-        fly(e, "c16_scramble", 2.6f, listOf(Key(s.x, s.y, 56f, 2.55f, 31f), Key(s.x, s.y, 49f, 2.85f, 27f)), easing = .2f, warm = warm, haze = .25f,
+        fly(e, "c16_scramble", 2.6f, listOf(Key(s.x, s.y, 56f, 1.95f, 34f), Key(s.x, s.y, 49f, 2.22f, 30f)), easing = .2f, warm = warm, haze = .25f,
             crowd = 45f) { _, _ ->
             clearWeather(e)
         }
