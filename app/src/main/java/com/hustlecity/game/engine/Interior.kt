@@ -750,9 +750,27 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     }
 
     private fun goTo(v: Person, goal: Int, occ: BooleanArray) {
-        val here = idx(floor(v.x).toInt().coerceIn(0, w - 1), floor(v.y).toInt().coerceIn(0, d - 1))
+        val tx = floor(v.x).toInt().coerceIn(0, w - 1); val ty = floor(v.y).toInt().coerceIn(0, d - 1)
+        var here = idx(tx, ty)
+        // standing up against something (at a shelf, in a seat) or off to one side of a tile: set off from the middle of
+        // the nearest open tile, since the straight runs are only checked from tile middles
+        var fromEdge = false
+        if (occ[here] || abs(v.x - (tx + .5f)) > .25f || abs(v.y - (ty + .5f)) > .25f) {
+            var best = if (occ[here]) -1 else here
+            var bd = if (occ[here]) Float.MAX_VALUE else (v.x - tx - .5f).let { it * it } + (v.y - ty - .5f).let { it * it }
+            for (k in 0 until 4) {
+                val n = idx(tx + DX[k], ty + DY[k])
+                if (n < 0 || occ[n] || backRoom?.blocks(tx, ty, tx + DX[k], ty + DY[k]) == true) continue
+                val dd = (v.x - n % w - .5f).let { it * it } + (v.y - n / w - .5f).let { it * it }
+                if (dd < bd) { bd = dd; best = n }
+            }
+            if (best >= 0) { here = best; fromEdge = true }
+        }
         v.goal = goal
-        v.path = if (goal < 0) IntArray(0) else smooth(here, bfs(here, goal, occ) ?: intArrayOf(goal), occ)
+        v.path = if (goal < 0) IntArray(0) else {
+            val p = smooth(here, bfs(here, goal, occ) ?: intArrayOf(goal), occ)
+            if (fromEdge && (p.isEmpty() || p[0] != here)) intArrayOf(here) + p else p
+        }
         v.pathIdx = 0
     }
 
