@@ -219,6 +219,8 @@ data class Business(
     var backRoom: Int = -1,
     /** First tile (x) of the doorway in the back room's wall. */
     var backDoor: Int = -1,
+    /** What the store's speakers play: [StoreMusic.RADIO], [StoreMusic.OFF], [StoreMusic.MINE] or a station's number. */
+    var music: Int = StoreMusic.RADIO,
     /** Staff perks paid for daily: "coffee", "health", "bonus". */
     val perks: MutableSet<String> = mutableSetOf(),
     /** Sales lost to tired staff ringing things up wrong, and restocks they missed, today. */
@@ -463,4 +465,13 @@ data class GameState(
     fun business(id: Int) = businesses.firstOrNull { it.id == id }
     fun rivalBusinessAt(buildingId: Int) = rivalBusinesses.firstOrNull { it.buildingId == buildingId }
     fun vehicle(id: Int) = vehicles.firstOrNull { it.id == id }
+}
+
+/** Choices for a store's speakers ([Business.music]); 0 and up pick a radio station. */
+object StoreMusic {
+    /** Whatever the player's phone radio is playing. */
+    const val RADIO = -1
+    const val OFF = -2
+    /** The player's own songs, shuffled. */
+    const val MINE = -3
 }

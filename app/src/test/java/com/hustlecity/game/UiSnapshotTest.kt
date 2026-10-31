@@ -321,6 +321,21 @@ class UiSnapshotTest {
         shoot(e, "ui_home.png")
     }
 
+    /** A store's speaker settings, with two of the player's own songs in the list and one playing. */
+    @Test
+    fun storeMusic() {
+        val e = game()
+        val b = giftShop(e)
+        val biz = e.state.businessAt(b.id)!!
+        biz.furniture += PlacedItem("speaker_medium", 0, biz.backRoom + 4, 0)
+        e.settings.songs.clear()
+        e.settings.songs += com.hustlecity.game.Song("Midnight Drive", "/music/midnight_drive.mp3")
+        e.settings.songs += com.hustlecity.game.Song("Corner Store Funk", "/music/corner_store_funk.mp3")
+        biz.music = com.hustlecity.game.model.StoreMusic.MINE
+        e.ui.panel = Panel.StoreMusic(biz.id)
+        shoot(e, "ui_store_music.png")
+    }
+
     @Test
     fun interiorDirect() {
         val e = game()

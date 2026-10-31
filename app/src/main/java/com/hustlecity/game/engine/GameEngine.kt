@@ -4,6 +4,7 @@ import android.content.Context
 import com.hustlecity.game.audio.Audio
 import com.hustlecity.game.audio.Sfx
 import com.hustlecity.game.data.Catalog
+import com.hustlecity.game.data.ItemFn
 import com.hustlecity.game.data.PlaceKind
 import com.hustlecity.game.model.CargoItem
 import com.hustlecity.game.model.GameState
@@ -62,6 +63,7 @@ class CameraRig {
 }
 
 class GameEngine(context: Context?) {
+    init { com.hustlecity.game.audio.SongPlayer.context = context?.applicationContext ?: context }
     val settings = Settings(context)
     val ui = UiState()
     val saves = SaveManager(context)
@@ -597,6 +599,7 @@ class GameEngine(context: Context?) {
             traffic.update(dt, camera.tx, camera.ty, 230f, bx, by)
         }
         interior?.update(dt, !simPaused() || skip != null)
+        updateStoreMusic()
         gps.update(dt)
         refreshHints()
 
@@ -830,6 +833,57 @@ class GameEngine(context: Context?) {
                 walkAmount = mag
             } else walkAmount = 0f
         }
+    }
+
+    // ------------------------------------------------------------------ store music
+
+    /** The store whose speakers are playing and what they play (business id to [Business.music]), or null for the phone. */
+    private var storeMusicKey: Pair<Int, Int>? = null
+
+    /** How loud a store's speakers play its music: 0 without speakers, louder with more (and bigger) ones. */
+    fun speakerGain(b: com.hustlecity.game.model.Business): Float {
+        val pts = b.furniture.sumOf { p -> Catalog.item(p.itemId)?.takeIf { it.fn == ItemFn.SPEAKER }?.music ?: 0 }
+        return if (pts <= 0) 0f else (.55f + .15f * pts).coerceAtMost(1f)
+    }
+
+    /**
+     * Inside one of your stores with speakers, they play what the store is set to (your phone's radio, a station of
+     * its own, your own songs, or nothing) instead of the phone; walking out hands the music back to the phone.
+     */
+    private fun updateStoreMusic() {
+        val sc = interior
+        val biz = if (sc != null && sc.mode == InteriorMode.BUSINESS) sc.business else null
+        val gain = biz?.let { speakerGain(it) } ?: 0f
+        val key = if (biz != null && gain > 0f) biz.id to biz.music else null
+        val mine = key?.second == com.hustlecity.game.model.StoreMusic.MINE
+        if (key == storeMusicKey && !(mine && !com.hustlecity.game.audio.SongPlayer.playing && settings.songs.isNotEmpty())) {
+            if (key != null) {
+                val v = settings.musicVolume * gain
+                if (mine) com.hustlecity.game.audio.SongPlayer.play(settings.songs.toList(), v) else Audio.musicVolume = v
+            }
+            return
+        }
+        storeMusicKey = key
+        // hand back to the phone first
+        com.hustlecity.game.audio.SongPlayer.stop()
+        Audio.radioOn = settings.radioOn
+        Audio.musicVolume = settings.musicVolume
+        if (Audio.station != settings.station) Audio.setStation(settings.station)
+        if (key == null) return
+        val choice = key.second
+        val v = settings.musicVolume * gain
+        when {
+            choice == com.hustlecity.game.model.StoreMusic.OFF -> Audio.radioOn = false
+            mine -> { Audio.radioOn = false; com.hustlecity.game.audio.SongPlayer.play(settings.songs.toList(), v) }
+            choice >= 0 -> { Audio.radioOn = true; Audio.setStation(choice); Audio.musicVolume = v }
+            else -> Audio.musicVolume = v
+        }
+    }
+
+    /** The app is going to the background: stop the songs (they start again on the next frame back). */
+    fun pauseMusic() {
+        com.hustlecity.game.audio.SongPlayer.stop()
+        storeMusicKey = null
     }
 
     /** Inside, the stick and the keys walk the player round the room, relative to the room's camera; out the door leaves. */

@@ -224,7 +224,9 @@ object BizCalc {
 
     fun decorScore(b: Business, building: Building?): Double {
         val area = building?.area ?: 75
-        val pts = b.furniture.sumOf { p -> Catalog.item(p.itemId)?.let { it.decor + it.music * 2 } ?: 0 }
+        // speakers count only while the music's on
+        val musicOn = b.music != com.hustlecity.game.model.StoreMusic.OFF
+        val pts = b.furniture.sumOf { p -> Catalog.item(p.itemId)?.let { it.decor + (if (musicOn) it.music * 2 else 0) } ?: 0 }
         return (pts / (area / 10.0)).coerceIn(0.0, 1.0)
     }
 

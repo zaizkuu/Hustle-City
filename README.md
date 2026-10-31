@@ -72,6 +72,7 @@ Saves and settings are kept in `%APPDATA%\HustleCity`.
 
 **Sound**
 - A phone radio with four procedurally generated stations (Lo-fi, Pop, Jazz, Electro), plus effects for purchases, the cash register, doors, notifications and the car engine. No audio files are shipped; everything is synthesized at runtime.
+- Store speakers: install loudspeakers and pick what your store plays: your phone's radio, a station of its own, nothing, or your own songs (MP3 and more on Android, MP3 and WAV on Windows), added with the file picker and played shuffled while you're inside. Music counts toward a store's atmosphere while it's on.
 
 **Management** (on the in-game HustlePhone)
 - **BizHub** has the tabs Insight, Inventory & Pricing, Schedule, Deliveries, Marketing and Settings.
@@ -161,6 +162,8 @@ Everything else in the game is generated in code. These came from free libraries
 | Trailer logo type: Anton | [Google Fonts](https://fonts.google.com/specimen/Anton) | SIL Open Font License | `tools/cinema/fonts/` (trailer tools only) |
 
 The scripts download their sources (with each site's own download links) and can be re-run to rebake. Each resource folder has a `CREDITS.txt` listing the exact assets.
+
+The Windows build plays MP3s with [JLayer and MP3SPI](https://github.com/umjammer/mp3spi) (LGPL 2.1), shipped unmodified as their own jars in the app folder.
 
 ## Trailers
 

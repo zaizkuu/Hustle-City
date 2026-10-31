@@ -27,6 +27,17 @@ import java.io.File
 
 fun main() {
     Platform.isDesktop = true
+    // songs for the store speakers: a Windows file dialog for MP3 and WAV files
+    Platform.pickSongs = { done ->
+        java.awt.EventQueue.invokeLater {
+            val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Add songs (MP3 or WAV)", java.awt.FileDialog.LOAD)
+            dialog.isMultipleMode = true
+            dialog.file = "*.mp3;*.wav"
+            dialog.setFilenameFilter { _, name -> name.endsWith(".mp3", true) || name.endsWith(".wav", true) }
+            dialog.isVisible = true
+            done(dialog.files.filter { it.isFile }.map { com.hustlecity.game.Song(it.nameWithoutExtension, it.absolutePath) })
+        }
+    }
     val engine = GameEngine(Context(dataDir()))
     engine.settings.applyAudio()
     Audio.start()

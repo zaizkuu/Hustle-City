@@ -4,6 +4,7 @@ import android.content.Context
 import com.hustlecity.game.Platform
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
@@ -43,8 +44,25 @@ class Settings(context: Context?) {
         if (com.hustlecity.game.audio.Audio.station != station) com.hustlecity.game.audio.Audio.setStation(station)
     }
 
+    /** The player's own music for their stores' speakers (kept on the device, not in the save). */
+    val songs = mutableStateListOf<com.hustlecity.game.Song>().apply {
+        prefs?.getString("songs", "")?.lineSequence()?.forEach { line ->
+            val tab = line.indexOf('\t')
+            if (tab > 0) add(com.hustlecity.game.Song(line.substring(0, tab), line.substring(tab + 1)))
+        }
+    }
+
+    /** Adds songs to the library (skipping ones already in it) and saves the list. */
+    fun addSongs(list: List<com.hustlecity.game.Song>) {
+        for (s in list) if (songs.none { it.ref == s.ref }) songs += s
+        save()
+    }
+
+    fun removeSong(s: com.hustlecity.game.Song) { songs.remove(s); save() }
+
     fun save() {
         prefs?.edit()
+            ?.putString("songs", songs.joinToString("\n") { "${it.name.replace('\t', ' ').replace('\n', ' ')}\t${it.ref}" })
             ?.putInt("quality", quality)
             ?.putInt("fpsCap", fpsCap)
             ?.putBoolean("showFps", showFps)

@@ -27,6 +27,8 @@ sealed class Panel {
     data class Trunk(val vehicleId: Int) : Panel()
     /** Paying for picked-up furniture at the checkout and having it delivered. */
     data class ShopDeliver(val buildingId: Int) : Panel()
+    /** What a store's speakers play: off, a radio station, or the player's own songs. */
+    data class StoreMusic(val businessId: Int) : Panel()
 }
 
 enum class ToastKind { INFO, GOOD, BAD, SAVE }

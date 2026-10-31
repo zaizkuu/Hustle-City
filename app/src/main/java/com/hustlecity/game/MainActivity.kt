@@ -1,10 +1,13 @@
 package com.hustlecity.game
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -20,8 +23,27 @@ object EngineHolder {
 }
 
 class MainActivity : ComponentActivity() {
+    /** Where the songs the player picks go once the system's file picker returns. */
+    private var songsPicked: ((List<Song>) -> Unit)? = null
+
+    /** The system file picker for music, keeping read access to what's picked so it plays after a restart too. */
+    private val pickSongs = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val songs = uris.mapNotNull { uri ->
+            runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            val name = runCatching {
+                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) c.getString(0) else null
+                }
+            }.getOrNull() ?: uri.lastPathSegment ?: return@mapNotNull null
+            Song(name.substringBeforeLast('.'), uri.toString())
+        }
+        songsPicked?.invoke(songs)
+        songsPicked = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Platform.pickSongs = { done -> songsPicked = done; pickSongs.launch(arrayOf("audio/*")) }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
@@ -51,6 +73,7 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         Audio.stop()
+        EngineHolder.current()?.pauseMusic()
         EngineHolder.current()?.let {
             it.settings.save()
             if (it.hasGame) it.save()

@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.Bolt
@@ -655,6 +656,7 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                     HButton(if (working) "Stop working" else "Start working", full, small = true, color = if (working) HC.Red else HC.Green) { e.toggleWork(biz) }
                     HButton("Work until %02d:00".format(biz.closeHour), full, small = true, color = HC.Teal) { e.workUntilClosing(biz) }
                     HButton("Clean (${biz.cleanliness.roundToInt()}%)", full, small = true, color = HC.GlassLight) { e.cleanStore(biz) }
+                    HButton("Music: " + musicLabel(e, biz), full, small = true, color = HC.Purple, icon = Icons.Filled.MusicNote) { e.ui.panel = Panel.StoreMusic(biz.id) }
                     // the back room: boxes waiting on the storage shelves
                     val shelves = BizCalc.storageBoxes(biz)
                     if (sc.backRoom != null || shelves > 0) {
@@ -942,4 +944,13 @@ private fun EndStat(label: String, value: String) {
         Text(value, style = HT.title, color = HC.Ink)
         Text(label, style = HT.small, color = HC.InkSoft)
     }
+}
+
+/** What a store's speakers are set to, for its button: "No speakers" when it has none yet. */
+fun musicLabel(e: GameEngine, biz: com.hustlecity.game.model.Business): String = when {
+    e.speakerGain(biz) <= 0f -> "no speakers"
+    biz.music == com.hustlecity.game.model.StoreMusic.OFF -> "off"
+    biz.music == com.hustlecity.game.model.StoreMusic.MINE -> "my songs"
+    biz.music >= 0 -> com.hustlecity.game.audio.Audio.stations.getOrNull(biz.music)?.name ?: "radio"
+    else -> "phone radio"
 }

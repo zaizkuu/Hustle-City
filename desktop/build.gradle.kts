@@ -45,6 +45,8 @@ dependencies {
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+    // MP3 decoding for the player's own songs on the store speakers (JLayer + MP3SPI, LGPL, shipped as their own jars)
+    implementation("com.googlecode.soundlibs:mp3spi:1.9.5.4")
 
     // OpenGL for the HD renderer
     implementation(platform("org.lwjgl:lwjgl-bom:3.3.6"))

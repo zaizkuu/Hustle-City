@@ -31,7 +31,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import com.hustlecity.game.model.StoreMusic
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -144,6 +146,7 @@ fun PanelHost(e: GameEngine, panel: Panel) {
         is Panel.Warehouse -> WarehousePanel(e, panel.businessId)
         is Panel.Trunk -> ManageStoragePanel(e, panel.vehicleId)
         is Panel.ShopDeliver -> ShopDeliverPanel(e, panel.buildingId)
+        is Panel.StoreMusic -> StoreMusicPanel(e, panel.businessId)
     }
 }
 
@@ -861,6 +864,70 @@ fun SleepPanel(e: GameEngine) {
         }
         val untilSeven = ((7 * 60 - (s.minute % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY).toInt()
         HButton("Until 07:00 (${untilSeven / 60}h ${untilSeven % 60}m)", Modifier.padding(top = 8.dp), color = HC.Purple) { e.sleepMinutes(untilSeven) }
+    }
+}
+
+// ------------------------------------------------------------------ store music
+
+/** The store's speakers: what they play (nothing, a station, your phone's radio, your own songs) and your song list. */
+@Composable
+private fun StoreMusicPanel(e: GameEngine, businessId: Int) {
+    val biz = e.state.business(businessId) ?: return
+    e.ui.tick
+    Modal("${biz.name} — Music", { close(e) }, maxWidth = 560.dp) {
+        val speakers = e.speakerGain(biz) > 0f
+        Text(
+            if (speakers) "Customers like a store with music: speakers count toward its atmosphere while they're playing. Your own songs play from where they are on this device."
+            else "This store has no speakers yet. Buy a Loudspeaker at an appliance store and place it with the Interior designer, then pick the music here.",
+            style = HT.body, color = if (speakers) HC.InkSoft else HC.Red,
+        )
+        Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            @Composable
+            fun option(value: Int, label: String, enabled: Boolean = true) {
+                val chosen = biz.music == value
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(if (chosen) HC.Purple.copy(alpha = .16f) else Color.White)
+                        .clickable(enabled = enabled) { biz.music = value; e.bump() }.padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(if (chosen) Icons.Filled.CheckCircle else Icons.Filled.MusicNote, null, tint = if (chosen) HC.Purple else HC.InkSoft, modifier = Modifier.size(18.dp))
+                    Text(label, style = HT.body, color = if (enabled) HC.Ink else HC.InkSoft, modifier = Modifier.padding(start = 8.dp))
+                }
+            }
+            option(StoreMusic.RADIO, "Your phone's radio (${com.hustlecity.game.audio.Audio.stations.getOrNull(e.settings.station)?.name ?: "radio"})")
+            for ((i, st) in com.hustlecity.game.audio.Audio.stations.withIndex()) option(i, "Radio: ${st.name}")
+            option(StoreMusic.MINE, if (e.settings.songs.isEmpty()) "My songs (add some below)" else "My songs (${e.settings.songs.size}, shuffled)", enabled = e.settings.songs.isNotEmpty())
+            option(StoreMusic.OFF, "Off")
+
+            Text("MY SONGS", style = HT.small, color = HC.InkSoft, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+            val playing = com.hustlecity.game.audio.SongPlayer.nowPlaying
+            if (biz.music == StoreMusic.MINE && playing != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Now playing: $playing", style = HT.body, color = HC.Purple, modifier = Modifier.weight(1f))
+                    HButton("Next song", small = true, color = HC.Purple) { com.hustlecity.game.audio.SongPlayer.next() }
+                }
+            }
+            for (song in e.settings.songs.toList()) {
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color.White).padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(song.name, style = HT.body, color = HC.Ink, modifier = Modifier.weight(1f))
+                    Icon(Icons.Filled.Close, "Remove", tint = HC.Red, modifier = Modifier.size(20.dp).clickable {
+                        e.settings.removeSong(song)
+                        if (e.settings.songs.isEmpty() && biz.music == StoreMusic.MINE) biz.music = StoreMusic.RADIO
+                        e.bump()
+                    })
+                }
+            }
+            HButton(if (com.hustlecity.game.Platform.isDesktop) "Add songs (MP3, WAV)…" else "Add songs from this phone…", Modifier.padding(top = 6.dp), color = HC.Blue) {
+                com.hustlecity.game.Platform.pickSongs { picked ->
+                    if (picked.isNotEmpty()) {
+                        e.settings.addSongs(picked)
+                        biz.music = StoreMusic.MINE
+                        e.toast("Added ${picked.size} song${if (picked.size == 1) "" else "s"}")
+                    }
+                    e.bump()
+                }
+            }
+        }
     }
 }
 
