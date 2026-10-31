@@ -91,10 +91,10 @@ class Projector {
     }
 
     /** Axis aligned ground rectangle that contains everything visible (x0, y0, x1, y1). */
-    fun visibleGround(out: FloatArray, margin: Float) {
+    fun visibleGround(out: FloatArray, margin: Float, minFar: Float = 0f) {
         val p = FloatArray(2)
         var x0 = Float.MAX_VALUE; var y0 = Float.MAX_VALUE; var x1 = -Float.MAX_VALUE; var y1 = -Float.MAX_VALUE
-        val far = dist * 6f
+        val far = max(dist * 6f, minFar)
         val pts = arrayOf(floatArrayOf(0f, 0f), floatArrayOf(screenW, 0f), floatArrayOf(0f, screenH), floatArrayOf(screenW, screenH))
         for (s in pts) {
             if (!unproject(s[0], s[1], p) || dist2(p[0], p[1], camX, camY) > far * far) {

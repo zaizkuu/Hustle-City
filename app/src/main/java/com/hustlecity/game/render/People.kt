@@ -16,11 +16,16 @@ object Pose {
 }
 
 /**
- * Draws a low-poly 3D person out of boxes: legs, torso, arms, head and hair, facing [heading] (0 = north).
- * Legs and arms swing while walking; people can also sit, dance or run in place, and hold an umbrella.
- * No allocations per call, and parts are drawn back to front so the figure looks solid from any side.
+ * Draws a 3D person facing [heading] (0 = north). In HD, anyone close enough to make out is one of the CC0
+ * characters of [PeopleModels], dressed in their own colours and posed from its rig's clips (walking, running,
+ * standing, sitting, dancing, carrying); otherwise, and on the Canvas, a low-poly figure out of boxes whose legs and
+ * arms swing. Umbrellas, boxes, carts and bags are boxes either way. No allocations per call, and box parts are drawn
+ * back to front so the figure looks solid from any side.
  */
 class PersonPainter(private val scene: Scene3D) {
+    /** Seconds, for the idle sway of people standing still. */
+    var clock = 0f
+
     companion object {
         val PANTS = intArrayOf(c(0xFF34383F), c(0xFF1F3A5F), c(0xFF4A3B2A), c(0xFF5B6770), c(0xFF2E4A3A), c(0xFF22252A), c(0xFF6B4F3A))
         val HAIR = intArrayOf(c(0xFF2B1D14), c(0xFF4A3220), c(0xFF0F0F10), c(0xFF8A5A2B), c(0xFFD9B26A), c(0xFF7A7A7A), c(0xFFA0522D))
@@ -34,6 +39,9 @@ class PersonPainter(private val scene: Scene3D) {
         private val CART_BLUE = c(0xFF2F80ED)
         private val BAG = c(0xFFD9B98A)
         private val BAG_DARK = c(0xFFB38A55)
+        /** Taller on screen than this many pixels, a person is drawn as a model. */
+        private const val MODEL_PX = 30f
+        private const val TWO_PI = (Math.PI * 2).toFloat()
     }
 
     // parts: forward offset, right offset, z0, z1, length (forward), width (right), color, draw-last flag
@@ -71,6 +79,20 @@ class PersonPainter(private val scene: Scene3D) {
         // far away people get a cheap three-box version
         val camD = proj().camZOf(x, y, z + .9f * s)
         val lod = camD > 0 && proj().focal * 1.75f * s / camD < 22f
+        val models = PeopleModels.models
+        if (scene.gpu != null && models.isNotEmpty() && camD > 0 && proj().focal * 1.75f * s / camD > MODEL_PX) {
+            val holding = carry >= 2 || (carry == 1 && load > 0)
+            modelled(models[pick(shirt, pants, hair, skin, models.size)], x, y, z, heading, phase, moving, pose, s,
+                if (apron != 0) apron else shirt, pants, skin, hair, alpha, holding)
+            // what they hold, push or shelter under stays as it was
+            if (pose == Pose.STAND || pose == Pose.RUN) {
+                if (holding) carried(z, z + .82f * s, s, carry, load)
+                else if (held != 0 || bag) inHand(z + .82f * s, s, sin(phase) * moving.coerceIn(0f, 1f), held, bag)
+            }
+            if (umbrella != 0 && pose == Pose.STAND) umbrella(z, s, umbrella)
+            emit(x, y, heading, alpha)
+            return
+        }
         when (pose) {
             Pose.SIT -> {
                 // seat height z: thighs forward, shins down to the floor
@@ -100,13 +122,78 @@ class PersonPainter(private val scene: Scene3D) {
                 else if (!lod && (held != 0 || bag)) inHand(z + .82f * s + bob, s, swing, held, bag)
             }
         }
-        if (umbrella != 0 && pose == Pose.STAND) {
-            val top = z + 2.05f * s
-            part(.08f * s, .2f * s, z + 1.1f * s, top, .03f * s, .03f * s, c(0xFF2B2B2B), last = true)
-            part(.05f * s, .1f * s, top - .06f * s, top, 1.05f * s, 1.05f * s, umbrella, last = true)
-            part(.05f * s, .1f * s, top, top + .1f * s, .6f * s, .6f * s, umbrella, last = true)
-        }
+        if (umbrella != 0 && pose == Pose.STAND) umbrella(z, s, umbrella)
         emit(x, y, heading, alpha)
+    }
+
+    private fun umbrella(z: Float, s: Float, color: Int) {
+        val top = z + 2.05f * s
+        part(.08f * s, .2f * s, z + 1.1f * s, top, .03f * s, .03f * s, c(0xFF2B2B2B), last = true)
+        part(.05f * s, .1f * s, top - .06f * s, top, 1.05f * s, 1.05f * s, color, last = true)
+        part(.05f * s, .1f * s, top, top + .1f * s, .6f * s, .6f * s, color, last = true)
+    }
+
+    /** Which character a person is, from their colours, so they stay the same one from frame to frame. */
+    private fun pick(shirt: Int, pants: Int, hair: Int, skin: Int, count: Int): Int {
+        var h = shirt * 31 + pants
+        h = h * 31 + hair; h = h * 31 + skin
+        h = h xor (h ushr 13); h *= 0x5bd1e995; h = h xor (h ushr 15)
+        return ((h % count) + count) % count
+    }
+
+    private val bones = FloatArray(32 * 12)
+    private var vx = FloatArray(0); private var vy = FloatArray(0); private var vz = FloatArray(0)
+    private val tx = FloatArray(3); private val ty = FloatArray(3); private val tz = FloatArray(3)
+
+    /** [m] posed for what the person is doing, at (x, y, z) facing [heading], in their colours. */
+    private fun modelled(m: PeopleModels.Model, x: Float, y: Float, z: Float, heading: Float, phase: Float, moving: Float, pose: Int,
+                         s: Float, top: Int, bottom: Int, skin: Int, hair: Int, alpha: Float, holding: Boolean) {
+        val rig = m.rig
+        val cycle = (phase / TWO_PI).let { it - kotlin.math.floor(it) }
+        fun dur(name: String) = rig.clips[name]?.duration ?: 1f
+        when (pose) {
+            Pose.SIT -> PeopleModels.pose(rig, "Sit", 0f, "Sit", 0f, 0f, bones)
+            Pose.DANCE -> PeopleModels.pose(rig, "Dance", phase * .3f, "Dance", 0f, 0f, bones)
+            Pose.RUN -> PeopleModels.pose(rig, "Run", cycle * dur("Run"), "Run", 0f, 0f, bones)
+            else -> {
+                // standing still to walking, by how fast they go; arms held out in front when they carry something
+                val k = moving.coerceIn(0f, 1f).let { it * it * (3 - 2 * it) }
+                val still = if (holding) "CarryIdle" else "Idle"
+                val walk = if (holding) "Carry" else "Walk"
+                PeopleModels.pose(rig, still, clock + (x + y) * .37f, walk, cycle * dur(walk), k, bones)
+            }
+        }
+        val nv = m.vertices
+        if (vx.size < nv) { vx = FloatArray(nv); vy = FloatArray(nv); vz = FloatArray(nv) }
+        val fx = sin(heading); val fy = -cos(heading)
+        val rx = -fy; val ry = fx
+        val p = m.pos; val b = bones
+        for (v in 0 until nv) {
+            val px = p[v * 3]; val py = p[v * 3 + 1]; val pz = p[v * 3 + 2]
+            val a = (m.b0[v].toInt() and 255) * 12; val c = (m.b1[v].toInt() and 255) * 12
+            val w = m.w[v]; val u = 1 - w
+            val f = (b[a] * px + b[a + 1] * py + b[a + 2] * pz + b[a + 3]) * w + (b[c] * px + b[c + 1] * py + b[c + 2] * pz + b[c + 3]) * u
+            val r = (b[a + 4] * px + b[a + 5] * py + b[a + 6] * pz + b[a + 7]) * w + (b[c + 4] * px + b[c + 5] * py + b[c + 6] * pz + b[c + 7]) * u
+            val up = (b[a + 8] * px + b[a + 9] * py + b[a + 10] * pz + b[a + 11]) * w + (b[c + 8] * px + b[c + 9] * py + b[c + 10] * pz + b[c + 11]) * u
+            vx[v] = x + (fx * f + rx * r) * s; vy[v] = y + (fy * f + ry * r) * s; vz[v] = z + up * s
+        }
+        val prev = scene.material
+        scene.material = Mat.PLAIN
+        val t = m.tri
+        for (i in 0 until m.triangles) {
+            val role = m.roles[i].toInt()
+            var col = when (role) {
+                PeopleModels.SKIN -> skin
+                PeopleModels.HAIR -> hair
+                PeopleModels.TOP -> top
+                PeopleModels.BOTTOM -> bottom
+                else -> m.palette[role - 4]
+            }
+            if (alpha < 1f) col = scene.withAlpha(col, alpha)
+            for (k in 0 until 3) { val v = t[i * 3 + k]; tx[k] = vx[v]; ty[k] = vy[v]; tz[k] = vz[v] }
+            scene.poly(3, tx, ty, tz, col)
+        }
+        scene.material = prev
     }
 
     private fun proj() = scene.proj

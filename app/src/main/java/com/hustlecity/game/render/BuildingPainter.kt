@@ -270,6 +270,9 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
 
     // ------------------------------------------------------------------ main entry
 
+    /** Facade detail at least this far out (films have no frame rate to keep). */
+    var detailRange = 0f
+
     /**
      * Draws a building. [roof]/[facadeIn] already include the style, map-mode and selection colors; [d0] is the
      * distance to the camera. Without [detail] only the massing is drawn.
@@ -286,7 +289,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         val facade = facadeIn
         val h = b.height
         val q = e.settings.quality
-        val near = detail && d0 < (when (q) { 0 -> 80f; 1 -> 125f; else -> 170f })
+        val near = detail && d0 < max(detailRange, when (q) { 0 -> 80f; 1 -> 125f; else -> 170f })
         scene.material = when (st) {
             Arch.WALKUP -> Mat.BRICK
             Arch.BROWNSTONE, Arch.DECO, Arch.CLASSIC -> Mat.STONE

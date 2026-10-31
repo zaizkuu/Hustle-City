@@ -80,6 +80,7 @@ class InteriorRenderer(private val e: GameEngine) {
             gpu.setCamera(proj)
             com.hustlecity.game.render.gpu.GpuLighting.interior(gpu, BG)
             gpu.time = e.realTime
+            people.clock = e.realTime
             // furniture and people cast soft shadows from the ceiling light
             gpu.setShadow(-1f, -1f, sc.w + 1f, sc.d + 1f, 3.2f, if (e.settings.quality >= 2) 1024 else 512, if (e.settings.quality > 0) .5f else 0f)
             scene.material = Mat.TILE

@@ -126,6 +126,8 @@ class WorldRenderer(private val e: GameEngine) {
 
     companion object {
         val WATER = c(0xFF27445C)
+        /** How far a film's camera sees the city, at the least. */
+        const val CINEMA_FAR = 1100f
         val SIDEWALK = c(0xFFB9BCC1)
         val ASPHALT = c(0xFF4A4D53)
         val LOT = c(0xFF8E9297)
@@ -214,6 +216,7 @@ class WorldRenderer(private val e: GameEngine) {
 
         if (gpu != null) {
             gpu.clear()
+            gpu.minFar = if (cinematic && !mapMode) 3000f else 0f
             gpu.setCamera(proj)
             com.hustlecity.game.render.gpu.GpuLighting.city(gpu, hour, scene.daylight, if (mapMode) 0f else v.cloud, if (mapMode) 0f else v.rain,
                 if (mapMode) 0f else v.storm, if (mapMode) 0f else v.flash, if (mapMode) 0f else v.wet, scene.snow, scene.fogColor, scene.fog,
@@ -222,7 +225,9 @@ class WorldRenderer(private val e: GameEngine) {
         } else canvas.drawColor(scene.mix(scene.lit(WATER, 1f), scene.lit(scene.fogColor, 1f), scene.fog * .7f))
         rebuildLookups()
         if (e.hasGame) { val f = e.focusPoint(); focusX = f.first; focusY = f.second }
-        proj.visibleGround(bbox, 30f)
+        // a film sees the city out to the haze, not just the few blocks a phone draws around the player
+        proj.visibleGround(bbox, 30f, if (cinematic && !mapMode) CINEMA_FAR else 0f)
+        painter.detailRange = if (cinematic && !mapMode) 450f else 0f
         if (gpu != null) {
             gpu.time = e.realTime
             // real sun shadows replace the painted ones when the view is small enough for a sharp shadow map
@@ -352,8 +357,8 @@ class WorldRenderer(private val e: GameEngine) {
         stageIdx = idx
         stageHard = hard; stageSoft = soft
         stageCamX = proj.camX; stageCamY = proj.camY; stageYaw = proj.yaw; stageDist = proj.dist
-        // a margin around the view so small moves don't need a rebuild
-        val mx = max(70f, (bbox[2] - bbox[0]) * .3f); val my = max(70f, (bbox[3] - bbox[1]) * .3f)
+        // a margin around the view so small moves don't need a rebuild (a film's view is already wide)
+        val mx = if (cinematic) 70f else max(70f, (bbox[2] - bbox[0]) * .3f); val my = if (cinematic) 70f else max(70f, (bbox[3] - bbox[1]) * .3f)
         stageBox[0] = bbox[0] - mx; stageBox[1] = bbox[1] - my; stageBox[2] = bbox[2] + mx; stageBox[3] = bbox[3] + my
         val n = e.city.buildings.size
         if (rangeStart[idx].size < n) { rangeStart[idx] = IntArray(n); rangeEnd[idx] = IntArray(n); drawnIds[idx] = IntArray(n) }
@@ -444,6 +449,7 @@ class WorldRenderer(private val e: GameEngine) {
     }
 
     private fun drawList() {
+        people.clock = e.realTime
         for (k in 0 until dCount) {
             val i = order[k]
             when (dType[i]) {

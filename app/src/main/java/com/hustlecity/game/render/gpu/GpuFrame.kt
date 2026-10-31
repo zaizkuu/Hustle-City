@@ -136,6 +136,9 @@ class GpuFrame {
 
     fun clear() { for (s in streams) s.clear(); staticGeom = null; skipCount = 0 }
 
+    /** The far clip plane at least this far (films see to the horizon). */
+    var minFar = 0f
+
     fun setCamera(p: Projector) {
         width = p.screenW; height = p.screenH
         cam[0] = p.camX; cam[1] = p.camY; cam[2] = p.camZ
@@ -144,7 +147,7 @@ class GpuFrame {
         fwd[0] = p.fwdX; fwd[1] = p.fwdY; fwd[2] = p.fwdZ
         focal = p.focal; centerX = p.centerX; centerY = p.centerY
         near = maxOf(p.near, p.dist * .02f).coerceAtMost(4f)
-        far = p.dist * 14f + 600f
+        far = maxOf(p.dist * 14f + 600f, minFar)
     }
 
     fun copyFrom(o: GpuFrame) {

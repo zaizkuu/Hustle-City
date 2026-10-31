@@ -1,0 +1,18 @@
+People for the HD renderer, baked by tools/assets/people.py from the Ultimate Modular Men and Ultimate Modular
+Women packs by Quaternius, released under CC0 1.0 (public domain):
+https://quaternius.com/packs/ultimatemodularcharacters.html
+https://quaternius.com/packs/ultimatemodularwomen.html
+
+M_Casual
+M_Hoodie
+M_Suit
+M_Worker
+M_Punk
+M_Beach
+M_Adventurer
+F_Casual
+F_Formal
+F_Suit
+F_Worker
+F_Punk
+F_Adventurer
