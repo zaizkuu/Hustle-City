@@ -41,12 +41,14 @@ class DesktopGpuView(private val e: GameEngine, private val quality: Int, privat
     private var targetH = 0
     private var pixels: ByteBuffer? = null
     private var bytes = ByteArray(0)
+    private var errors = 0
 
     private val imageLock = Any()
     private var image: Image? = null
     private val paint = org.jetbrains.skia.Paint()
 
     override val glFps: Float get() = gpu?.fps ?: 0f
+    override val glErrors: Int get() = gpu?.glErrors ?: 0
 
     /** The renderer is running with the photo materials. */
     val photoMaterials: Boolean get() = gpu?.photoMaterials == true
@@ -97,8 +99,24 @@ class DesktopGpuView(private val e: GameEngine, private val quality: Int, privat
     }
 
     private fun drawLatest() {
-        val g = gpu ?: return
         if (closed) return
+        // a frame that fails is dropped; a GPU that keeps failing (a driver reset, out of memory) hands over to the
+        // classic renderer instead of leaving the world black
+        try {
+            drawFrame()
+            errors = 0
+        } catch (t: Throwable) {
+            System.err.println("HD frame failed: $t")
+            if (++errors >= 3) {
+                System.err.println("HD graphics keep failing: switching to the classic renderer")
+                closed = true
+                fail()
+            }
+        }
+    }
+
+    private fun drawFrame() {
+        val g = gpu ?: return
         val f = queue.take()
         val w = (f.width * renderScale).roundToInt().coerceAtLeast(16)
         val h = (f.height * renderScale).roundToInt().coerceAtLeast(16)

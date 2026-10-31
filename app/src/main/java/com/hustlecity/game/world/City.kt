@@ -286,8 +286,11 @@ class Shore(val water: List<FloatArray>, val land: List<FloatArray>, val islands
     fun anyWater(x: Float, y: Float) = wet(x, y) || inAny(x, y, canals, canalBox)
 }
 
-/** A city, generated from one of the [Maps] and a seed. Same seed and map give the same city. */
-class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
+/**
+ * A city, generated from one of the [Maps] and a seed. Same seed, map and [layout] give the same city: a saved game
+ * keeps the layout revision it started on, so its buildings stay where its shops are.
+ */
+class City(val seed: Long, val mapId: String = Maps.CLASSIC, val layout: Int = LAYOUT) {
     val map: MapDef = Maps.byId(mapId)
     val roads: RoadGraph
     val buildings = ArrayList<Building>()
@@ -302,6 +305,8 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
     val neighborhoods: List<Neighborhood>
     /** World area the player can reach: x0, y0, x1, y1. */
     val bounds: FloatArray
+    /** Paved ground (on maps without land outlines): [bounds], out to wherever the roads run on past its edge. */
+    val paved: FloatArray
     val maxHeight: Float
     val placeBuildings = HashMap<String, MutableList<Int>>()
     /** Cars keep left (Tokyo) instead of right. */
@@ -325,7 +330,7 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
     val height get() = bounds[3] - bounds[1]
 
     init {
-        val layout = map.generate(seed)
+        val layout = map.generate(seed, this.layout)
         roads = layout.roads
         buildings += layout.buildings
         trees += layout.trees
@@ -337,6 +342,13 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
         walls = layout.walls
         neighborhoods = layout.neighborhoods
         bounds = layout.bounds
+        paved = bounds.copyOf().also { p ->
+            for (e in roads.edges) {
+                val m = e.cls.outer + 3f
+                p[0] = min(p[0], min(e.ax, e.bx) - m); p[1] = min(p[1], min(e.ay, e.by) - m)
+                p[2] = max(p[2], max(e.ax, e.bx) + m); p[3] = max(p[3], max(e.ay, e.by) + m)
+            }
+        }
         leftHand = map.leftHand
         for (b in buildings) b.placeId?.let { placeBuildings.getOrPut(it) { mutableListOf() } += b.id }
         for (l in landmarks) if (l.kind == Landmark.BILLBOARDS && l.style == Landmark.SCRAMBLE) scrambleNode(l)?.scramble = true
@@ -516,6 +528,11 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
     }
 
     companion object {
+        /**
+         * Revision of the city generator new games get. 1: as first played; 2: dead ends that ran on into a river
+         * stop at the bank (which moves lots, so games saved on 1 keep it).
+         */
+        const val LAYOUT = 2
         /** City walls are 6 m thick on their centre line; trees and street furniture keep this far from it. */
         const val WALL_BAND = 6f
         private val ROOFS = intArrayOf(c(0xFF6E7378), c(0xFF5F6368), c(0xFF7D8085), c(0xFF8A8D91), c(0xFF55595E))

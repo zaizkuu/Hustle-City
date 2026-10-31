@@ -686,7 +686,7 @@ class WorldRenderer(private val e: GameEngine) {
         // land: the city's paving, then rivers and bays cut into it (or, on island maps, the land masses)
         scene.material = Mat.SIDEWALK
         val sh = city.shore
-        if (sh.land.isEmpty()) clipRect(city.bounds[0], city.bounds[1], city.bounds[2], city.bounds[3], 0f, sidewalk)
+        if (sh.land.isEmpty()) clipRect(city.paved[0], city.paved[1], city.paved[2], city.paved[3], 0f, sidewalk)
         else for (l in sh.land) groundPoly(l, 0f, sidewalk)
         scene.material = Mat.WATER
         val water = scene.lit(WATER, 1f)

@@ -7,6 +7,8 @@ package com.hustlecity.game.render.gpu
 interface GpuSurface {
     /** Frames the GPU actually drew per second (what's on screen). */
     val glFps: Float
+    /** GL errors the renderer has run into so far. */
+    val glErrors: Int
     /** Fraction of the view's size the 3D is rendered at; the display scales it up. */
     val renderScale: Float
 

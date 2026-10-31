@@ -14,6 +14,7 @@ import java.nio.ByteBuffer
 @Suppress("FunctionName", "unused")
 object GLES30 {
     const val GL_NO_ERROR = GL33C.GL_NO_ERROR
+    const val GL_OUT_OF_MEMORY = GL33C.GL_OUT_OF_MEMORY
     const val GL_NONE = GL33C.GL_NONE
     const val GL_DEPTH_BUFFER_BIT = GL33C.GL_DEPTH_BUFFER_BIT
     const val GL_COLOR_BUFFER_BIT = GL33C.GL_COLOR_BUFFER_BIT

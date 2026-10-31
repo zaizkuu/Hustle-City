@@ -163,6 +163,8 @@ class GameEngine(context: Context?) {
     /** Frames the GPU renderer actually drew per second, and its resolution scale (for the FPS counter). */
     var gpuFps = 0f
     var renderScale = 1f
+    /** GL errors the GPU renderer has hit (there should be none). */
+    var gpuErrors = 0
     private var fpsAcc = 0f
     private var fpsFrames = 0
     var crashCooldown = 0f
@@ -182,7 +184,7 @@ class GameEngine(context: Context?) {
                 rules: com.hustlecity.game.model.GameRules = com.hustlecity.game.model.GameRules.preset(difficulty)) {
         city = City(seed, mapId)
         traffic.attach(city)
-        val s = GameState(seed = seed, minute = 8L * 60, mapId = city.mapId)
+        val s = GameState(seed = seed, minute = 8L * 60, mapId = city.mapId, layout = city.layout)
         s.player = PlayerState(name = name.ifBlank { "Alex" }, skin = skin, shirt = shirt, money = rules.startMoney, difficulty = difficulty, rules = rules)
         state = s
         rnd = Random(seed xor System.nanoTime())
@@ -230,7 +232,7 @@ class GameEngine(context: Context?) {
     fun loadGame(): Boolean {
         val s = saves.load() ?: return false
         state = s
-        city = City(s.seed, s.mapId)
+        city = City(s.seed, s.mapId, s.layout)
         traffic.attach(city)
         rnd = Random(System.nanoTime())
         economy.rivals.migrate()
@@ -266,7 +268,7 @@ class GameEngine(context: Context?) {
         if (hasGame || menuMode) return
         city = City(1337L, Maps.NYC)
         traffic.attach(city)
-        state = GameState(seed = 1337L, minute = 18L * 60 + 40, mapId = city.mapId)
+        state = GameState(seed = 1337L, minute = 18L * 60 + 40, mapId = city.mapId, layout = city.layout)
         // the tallest office tower makes a good backdrop
         val b = city.buildings.filter { it.kind == BKind.OFFICE }.maxByOrNull { it.height } ?: city.buildings.first()
         state.player.x = b.doorX; state.player.y = b.doorY + 8f

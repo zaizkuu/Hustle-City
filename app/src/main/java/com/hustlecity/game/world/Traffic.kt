@@ -102,6 +102,7 @@ class Traffic(private val rnd: Random = Random(7)) {
     var hurry = 1f
 
     private var roads: RoadGraph? = null
+    private var shore: Shore? = null
     private var leftHand = false
     /** Vehicle mix: styles weighted by repetition; beyond the basic four they're map specific (jeepneys, kei cars, buses…). */
     var mix: IntArray = intArrayOf(0, 0, 0, 0, 0, 0, 1, 1, 2, 2)
@@ -115,6 +116,7 @@ class Traffic(private val rnd: Random = Random(7)) {
     /** Switches to a city's roads and its own traffic; everyone is placed again. */
     fun attach(city: City) {
         roads = city.roads
+        shore = city.shore
         leftHand = city.leftHand
         mix = city.map.trafficMix
         palette = city.map.trafficPalette
@@ -226,18 +228,24 @@ class Traffic(private val rnd: Random = Random(7)) {
         val near = e.cls.halfWidth + .3f; val far = e.cls.halfWidth + e.cls.sidewalk * .8f
         val steps = max(2, e.len.toInt())
         var bestLo = 0f; var bestHi = -1f; var runLo = -1f
+        var wet = false
+        val sh = shore
         for (i in 0..steps) {
             val s = e.len * i / steps
             val bx = e.ax + e.ux * s; val by = e.ay + e.uy * s
             // right of a→b in a y-down world is (-uy, ux)
             val nx = -e.uy * sign; val ny = e.ux * sign
             val clear = !g.onAsphalt(bx + nx * near, by + ny * near) && !g.onAsphalt(bx + nx * far, by + ny * far)
+            // a road along a river can have its sidewalk out over the water (bridge decks have their own; the
+            // pavement is laid over a canal, so that's fine to walk)
+            if (!e.overWater && sh != null && (sh.wet(bx + nx * near, by + ny * near) || sh.wet(bx + nx * far, by + ny * far))) wet = true
             if (clear) {
                 if (runLo < 0f) runLo = s
                 if (s - runLo > bestHi - bestLo) { bestLo = runLo; bestHi = s }
             } else runLo = -1f
         }
-        if (bestHi - bestLo < 2f) { bestLo = e.len * .5f; bestHi = e.len * .5f }
+        // no walking there: an empty range in the middle, which no one spawns on or turns into
+        if (wet || bestHi - bestLo < 2f) { bestLo = e.len * .5f; bestHi = e.len * .5f }
         walk[k] = bestLo; walk[k + 1] = bestHi
         return k
     }
@@ -250,6 +258,9 @@ class Traffic(private val rnd: Random = Random(7)) {
         val k = walkRange(g, e, phys(e, from, side))
         return if (from == e.a) walk[k] else e.len - walk[k + 1]
     }
+
+    /** True when there's sidewalk to walk on [side] of [e] heading away from [from] (not over water, not all junction). */
+    private fun walkable(g: RoadGraph, e: RoadEdge, from: Int, side: Int) = walkEnd(g, e, from, side) - walkStart(g, e, from, side) >= 2f
 
     /** Where the clear sidewalk ends, measured from [from]. */
     private fun walkEnd(g: RoadGraph, e: RoadEdge, from: Int, side: Int): Float {
@@ -487,6 +498,12 @@ class Traffic(private val rnd: Random = Random(7)) {
                 if (j > index) continue
                 ahead = .01f
             }
+            // side by side and angled together (coming out of a turn next to each other) each sees the other just in
+            // front of it; the same rule settles who goes, or both stand there for good
+            if (j > index && align > .6f && ahead > 0f && ahead < (a.length + o.length) * .5f) {
+                val ofx = sin(o.heading); val ofy = -cos(o.heading)
+                if (dx * ofx + dy * ofy < 0f) continue
+            }
             if (ahead <= 0 || ahead >= 15f || side >= 1.7f + (o.width - 1.8f) * .5f + (a.width - 1.8f) * .5f) continue
             if (align < .6f) {
                 if (a.blocked > 2.5f) continue
@@ -713,14 +730,29 @@ class Traffic(private val rnd: Random = Random(7)) {
             a.from = node.id; a.s = e.len - a.s; a.side = -a.side
             return
         }
-        val nextId = chooseNext(g, node, e, false)
-        val ne = g.edges[nextId]
+        var nextId = chooseNext(g, node, e, false)
+        var ne = g.edges[nextId]
         // stay on whichever side of the next road we're already on
         val ox = if (node.id == ne.a) ne.ux else -ne.ux; val oy = if (node.id == ne.a) ne.uy else -ne.uy
         val rx = -oy; val ry = ox
         var side = if ((a.x - node.x) * rx + (a.y - node.y) * ry >= 0f) 1 else -1
         // at a scramble half the crowd cuts straight across to the far side, through the middle
         if (node.scramble && rnd.nextFloat() < .5f) side = -side
+        // never onto a sidewalk out over the water: the dry side, another road, or back the way they came
+        if (!walkable(g, ne, node.id, side)) {
+            if (walkable(g, ne, node.id, -side)) side = -side
+            else {
+                var found = false
+                for (id in node.edges) {
+                    if (id == e.id) continue
+                    val f = g.edges[id]
+                    if (f.under) continue
+                    for (sd in intArrayOf(side, -side)) if (!found && walkable(g, f, node.id, sd)) { nextId = id; ne = f; side = sd; found = true }
+                    if (found) break
+                }
+                if (!found) { nextId = e.id; ne = e; side = -a.side }
+            }
+        }
         a.next = nextId
         a.nextLane = side
         at(ne, node.id, walkStart(g, ne, node.id, side), pedOffset(ne, a) * side, tmp)

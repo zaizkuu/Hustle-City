@@ -19,6 +19,12 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # the reference GLSL compiler, so the shader check can compile every shader for Android and for Windows
+      - name: Install glslang
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends glslang-tools
+
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
 

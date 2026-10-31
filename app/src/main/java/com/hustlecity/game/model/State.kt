@@ -438,6 +438,8 @@ data class GameState(
     var snowCover: Double = 0.0,
     /** Which map the city was generated from (older saves are all the classic grid). */
     val mapId: String = "classic",
+    /** City generator revision the game started on ([com.hustlecity.game.world.City.LAYOUT]; saves from before it have 1). */
+    val layout: Int = 1,
     /** Delivery routes for your vans, and the stock they are carrying right now. */
     val fleet: MutableList<FleetRoute> = mutableListOf(),
     val fleetDrops: MutableList<FleetDrop> = mutableListOf(),

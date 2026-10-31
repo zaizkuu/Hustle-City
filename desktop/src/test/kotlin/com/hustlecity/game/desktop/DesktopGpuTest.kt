@@ -65,4 +65,50 @@ class DesktopGpuTest {
             File(outDir, "desktop_street_hd_close.png").writeBytes(scene.render(t).encodeToData(EncodedImageFormat.PNG)!!.bytes)
         }
     }
+
+    /**
+     * What a player puts the renderer through: a new game on every map (each at another quality), the HD renderer
+     * switched off and on again, a walk into their home. It must never give up, and never hit a GL error.
+     */
+    @Test
+    fun hdThroughEveryMap() {
+        assumeTrue(System.getProperty("hustle.gpuTest") == "true")
+        Platform.isDesktop = true
+        val e = GameEngine(Context(Files.createTempDirectory("hustle").toFile()))
+        e.settings.hd = true
+        e.newGame("Alex Rivera", 1, 2, 1)
+        ImageComposeScene(1280, 720, Density(1f)) { HustleCityApp(e, onExit = {}) }.use { scene ->
+            var t = 0L
+            fun run(min: Int, what: String) {
+                val deadline = System.nanoTime() + 60_000_000_000L
+                var n = 0
+                while (n < min || (e.gpuFps <= 0f && !e.settings.gpuFailed && System.nanoTime() < deadline)) {
+                    e.frame(1 / 30f)
+                    scene.render(t)
+                    t += 33_000_000L
+                    Thread.sleep(40)
+                    javax.swing.SwingUtilities.invokeAndWait { }
+                    n++
+                }
+                assertTrue("$what: no GL context: ${DesktopGl.failure}", DesktopGl.failure == null)
+                assertFalse("$what: the HD renderer gave up", e.settings.gpuFailed)
+                assertTrue("$what: ${e.gpuErrors} GL errors", e.gpuErrors == 0)
+                assertTrue("$what: the GPU drew no frames", e.gpuFps > 0f)
+                println("$what: ${e.gpuFps} fps")
+            }
+            for ((i, m) in com.hustlecity.game.world.Maps.all.withIndex()) {
+                e.settings.quality = i % 3
+                e.newGame("Alex Rivera", 1, 2, 1, mapId = m.id)
+                run(30, "${m.id} at quality ${i % 3}")
+            }
+            e.settings.hd = false
+            repeat(10) { e.frame(1 / 30f); scene.render(t); t += 33_000_000L }
+            e.settings.hd = true
+            run(30, "HD back on")
+            e.enterBuilding(e.city.building(e.state.player.home)!!)
+            assertTrue("went inside", e.interior != null)
+            run(30, "at home")
+            File(outDir, "desktop_home_hd.png").writeBytes(scene.render(t).encodeToData(EncodedImageFormat.PNG)!!.bytes)
+        }
+    }
 }

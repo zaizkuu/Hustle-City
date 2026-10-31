@@ -86,10 +86,10 @@ float noise(vec2 p) {
 #ifdef FAST
 // one octave keeps the look (same average) at a quarter of the cost
 float fbm(vec2 p) { return noise(p) * 0.875; }
-float noise3(vec3 p) { return noise(p.xy + p.z * 1.7); }
+float vnoise3(vec3 p) { return noise(p.xy + p.z * 1.7); }
 #else
 float fbm(vec2 p) { return noise(p) * 0.5 + noise(p * 2.03 + 7.1) * 0.25 + noise(p * 4.07 + 3.3) * 0.125; }
-float noise3(vec3 p) { return noise(p.xy + p.z * 1.7) * 0.6 + noise(p.yz * 1.3 - p.x * 0.9) * 0.4; }
+float vnoise3(vec3 p) { return noise(p.xy + p.z * 1.7) * 0.6 + noise(p.yz * 1.3 - p.x * 0.9) * 0.4; }
 #endif
 
 // surface coordinates: horizontal faces use world xy, walls use (along the wall, height)
@@ -302,7 +302,7 @@ void main() {
     } else if (mat == 12 && wall) {    // painted plaster
         albedo *= 0.96 + 0.07 * fbm(uv * 3.0);
     } else if (mat == 13) {            // leafy canopy clumps
-        float l = noise3(vPos * 1.6);
+        float l = vnoise3(vPos * 1.6);
         albedo *= 0.72 + 0.55 * l;
         spec = 0.03;
     } else if (mat == 16) {            // glossy car paint

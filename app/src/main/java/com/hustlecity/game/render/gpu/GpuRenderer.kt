@@ -44,6 +44,10 @@ class GpuRenderer(
     /** Frames drawn per second. */
     @Volatile var fps = 0f
         private set
+
+    /** GL errors seen so far (checked now and then). */
+    @Volatile var glErrors = 0
+        private set
     private val u = HashMap<String, Int>()
     private val us = HashMap<String, Int>()
     /** The photo materials' detail and bump texture arrays, when loaded (medium and high quality). */
@@ -221,7 +225,12 @@ class GpuRenderer(
         // checking for errors stalls some mobile drivers, so only now and then
         if (++frameCount % 300 == 0) {
             val err = GLES30.glGetError()
-            if (err != GLES30.GL_NO_ERROR) Log.w("HustleGL", "GL error $err")
+            if (err != GLES30.GL_NO_ERROR) {
+                glErrors++
+                Log.w("HustleGL", "GL error $err")
+                // out of memory leaves the GPU in no state to go on: the host falls back to the classic renderer
+                check(err != GLES30.GL_OUT_OF_MEMORY) { "GL out of memory" }
+            }
         }
         val now = System.nanoTime()
         fpsN++

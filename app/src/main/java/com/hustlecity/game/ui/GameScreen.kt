@@ -144,6 +144,7 @@ class ResolutionGovernor(private val e: GameEngine) {
 
     fun tick(v: GpuSurface) {
         e.gpuFps = v.glFps
+        e.gpuErrors = v.glErrors
         e.renderScale = v.renderScale
         val fixed = e.settings.resolution
         if (fixed > 0) { if (kotlin.math.abs(v.renderScale - fixed / 100f) > .01f) v.setRenderScale(fixed / 100f); return }

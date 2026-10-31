@@ -255,8 +255,11 @@ class RoadBuilder {
      * @param wet where roads may only cross as bridges
      * @param blocked polygons no road may enter (parks without paths, palaces)
      * @param cut polygons lanes and streets are cut out of exactly at the outline (landmark grounds); avenues stay
+     * @param trimWetEnds stop dead ends at the bank and deck every bridge piece over water (off only to rebuild the
+     *   cities of games saved before these fixes)
      */
-    fun build(wet: (Float, Float) -> Boolean, blocked: List<FloatArray> = emptyList(), snap: Float = 2.5f, cut: List<FloatArray> = emptyList()): RoadGraph {
+    fun build(wet: (Float, Float) -> Boolean, blocked: List<FloatArray> = emptyList(), snap: Float = 2.5f, cut: List<FloatArray> = emptyList(),
+              trimWetEnds: Boolean = true): RoadGraph {
         extendDeadEnds(28f)
         split()
         if (cut.isNotEmpty()) {
@@ -284,9 +287,11 @@ class RoadBuilder {
                 val mx = (x0 + x1) * .5f; val my = (y0 + y1) * .5f
                 val isWet = wet(mx, my)
                 if (isWet && !s.bridge) continue
+                // a bridge piece cut at a road on the bank can have its middle on land and still run out over the river
+                val deck = s.bridge && (isWet || (trimWetEnds && (1..7).any { wet(x0 + dx * it / 8f, y0 + dy * it / 8f) }))
                 if (blocked.any { Geo.inside(mx, my, it) }) continue
                 if (s.cls.rank <= 1 && cut.any { Geo.inside(mx, my, it) }) continue
-                pieces += Piece(x0, y0, x1, y1, s.cls, s.name, s.bridge && isWet)
+                pieces += Piece(x0, y0, x1, y1, s.cls, s.name, deck)
             }
         }
         // nodes: merge points closer than [snap]
@@ -346,6 +351,33 @@ class RoadBuilder {
             if (size > bestSize) { bestSize = size; bestComp = id }
         }
         alive = alive.filter { comp[it.a] == bestComp }.toMutableList()
+        // a dead end whose last stretch runs on past the bank stops short of it, its turning circle on dry land
+        // (once the stubs and stray pieces are gone, which can leave a road a dead end)
+        if (trimWetEnds) for (pass in 0 until 6) {
+            val deg = IntArray(nodeX.size)
+            for (l in alive) { deg[l.a]++; deg[l.b]++ }
+            val before = alive.size
+            alive = alive.filter { l ->
+                if (l.bridge) return@filter true
+                val dead = if (deg[l.b] == 1) l.b else if (deg[l.a] == 1) l.a else return@filter true
+                val other = if (dead == l.a) l.b else l.a
+                val ox = nodeX[other]; val oy = nodeY[other]
+                val len = sqrt((nodeX[dead] - ox).let { it * it } + (nodeY[dead] - oy).let { it * it })
+                if (len < 1f) return@filter true
+                val ux = (nodeX[dead] - ox) / len; val uy = (nodeY[dead] - oy) / len
+                val cap = l.cls.outer
+                var s = 0f
+                var wetFrom = -1f
+                while (s <= len + cap) { if (wet(ox + ux * s, oy + uy * s)) { wetFrom = s; break }; s += 1f }
+                if (wetFrom < 0f) return@filter true
+                val end = wetFrom - cap
+                if (end < 14f) return@filter false
+                if (end < len) { nodeX[dead] = ox + ux * end; nodeY[dead] = oy + uy * end }
+                true
+            }.toMutableList()
+            // dropping one can leave the road it hung off a dead end in the water too
+            if (alive.size == before) break
+        }
         // renumber
         val remap = HashMap<Int, Int>()
         val nodes = ArrayList<RoadNode>()

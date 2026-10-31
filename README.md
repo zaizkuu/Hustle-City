@@ -120,6 +120,14 @@ Every push also builds both APKs and the Windows installer on GitHub Actions. Do
 
 The unit tests use Robolectric's native graphics to render the city, interiors and every main UI screen to PNG files in `app/build/snapshots/`. `AudioTest` renders each radio station to WAV files in `app/build/audio/`. `BalanceReportTest` writes a per-business-type profit report to `app/build/balance.txt`.
 
+Release checks, all part of the normal test run:
+
+- `AiSoakTest`: six minutes of busy street life on every map with the camera roaming like a player. No pedestrian walks into a building or onto the water, no car leaves the road, and nobody freezes. `TrafficTest` also catches cars stuck in each other.
+- `InteriorSoakTest`: every kind of store, fully fitted out at its busiest hour. Customers and staff stay in the room and never walk through shelves or counters, and every customer leaves.
+- `MapAuditTest`: every map on two seeds. Nothing stands in the water or on the road, no road runs into a river without a bridge, and every road connects. It also checks that games saved on an older city layout still rebuild the city they were played on (`City.LAYOUT`).
+- `ShaderPortabilityTest`: compiles every shader as Android (GLSL ES 3.00) and as the Windows build (GLSL 3.30 core) with the reference compiler, so a strict AMD or Intel driver never sees one that only forgiving drivers accept. Needs `glslangValidator` (`apt install glslang-tools`), which CI installs.
+- `DesktopGpuTest` (`-PgpuTest`): plays the HD renderer through a new game on every map, each at a different quality, switches HD off and on, and goes inside. It must never fall back to the classic renderer or hit a GL error.
+
 ## Project layout
 
 ```
@@ -148,6 +156,7 @@ Everything else in the game is generated in code. These came from free libraries
 | --- | --- | --- | --- |
 | HD photo materials (11 surfaces) | [ambientCG](https://ambientcg.com) | CC0 (public domain) | `tools/assets/textures.py` into `app/src/main/resources/textures/` |
 | Car models (sedans, taxi, police cruiser, SUV, sports cars) | [Quaternius Cars Pack](https://quaternius.com/packs/cars.html) | CC0 (public domain) | `tools/assets/cars.py` into `app/src/main/resources/models/cars.bin` |
+| People (13 characters, walking, running, sitting, carrying, dancing) | [Quaternius Ultimate Modular Men](https://quaternius.com/packs/ultimatemodularcharacters.html) and [Women](https://quaternius.com/packs/ultimatemodularwomen.html) | CC0 (public domain) | `tools/assets/people.py` into `app/src/main/resources/models/people.bin` |
 | Trailer logo type: Anton | [Google Fonts](https://fonts.google.com/specimen/Anton) | SIL Open Font License | `tools/cinema/fonts/` (trailer tools only) |
 
 The scripts download their sources (with each site's own download links) and can be re-run to rebake. Each resource folder has a `CREDITS.txt` listing the exact assets.

@@ -26,6 +26,7 @@ class GlWorldView(
     private val renderer = Renderer()
 
     override val glFps: Float get() = renderer.gpu?.fps ?: 0f
+    override val glErrors: Int get() = renderer.gpu?.glErrors ?: 0
 
     private var layoutW = 0
     private var layoutH = 0
@@ -102,6 +103,7 @@ class GlWorldView(
     private inner class Renderer : GLSurfaceView.Renderer {
         @Volatile var gpu: GpuRenderer? = null
         private var failed = false
+        private var errors = 0
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
             try {
@@ -125,7 +127,15 @@ class GlWorldView(
 
         override fun onDrawFrame(gl: GL10?) {
             if (failed) return
-            gpu?.draw(queue.take())
+            // an exception here would take the whole app down with the GL thread: a frame that fails is dropped, and
+            // a GPU that keeps failing hands over to the classic renderer
+            try {
+                gpu?.draw(queue.take())
+                errors = 0
+            } catch (t: Throwable) {
+                Log.e("HustleGL", "GL frame failed", t)
+                if (++errors >= 3) fail()
+            }
         }
     }
 }

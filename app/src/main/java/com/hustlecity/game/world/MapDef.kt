@@ -38,7 +38,8 @@ abstract class MapDef(val id: String, val title: String, val blurb: String) {
     /** Neighborhood index for each place, in the order places are assigned. */
     abstract val placeHoods: List<Pair<String, Int>>
 
-    abstract fun generate(seed: Long): CityLayout
+    /** The city for [seed]; [layout] is the generator revision a saved game was made with (see [City.LAYOUT]). */
+    abstract fun generate(seed: Long, layout: Int = City.LAYOUT): CityLayout
 
     /** Neighborhood index at a point. */
     abstract fun hoodAt(x: Float, y: Float): Int
@@ -129,14 +130,14 @@ abstract class PlannedMap(id: String, title: String, blurb: String) : MapDef(id,
         return best
     }
 
-    override fun generate(seed: Long): CityLayout {
+    override fun generate(seed: Long, layout: Int): CityLayout {
         val p = Plan(Random(seed))
         plan(p)
         // landmark grounds are cut out of the side streets exactly at their outline
         val cleared = p.landmarks.filter { it.clearsRoads }.mapNotNull { it.footprint }
         val blockedRoads = p.parks.filter { !it.roads }.map { it.poly }
         val shore = p.shore
-        val graph = p.roads.build({ x, y -> shore.wet(x, y) }, blockedRoads, cut = cleared)
+        val graph = p.roads.build({ x, y -> shore.wet(x, y) }, blockedRoads, cut = cleared, trimWetEnds = layout >= 2)
         numberRoads(graph)
         val hoodList = hoods.map { it.hood }
         val buildings = Lots(this, graph, p, hoodList).place()
@@ -144,7 +145,8 @@ abstract class PlannedMap(id: String, title: String, blurb: String) : MapDef(id,
         val trees = ArrayList(p.trees)
         streetTrees(graph, buildings, p, trees)
         parkTrees(p, trees)
-        trees.removeAll { t -> clearOfTrees(p, t.x, t.y) }
+        // and none out on the asphalt: a sidewalk spot where another road runs close by or crosses, a park path
+        trees.removeAll { t -> clearOfTrees(p, t.x, t.y) || graph.nearAsphalt(t.x, t.y, .8f) }
         return CityLayout(graph, buildings, trees, shore, p.parks, p.rails, hoodList, extent, p.landmarks, p.walls)
     }
 
