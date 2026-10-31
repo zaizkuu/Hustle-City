@@ -96,10 +96,14 @@ class DesktopGpuTest {
                 assertTrue("$what: the GPU drew no frames", e.gpuFps > 0f)
                 println("$what: ${e.gpuFps} fps")
             }
+            // each at another time of day, saved for a look
+            val hours = intArrayOf(12, 21, 18, 23, 8)
             for ((i, m) in com.hustlecity.game.world.Maps.all.withIndex()) {
                 e.settings.quality = i % 3
                 e.newGame("Alex Rivera", 1, 2, 1, mapId = m.id)
+                e.state.minute = hours[i] * 60L + 30
                 run(30, "${m.id} at quality ${i % 3}")
+                File(outDir, "desktop_${m.id}_hd.png").writeBytes(scene.render(t).encodeToData(EncodedImageFormat.PNG)!!.bytes)
             }
             e.settings.hd = false
             repeat(10) { e.frame(1 / 30f); scene.render(t); t += 33_000_000L }
