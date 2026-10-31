@@ -601,4 +601,6 @@ object Mat {
     const val PAINT = 16
     /** Where water meets a quay: foam and shallows, their strength in the vertex alpha (1 at the wall, 0 out on the water). */
     const val SHORE = 17
+    /** The dark footprint under a car: in HD it fades where the ground is already in shadow, so it never shows as a box. */
+    const val CONTACT = 18
 }

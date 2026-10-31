@@ -6,6 +6,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sign
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
@@ -54,6 +55,8 @@ class Agent {
     var hidden = false
     /** Seconds a car has been held up by cross traffic (used to untangle jams in junctions). */
     var blocked = 0f
+    /** A car part way through a lane change: meters still to cover sideways to its new lane's line. */
+    var shift = 0f
     /** How the body leans on its springs: nose up (+) or down when braking, and rolled toward the outside of a turn. */
     var pitch = 0f
     var roll = 0f
@@ -90,7 +93,10 @@ private const val PI_F = 3.14159265f
 class Traffic(private val rnd: Random = Random(7)) {
     val cars = ArrayList<Agent>()
     val peds = ArrayList<Agent>()
-    /** Parked player vehicles (x, y pairs) that NPC cars stop for. */
+    /**
+     * What NPC cars stop for (or change lanes round) besides each other: the player's car and their parked vehicles, as
+     * boxes of [OBSTACLE] floats each: x, y, heading, half length, half width.
+     */
     var obstacles = FloatArray(0)
     var obstacleCount = 0
     /** Shop doors near the camera: x, y, chance a passer-by walks in, and the inward direction (x, y). */
@@ -521,19 +527,42 @@ class Traffic(private val rnd: Random = Random(7)) {
             val side = abs(-dx * fwdY + dy * fwdX)
             if (ahead > 0 && ahead < 10f && side < 1.6f) target = min(target, (ahead - a.length * .5f - 1.5f).coerceAtLeast(0f) * 1.2f)
         }
+        // the player on foot
         run {
             val dx = bx - a.x; val dy = by - a.y
             val ahead = dx * fwdX + dy * fwdY
             val side = abs(-dx * fwdY + dy * fwdX)
-            if (ahead > 0 && ahead < 12f && side < 2.2f) target = min(target, (ahead - 5f).coerceAtLeast(0f))
+            if (ahead > 0 && ahead < 12f && side < a.width * .5f + .9f) target = min(target, (ahead - a.length * .5f - 2f).coerceAtLeast(0f))
         }
+        // the player's car and parked cars, by their whole length: three points down the middle of each, each as wide
+        // as the car, against the strip ahead of this one (a car already alongside counts too, so nothing drives through)
+        var blockedAhead = -1f
         for (k in 0 until obstacleCount) {
-            val dx = obstacles[k * 2] - a.x; val dy = obstacles[k * 2 + 1] - a.y
-            if (abs(dx) > 14f || abs(dy) > 14f) continue
-            val ahead = dx * fwdX + dy * fwdY
-            val side = abs(-dx * fwdY + dy * fwdX)
-            if (ahead > 0 && ahead < 12f && side < 2.2f) target = min(target, (ahead - 5.5f).coerceAtLeast(0f))
+            val o = k * OBSTACLE
+            val ox = obstacles[o]; val oy = obstacles[o + 1]
+            if (abs(ox - a.x) > 26f || abs(oy - a.y) > 26f) continue
+            val ofx = sin(obstacles[o + 2]); val ofy = -cos(obstacles[o + 2])
+            val hw = obstacles[o + 4]
+            val reach = max(0f, obstacles[o + 3] - hw)
+            for (sgn in -1..1) {
+                val dx = ox + ofx * reach * sgn - a.x; val dy = oy + ofy * reach * sgn - a.y
+                val ahead = dx * fwdX + dy * fwdY
+                val side = abs(-dx * fwdY + dy * fwdX)
+                if (ahead > -a.length * .5f && ahead < 18f && side < a.width * .5f + hw + .15f) {
+                    target = min(target, (ahead - a.length * .5f - hw - 1.5f).coerceAtLeast(0f) * 1.2f)
+                    if (blockedAhead < 0f || ahead < blockedAhead) blockedAhead = ahead
+                }
+            }
         }
+        // on a road with lanes to spare, ease over into the next one to get round it
+        if (blockedAhead >= 0f && !a.inJunction && a.shift == 0f) laneChange(g, a, index)
+        // round the corner: one sitting on the turn or just past it holds a car at the line, or stops it on the curve
+        val onPath = obstacleOnPath(g, a)
+        if (onPath >= 0f) {
+            target = if (a.inJunction) min(target, (onPath - a.length * .5f - 1f).coerceAtLeast(0f) * 1.2f)
+            else min(target, (e.len - clearAt(e, toNode.id) - a.s - 1.2f).coerceAtLeast(0f) * .9f)
+        }
+        if (a.shift != 0f) { val step = 3f * dt; a.shift = if (abs(a.shift) <= step) 0f else a.shift - step * sign(a.shift) }
         // gentle acceleration, firm braking
         val brake = if (target < a.speed - 4f) 16f else 9f
         a.speed += (target - a.speed).coerceIn(-brake * dt, 4.5f * dt)
@@ -609,7 +638,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             val sEnd = e.len - clearAt(e, to)
             a.s += d
             if (a.s < sEnd) {
-                at(e, a.from, a.s, laneOffset(e, a.lane), tmp)
+                at(e, a.from, a.s, laneOffset(e, a.lane) + a.shift, tmp)
                 a.x = tmp[0]; a.y = tmp[1]
                 a.heading = headingOf(e, a.from)
                 return
@@ -624,6 +653,7 @@ class Traffic(private val rnd: Random = Random(7)) {
                 continue
             }
             // a curve through the junction, from the end of this lane to the start of the next
+            a.shift = 0f
             at(e, a.from, sEnd, laneOffset(e, a.lane), tmp)
             val lane = a.nextLane.coerceIn(0, ne.cls.lanes - 1)
             at(ne, nFrom, clearAt(ne, nFrom), laneOffset(ne, lane), tmp2)
@@ -819,6 +849,8 @@ class Traffic(private val rnd: Random = Random(7)) {
     }
 
     companion object {
+        /** Floats per entry in [obstacles]. */
+        const val OBSTACLE = 5
         /** Seconds round a scramble crossing's lights: two road phases, then the walk. */
         const val SCRAMBLE_CYCLE = 48f
 
@@ -830,19 +862,105 @@ class Traffic(private val rnd: Random = Random(7)) {
     }
 
     /** Pushes a circle out of NPC cars. Returns true on contact. */
+    /** True when a circle of radius [r] at (x, y) touches any obstacle's box. */
+    private fun nearObstacle(x: Float, y: Float, r: Float): Boolean {
+        for (k in 0 until obstacleCount) {
+            val o = k * OBSTACLE
+            val dx = x - obstacles[o]; val dy = y - obstacles[o + 1]
+            val hl = obstacles[o + 3]; val hw = obstacles[o + 4]
+            if (abs(dx) > hl + r + 1f || abs(dy) > hl + r + 1f) continue
+            val fx = sin(obstacles[o + 2]); val fy = -cos(obstacles[o + 2])
+            val f = max(abs(dx * fx + dy * fy) - hl, 0f); val c = max(abs(-dx * fy + dy * fx) - hw, 0f)
+            if (f * f + c * c < r * r) return true
+        }
+        return false
+    }
+
+    /**
+     * How far along [a]'s way through the coming junction (the rest of its curve, then the first stretch of the road it
+     * turns into) an obstacle sits, or -1: while turning, from where the car is; before the junction, -1 or 0 (whether
+     * the way out is blocked, so it waits at the line rather than pull into the box).
+     */
+    private fun obstacleOnPath(g: RoadGraph, a: Agent): Float {
+        if (obstacleCount == 0) return -1f
+        var any = false
+        for (k in 0 until obstacleCount) if (abs(obstacles[k * OBSTACLE] - a.x) < 45f && abs(obstacles[k * OBSTACLE + 1] - a.y) < 45f) { any = true; break }
+        if (!any) return -1f
+        val r = a.width * .5f + .3f
+        if (a.inJunction) {
+            var travelled = 0f; var px = a.x; var py = a.y
+            for (i in 1..6) {
+                val t = a.jt + (1f - a.jt) * i / 6f; val u = 1f - t
+                val x = u * u * a.jx0 + 2 * u * t * a.jcx + t * t * a.jx1
+                val y = u * u * a.jy0 + 2 * u * t * a.jcy + t * t * a.jy1
+                travelled += dist(px, py, x, y); px = x; py = y
+                if (nearObstacle(x, y, r)) return travelled
+            }
+            val e = g.edges[a.edge]
+            for (k in 1..3) {
+                at(e, a.from, clearAt(e, a.from) + k * 3f, laneOffset(e, a.lane), tmp2)
+                travelled += dist(px, py, tmp2[0], tmp2[1]); px = tmp2[0]; py = tmp2[1]
+                if (nearObstacle(px, py, r)) return travelled
+            }
+            return -1f
+        }
+        if (a.next < 0) return -1f
+        val e = g.edges[a.edge]
+        val node = e.other(a.from)
+        if (e.len - clearAt(e, node) - a.s > 24f) return -1f
+        val ne = g.edges[a.next]
+        for (k in 0..3) {
+            at(ne, node, clearAt(ne, node) + k * 3f, laneOffset(ne, a.nextLane), tmp2)
+            if (nearObstacle(tmp2[0], tmp2[1], r)) return 0f
+        }
+        return -1f
+    }
+
+    /**
+     * Moves [a] one lane over (inward if it can, else outward) when that lane is clear beside and a little ahead and
+     * behind, and the junction is far enough off to finish the move before it; the car slides across over a second or so.
+     */
+    private fun laneChange(g: RoadGraph, a: Agent, index: Int) {
+        val e = g.edges[a.edge]
+        if (e.cls.lanes < 2) return
+        if (e.len - clearAt(e, e.other(a.from)) - a.s < 20f) return
+        val to = when {
+            a.lane > 0 -> a.lane - 1
+            a.lane < e.cls.lanes - 1 -> a.lane + 1
+            else -> return
+        }
+        for ((j, o) in cars.withIndex()) {
+            if (j == index || !o.placed || o.inJunction || o.edge != a.edge || o.from != a.from || o.lane != to) continue
+            if (o.s > a.s - 9f && o.s < a.s + 12f) return
+        }
+        a.shift = laneOffset(e, a.lane) + a.shift - laneOffset(e, to)
+        a.lane = to
+    }
+
+    /** Pushes a circle at (x, y) of radius [r] out of every NPC vehicle's body, a box its length and width; true if it hit one. */
     fun bump(x: Float, y: Float, r: Float, out: FloatArray): Boolean {
         var px = x; var py = y; var hit = false
         for (a in cars) {
             if (!a.placed) continue
             val dx = px - a.x; val dy = py - a.y
-            val minD = r + a.width * .6f
-            val d2 = dx * dx + dy * dy
-            if (d2 < minD * minD && d2 > 1e-4f) {
-                val d = sqrt(d2)
-                px = a.x + dx / d * minD
-                py = a.y + dy / d * minD
-                hit = true
+            val hl = a.length * .5f; val hw = a.width * .5f
+            if (abs(dx) > hl + r + .5f || abs(dy) > hl + r + .5f) continue
+            // in the car's own frame: along it (f) and across it (c, to its right)
+            val fx = sin(a.heading); val fy = -cos(a.heading)
+            val f = dx * fx + dy * fy; val c = -dx * fy + dy * fx
+            var nf = f - f.coerceIn(-hl, hl); var nc = c - c.coerceIn(-hw, hw)
+            val d2 = nf * nf + nc * nc
+            if (d2 >= r * r) continue
+            if (d2 > 1e-6f) {
+                val d = sqrt(d2); val k = (r - d) / d
+                nf *= k; nc *= k
+            } else {
+                // the centre is inside the body: out through the nearest side
+                val ef = hl - abs(f); val ec = hw - abs(c)
+                if (ef < ec) { nf = (ef + r) * (if (f >= 0f) 1f else -1f); nc = 0f } else { nc = (ec + r) * (if (c >= 0f) 1f else -1f); nf = 0f }
             }
+            px += nf * fx - nc * fy; py += nf * fy + nc * fx
+            hit = true
         }
         out[0] = px; out[1] = py
         return hit

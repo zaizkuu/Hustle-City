@@ -95,6 +95,12 @@ fun GameScreen(e: GameEngine) {
                     if (e.ui.designer) DesignerBar(e, Modifier.align(Alignment.BottomCenter))
                     else {
                         InteriorPanel(e, Modifier.align(Alignment.TopEnd).padding(top = 58.dp, end = 8.dp))
+                        // walk the room with the stick or the keys (tapping still walks you to things), unless a card is open there
+                        if ((e.interior?.inspect ?: -1) < 0) {
+                            val corner = if (e.settings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart
+                            if (e.settings.keyboard) com.hustlecity.game.ui.hud.KeyHints(e, Modifier.align(corner).padding(16.dp))
+                            else Joystick(e, Modifier.align(corner).padding(18.dp))
+                        }
                         com.hustlecity.game.ui.places.ShopItemCard(e, Modifier.align(Alignment.BottomStart).padding(8.dp))
                         com.hustlecity.game.ui.hud.DisplayCard(e, Modifier.align(Alignment.BottomStart).padding(8.dp))
                     }

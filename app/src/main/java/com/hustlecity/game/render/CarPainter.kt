@@ -87,8 +87,15 @@ class CarPainter(private val scene: Scene3D) {
         }
         tiltF = pitch; tiltL = roll
         val hl = len / 2; val hw = wid / 2
-        // contact shadow
-        quadFlat(-hl - .15f, -hw - .1f, hl + .15f, hw + .1f, .03f, scene.withAlpha(0xFF000000.toInt(), .28f))
+        // contact shadow: in HD a soft-edged footprint (two nested layers) that the shader fades where the ground is
+        // already in shadow, the sun's own shadow of the car doing the rest; one darker layer in the classic renderer
+        if (scene.gpu != null) {
+            val prev = scene.material
+            scene.material = Mat.CONTACT
+            quadFlat(-hl - .45f, -hw - .35f, hl + .45f, hw + .35f, .025f, scene.withAlpha(0xFF000000.toInt(), .09f))
+            quadFlat(-hl + .1f, -hw + .05f, hl - .1f, hw - .05f, .03f, scene.withAlpha(0xFF000000.toInt(), .16f))
+            scene.material = prev
+        } else quadFlat(-hl - .15f, -hw - .1f, hl + .15f, hw + .1f, .03f, scene.withAlpha(0xFF000000.toInt(), .28f))
         val body = color
         scene.material = Mat.PAINT
         val camF = (scene.camLX - x) * fx + (scene.camLY - y) * fy

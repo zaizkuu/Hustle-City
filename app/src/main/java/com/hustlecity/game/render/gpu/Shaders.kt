@@ -326,6 +326,8 @@ void main() {
         col = albedo * (1.15 + 0.75 * (1.0 - uMisc.x));
     } else {
         float sh = shadowAt();
+        // a contact shadow only darkens sunlit ground: in a building's shadow it's all but gone
+        if (mat == 18) alpha *= mix(0.3, 1.0, sh);
         float ndl = max(dot(N, uSunDir), 0.0);
         float wrap = max((dot(N, uSunDir) + 0.3) / 1.3, 0.0);
         vec3 amb = mix(uGroundAmb, uSkyAmb, N.z * 0.5 + 0.5);

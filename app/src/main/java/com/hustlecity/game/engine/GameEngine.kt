@@ -151,6 +151,7 @@ class GameEngine(context: Context?) {
     /** E: gets out of the car, or goes in the door you're at, or gets in the car you're next to. */
     private fun useKey() {
         if (state.player.driving >= 0) { if (getOutOfCar()) ui.phoneOpen = true; return }
+        interior?.let { sc -> if (sc.nearEntrance()) exitBuilding(); return }
         val door = nearDoor
         val car = nearVehicle
         if (door != null) enterBuilding(door)
@@ -572,15 +573,24 @@ class GameEngine(context: Context?) {
         Audio.engineLevel = if (drivingNow != null && !inside && skip == null) (abs(carSpeed) / drivingNow.def.maxSpeed).coerceIn(0f, 1f) else -1f
         // the car and player hold still while a phone app, the map or a panel covers the controls
         if (!inside && skip == null && ui.app == null && ui.panel == null) updateMovement(dt)
+        else if (inside && skip == null && ui.app == null && ui.panel == null && !ui.designer) walkInside(dt)
         updateCamera(dt)
         val (fx, fy) = focusPoint()
         if (!inside) {
-            val bx = if (state.player.driving >= 0) fx else state.player.x
-            val by = if (state.player.driving >= 0) fy else state.player.y
-            val parked = state.vehicles.size
-            if (traffic.obstacles.size < parked * 2) traffic.obstacles = FloatArray(parked * 2 + 8)
+            // traffic stops for the player on foot, and for their cars (the one they drive and the parked ones) by
+            // each car's whole body
+            val bx = if (state.player.driving >= 0) -9999f else state.player.x
+            val by = if (state.player.driving >= 0) -9999f else state.player.y
+            val stride = Traffic.OBSTACLE
+            if (traffic.obstacles.size < state.vehicles.size * stride) traffic.obstacles = FloatArray((state.vehicles.size + 4) * stride)
             var n = 0
-            for (v in state.vehicles) if (v.id != state.player.driving) { traffic.obstacles[n * 2] = v.x; traffic.obstacles[n * 2 + 1] = v.y; n++ }
+            for (v in state.vehicles) {
+                if (ops.away(v)) continue
+                val o = n * stride
+                traffic.obstacles[o] = v.x; traffic.obstacles[o + 1] = v.y; traffic.obstacles[o + 2] = v.heading
+                traffic.obstacles[o + 3] = v.def.length * .5f; traffic.obstacles[o + 4] = v.def.width * .5f
+                n++
+            }
             traffic.obstacleCount = n
             doorClock -= dt
             if (doorClock <= 0f) { doorClock = 1f; refreshDoors(camera.tx, camera.ty) }
@@ -822,6 +832,21 @@ class GameEngine(context: Context?) {
         }
     }
 
+    /** Inside, the stick and the keys walk the player round the room, relative to the room's camera; out the door leaves. */
+    private fun walkInside(dt: Float) {
+        val sc = interior ?: return
+        val mag = hypot(input.jx, input.jy).coerceAtMost(1f)
+        if (mag < .08f) return
+        val yaw = sc.yaw
+        val wx = cos(yaw) * input.jx + sin(yaw) * input.jy
+        val wy = -sin(yaw) * input.jx + cos(yaw) * input.jy
+        if (sc.walkDirect(wx, wy, mag, dt)) {
+            exitBuilding()
+            // still inside (unpaid goods): step back in from the doorway
+            if (interior === sc) { sc.py = sc.d - .4f; resetInput() }
+        }
+    }
+
     private fun wrap(a: Float): Float {
         var x = a
         while (x > Math.PI) x -= (2 * Math.PI).toFloat()
@@ -989,7 +1014,8 @@ class GameEngine(context: Context?) {
         val side = if (hit.dist > .8f) hit.side else if (alongAB != city.leftHand) -1 else 1
         val lo = min(e.clearA + 6f, e.len * .5f); val hi = max(e.len - e.clearB - 6f, e.len * .5f)
         val sAlong = hit.s.coerceIn(lo, hi)
-        val off = e.cls.halfWidth - 1.1f
+        // tucked in against the curb, so traffic in the lane gets by
+        val off = e.cls.halfWidth - v.def.width * .5f - .15f
         var px = e.ax + e.ux * sAlong + e.uy * off * side
         var py = e.ay + e.uy * sAlong - e.ux * off * side
         val heading = city.curbHeading(e, side)

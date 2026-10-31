@@ -523,7 +523,7 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC, val layout: Int = L
         val s = ((b.doorX - e.ax) * e.ux + (b.doorY - e.ay) * e.uy).coerceIn(0f, e.len)
         val side = if ((b.doorX - e.ax) * e.uy - (b.doorY - e.ay) * e.ux >= 0f) 1f else -1f
         val t = (s + along).coerceIn(min(e.clearA + 3f, e.len * .5f), max(e.len - e.clearB - 3f, e.len * .5f))
-        val off = e.cls.halfWidth - 1.3f
+        val off = e.cls.halfWidth - 1.2f
         return (e.ax + e.ux * t + e.uy * off * side) to (e.ay + e.uy * t - e.ux * off * side)
     }
 

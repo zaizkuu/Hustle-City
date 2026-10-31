@@ -157,6 +157,9 @@ fun KeyHints(e: GameEngine, modifier: Modifier = Modifier) {
             KeyRow(listOf("Space"), "Handbrake")
             KeyRow(listOf("P"), "Park")
             KeyRow(listOf("E"), "Get out")
+        } else if (e.interior != null) {
+            KeyRow(listOf("W", "A", "S", "D"), "Walk")
+            KeyRow(listOf("E"), if (e.interior?.nearEntrance() == true) "Go outside" else "Go outside (at the door)")
         } else {
             val door = e.nearDoor
             val car = e.nearVehicle

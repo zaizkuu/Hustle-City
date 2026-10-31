@@ -341,6 +341,46 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         fn == ItemFn.DISPLAY || fn == ItemFn.EQUIPMENT || fn == ItemFn.SEATING || fn == ItemFn.SHOWER || fn == ItemFn.LOCKER || fn == ItemFn.OFFICE
     }
 
+    /**
+     * Walks the player straight from the stick or the keys: ([wx], [wy]) the direction in the room (tiles, y toward the
+     * entrance), [mag] 0..1 how far the stick is pushed. Furniture (a dance floor aside), the walls and the back room's
+     * wall stop them, and they slide along whatever they meet. Returns true when they walk out through the entrance.
+     */
+    fun walkDirect(wx: Float, wy: Float, mag: Float, dt: Float): Boolean {
+        if (mag < .08f || e.state.player.workingAt >= 0) return false
+        // taking the stick cancels a walk set by tapping
+        ppath = IntArray(0); ppathIdx = 0; onArrive = null
+        val len = kotlin.math.hypot(wx, wy).coerceAtLeast(1e-4f)
+        val step = 3.4f * mag * dt
+        val dx = wx / len * step; val dy = wy / len * step
+        playerHeading = kotlin.math.atan2(dx, -dy); playerMoving = 1f
+        val occ = walkOcc()
+        fun free(x: Float, y: Float): Boolean {
+            val r = .26f
+            // the entrance is a gap in the front wall
+            val atDoor = x > doorX - 1f + r * .5f && x < doorX + 1f - r * .5f
+            if (x < r || x > w - r || y < r || (y > d - r && !atDoor)) return false
+            if (backRoom?.cuts(px, py, x, y) == true) return false
+            val x0 = floor(x - r).toInt(); val x1 = floor(x + r).toInt()
+            val y0 = floor(y - r).toInt(); val y1 = floor(y + r).toInt()
+            for (ty in y0..y1) for (tx in x0..x1) {
+                val i = idx(tx, ty)
+                if (i >= 0 && occ[i]) return false
+            }
+            return true
+        }
+        // straight on if we can, else slide along whichever way is open
+        when {
+            free(px + dx, py + dy) -> { px += dx; py += dy }
+            free(px + dx, py) -> px += dx
+            free(px, py + dy) -> py += dy
+        }
+        return py > d + .15f
+    }
+
+    /** The player stands by the entrance (E walks out). */
+    fun nearEntrance() = py > d - 1.4f && abs(px - doorX) < 1.5f
+
     fun walkPlayerTo(tx: Int, ty: Int) {
         if (e.state.player.workingAt >= 0) return
         onArrive = null
