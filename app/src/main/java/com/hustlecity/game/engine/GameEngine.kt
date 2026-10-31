@@ -599,6 +599,13 @@ class GameEngine(context: Context?) {
                 n++
             }
             traffic.obstacleCount = n
+            // the car you drive, for people on the sidewalk to get out of the way of
+            val drivingCar = state.vehicle(state.player.driving)
+            if (drivingCar != null) {
+                traffic.threatX = drivingCar.x; traffic.threatY = drivingCar.y
+                traffic.threatHeading = if (carSpeed >= 0f) drivingCar.heading else drivingCar.heading + Math.PI.toFloat()
+                traffic.threatSpeed = abs(carSpeed)
+            } else traffic.threatSpeed = 0f
             doorClock -= dt
             if (doorClock <= 0f) { doorClock = 1f; refreshDoors(camera.tx, camera.ty) }
             traffic.update(dt, camera.tx, camera.ty, 230f, bx, by)

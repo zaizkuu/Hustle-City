@@ -1,0 +1,74 @@
+package com.hustlecity.game
+
+import com.hustlecity.game.world.City
+import com.hustlecity.game.world.Maps
+import com.hustlecity.game.world.PedActivity
+import com.hustlecity.game.world.Traffic
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.random.Random
+
+/** The sidewalks are more than people walking: window-shoppers, phones out, a chat, joggers, shopping bags, and a jump back from a car. */
+class StreetBehaviourTest {
+    @Test
+    fun peopleDoThingsOnTheSidewalk() {
+        val city = City(1337L, Maps.NYC)
+        val t = Traffic(Random(8))
+        t.attach(city)
+        t.ensure(30, 160)
+        val n = city.roads.nodes.filter { it.degree >= 3 && !city.shore.wet(it.x, it.y) }
+        val focus = n[n.size / 3]
+        // a few open shop doors along the street, as the game hands them over near the camera
+        val shops = city.buildings.filter { it.solid && abs(it.doorX - focus.x) < 90f && abs(it.doorY - focus.y) < 90f }.take(12)
+        t.doors = FloatArray(shops.size * 5).also { d -> for ((k, b) in shops.withIndex()) { d[k * 5] = b.doorX; d[k * 5 + 1] = b.doorY; d[k * 5 + 2] = .05f; d[k * 5 + 3] = -b.frontX; d[k * 5 + 4] = -b.frontY } }
+        t.doorCount = shops.size
+        t.update(0f, focus.x, focus.y, 200f, -9999f, -9999f, initial = true)
+        val seen = IntArray(4)
+        var bags = 0; var joggers = 0
+        repeat(30 * 240) {
+            t.update(1f / 30f, focus.x, focus.y, 200f, -9999f, -9999f)
+            for (a in t.peds) {
+                if (a.hidden || !a.placed) continue
+                seen[a.activity]++
+                if (a.bag) bags++
+                if (a.jogger) joggers++
+            }
+        }
+        println("frames: window ${seen[PedActivity.WINDOW]}, phone ${seen[PedActivity.PHONE]}, chat ${seen[PedActivity.CHAT]}, bags $bags, joggers $joggers")
+        assertTrue("someone stopped at a shop window", seen[PedActivity.WINDOW] > 0)
+        assertTrue("someone read their phone", seen[PedActivity.PHONE] > 0)
+        assertTrue("two people stopped to talk", seen[PedActivity.CHAT] > 0)
+        assertTrue("shoppers carry bags", bags > 0)
+        assertTrue("people jog", joggers > 0)
+        // most of the time, most people are just walking
+        val busy = seen[1] + seen[2] + seen[3]
+        assertTrue("not everyone loiters ($busy of ${seen.sum()})", busy * 4 < seen.sum())
+    }
+
+    @Test
+    fun peopleJumpBackFromACarComingAtThem() {
+        val city = City(1337L, Maps.NYC)
+        val t = Traffic(Random(3))
+        t.attach(city)
+        t.ensure(0, 120)
+        val n = city.roads.nodes.filter { it.degree >= 3 && !city.shore.wet(it.x, it.y) }
+        val focus = n[n.size / 2]
+        t.update(0f, focus.x, focus.y, 200f, -9999f, -9999f, initial = true)
+        repeat(30) { t.update(1f / 30f, focus.x, focus.y, 200f, -9999f, -9999f) }
+        // a car coming straight down the sidewalk at someone, 8 m off, at 10 m/s
+        val ped = t.peds.first { it.placed && !it.hidden && it.state == 0 && !it.jogger }
+        val h = ped.heading + Math.PI.toFloat()
+        t.threatX = ped.x - sin(h) * 8f; t.threatY = ped.y + cos(h) * 8f
+        t.threatHeading = h; t.threatSpeed = 10f
+        t.update(1f / 30f, focus.x, focus.y, 200f, -9999f, -9999f)
+        assertTrue("they saw it coming", ped.startled > 0f)
+        val x0 = ped.x; val y0 = ped.y
+        repeat(20) { t.update(1f / 30f, focus.x, focus.y, 200f, -9999f, -9999f) }
+        // they hurried: further in two thirds of a second than a stroll would take them
+        val moved = kotlin.math.hypot(ped.x - x0, ped.y - y0)
+        assertTrue("they ran (%.2f m)".format(moved), moved > 1.4f)
+    }
+}

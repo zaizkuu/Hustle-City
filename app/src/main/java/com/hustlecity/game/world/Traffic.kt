@@ -57,6 +57,15 @@ class Agent {
     var blocked = 0f
     /** A car part way through a lane change: meters still to cover sideways to its new lane's line. */
     var shift = 0f
+    /** What a pedestrian is up to besides walking ([PedActivity]), and for how many seconds more. */
+    var activity = 0
+    var linger = 0f
+    /** A pedestrian carrying a shopping bag (since coming out of a shop). */
+    var bag = false
+    /** Jogs rather than walks. */
+    var jogger = false
+    /** Seconds left of hurrying clear of a car coming at them. */
+    var startled = 0f
     /** How the body leans on its springs: nose up (+) or down when braking, and rolled toward the outside of a turn. */
     var pitch = 0f
     var roll = 0f
@@ -64,6 +73,17 @@ class Agent {
     var lastHeading = 0f
     /** Set down by hand for a shot ([Traffic.placeCar]): others placed after it make room elsewhere, not here. */
     var staged = false
+}
+
+/** What a pedestrian can stop to do on the sidewalk. */
+object PedActivity {
+    const val NONE = 0
+    /** Stopped at a shop window, looking in. */
+    const val WINDOW = 1
+    /** Ambling along looking at their phone. */
+    const val PHONE = 2
+    /** Stopped to talk to someone they met. */
+    const val CHAT = 3
 }
 
 /** Eases a car's body [a] toward the lean its braking, accelerating and turning would give it. */
@@ -93,6 +113,12 @@ private const val PI_F = 3.14159265f
 class Traffic(private val rnd: Random = Random(7)) {
     val cars = ArrayList<Agent>()
     val peds = ArrayList<Agent>()
+    /** The player's car (position, heading, speed) when they're driving, so people on the sidewalk get out of its way. */
+    var threatX = -9999f
+    var threatY = -9999f
+    var threatHeading = 0f
+    var threatSpeed = 0f
+
     /**
      * What NPC cars stop for (or change lanes round) besides each other: the player's car and their parked vehicles, as
      * boxes of [OBSTACLE] floats each: x, y, heading, half length, half width.
@@ -244,7 +270,8 @@ class Traffic(private val rnd: Random = Random(7)) {
             val clear = !g.onAsphalt(bx + nx * near, by + ny * near) && !g.onAsphalt(bx + nx * far, by + ny * far)
             // a road along a river can have its sidewalk out over the water (bridge decks have their own; the
             // pavement is laid over a canal, so that's fine to walk)
-            if (!e.overWater && sh != null && (sh.wet(bx + nx * near, by + ny * near) || sh.wet(bx + nx * far, by + ny * far))) wet = true
+            val mid = (near + far) * .5f
+            if (!e.overWater && sh != null && !wet && (sh.wet(bx + nx * near, by + ny * near) || sh.wet(bx + nx * mid, by + ny * mid) || sh.wet(bx + nx * far, by + ny * far))) wet = true
             if (clear) {
                 if (runLo < 0f) runLo = s
                 if (s - runLo > bestHi - bestLo) { bestLo = runLo; bestHi = s }
@@ -370,29 +397,37 @@ class Traffic(private val rnd: Random = Random(7)) {
     private fun spawnPed(g: RoadGraph, a: Agent, fx: Float, fy: Float, radius: Float, initial: Boolean) {
         a.color = shirtColors[rnd.nextInt(shirtColors.size)]
         a.cruise = 1.1f + rnd.nextFloat() * .6f
+        // a few are out for a run, in bright kit
+        a.jogger = rnd.nextFloat() < .07f
+        if (a.jogger) { a.cruise = 2.6f + rnd.nextFloat() * .7f; a.color = JOG_COLORS[rnd.nextInt(JOG_COLORS.size)] }
+        a.activity = PedActivity.NONE; a.linger = 0f; a.bag = false; a.startled = 0f
         a.speed = a.cruise
         a.phase = rnd.nextFloat() * 6f
         a.jitter = rnd.nextFloat() * 2f - 1f
         a.dodge = 0f
         a.state = 0
         a.hidden = false
+        // try a few sidewalks; only one that's walkable is kept (a failed try mustn't leave its road on the walker)
+        var placed = false
         for (attempt in 0 until 12) {
             val id = pickEdge(g, fx, fy, radius, false)
-            if (id < 0) return
+            if (id < 0) break
             val e = g.edges[id]
-            a.edge = id
-            a.from = if (rnd.nextBoolean()) e.a else e.b
-            a.side = if (rnd.nextBoolean()) 1 else -1
-            val s0 = walkStart(g, e, a.from, a.side); val s1 = walkEnd(g, e, a.from, a.side)
+            val from = if (rnd.nextBoolean()) e.a else e.b
+            val side = if (rnd.nextBoolean()) 1 else -1
+            val s0 = walkStart(g, e, from, side); val s1 = walkEnd(g, e, from, side)
             if (s1 - s0 < 3f) continue
+            a.edge = id; a.from = from; a.side = side
             a.s = s0 + rnd.nextFloat() * (s1 - s0)
             at(e, a.from, a.s, pedOffset(e, a) * a.side, tmp)
             a.x = tmp[0]; a.y = tmp[1]
             a.heading = headingOf(e, a.from)
+            placed = true
             if (initial || dist(a.x, a.y, fx, fy) > radius * .55f) break
         }
         a.next = -1
-        a.placed = true
+        // nowhere to walk near here this time: try again next frame
+        a.placed = placed
     }
 
     // ------------------------------------------------------------------ update
@@ -658,9 +693,15 @@ class Traffic(private val rnd: Random = Random(7)) {
             val ne = g.edges[a.next]
             val nFrom = if (a.next == e.id) to else to
             if (clearAt(e, to) <= 0f && clearAt(ne, to) <= 0f && a.next != e.id) {
-                // a bend in the road: carry on
-                a.edge = ne.id; a.from = nFrom; a.lane = a.nextLane.coerceIn(0, ne.cls.lanes - 1); a.s = 0f; a.next = -1
-                continue
+                // a bend in the road: carry on, unless the lane lines don't meet there (the outside of a sharp bend, or
+                // fewer lanes on), in which case a short curve takes the car across
+                val nl = a.nextLane.coerceIn(0, ne.cls.lanes - 1)
+                at(e, a.from, sEnd, laneOffset(e, a.lane, a), tmp)
+                at(ne, nFrom, 0f, laneOffset(ne, nl, a), tmp2)
+                if (dist(tmp[0], tmp[1], tmp2[0], tmp2[1]) < .5f) {
+                    a.edge = ne.id; a.from = nFrom; a.lane = nl; a.s = 0f; a.next = -1; a.shift = 0f
+                    continue
+                }
             }
             // a curve through the junction, from the end of this lane to the start of the next
             a.shift = 0f
@@ -711,7 +752,11 @@ class Traffic(private val rnd: Random = Random(7)) {
             5 -> { // back out onto the sidewalk
                 val e = g.edges[a.edge]
                 at(e, a.from, a.s, pedOffset(e, a) * a.side, tmp)
-                if (walkTo(a, dt, tmp[0], tmp[1], a.cruise)) { a.state = 0; a.timer = 8f }
+                if (walkTo(a, dt, tmp[0], tmp[1], a.cruise)) {
+                    a.state = 0; a.timer = 8f
+                    // most come out with something
+                    a.bag = !a.jogger && rnd.nextFloat() < .7f
+                }
                 return
             }
             1, 2 -> { crossing(g, a, dt); return }
@@ -720,6 +765,32 @@ class Traffic(private val rnd: Random = Random(7)) {
         val to = g.nodes[e.other(a.from)]
         val sEnd = walkEnd(g, e, a.from, a.side)
         var speed = a.cruise * hurry
+        // the player's car coming at them (up on the sidewalk, or skimming the curb): jump back and hurry off
+        if (threatSpeed > 3f) {
+            val dx = a.x - threatX; val dy = a.y - threatY
+            if (abs(dx) < 12f && abs(dy) < 12f) {
+                val tfx = sin(threatHeading); val tfy = -cos(threatHeading)
+                val ahead = dx * tfx + dy * tfy; val across = abs(-dx * tfy + dy * tfx)
+                if (ahead > -1.5f && ahead < 3f + threatSpeed * .55f && across < 2.8f) { a.startled = 1.8f; a.activity = PedActivity.NONE; a.linger = 0f }
+            }
+        }
+        if (a.startled > 0f) {
+            a.startled -= dt
+            speed = max(a.cruise, 1.4f) * 2.4f
+            a.dodge = max(a.dodge - dt * 5f, -1.4f)
+        }
+        // standing at a shop window or chatting: stay put, turned to it, until done
+        if (a.linger > 0f && a.startled <= 0f) {
+            a.linger -= dt
+            if (a.activity == PedActivity.PHONE) speed = min(speed, .55f)
+            else {
+                a.speed = max(0f, a.speed - 3f * dt)
+                if (a.speed > 0f) { a.s += a.speed * dt; a.phase += dt * a.speed * 3f }
+                if (a.linger <= 0f) a.activity = PedActivity.NONE
+                return
+            }
+            if (a.linger <= 0f) a.activity = PedActivity.NONE
+        }
         // make room: step aside for people coming the other way, slow behind slower walkers
         var nearest = 99f
         val fx = sin(a.heading); val fy = -cos(a.heading)
@@ -731,6 +802,14 @@ class Traffic(private val rnd: Random = Random(7)) {
             val side = abs(-dx * fy + dy * fx)
             if (ahead <= 0f || ahead > 2.5f || side > .8f) continue
             val facing = fx * sin(o.heading) - fy * cos(o.heading)
+            // two people meeting now and then stop for a chat, face to face
+            if (facing < -.6f && ahead < 1.6f && side < .7f && a.activity == PedActivity.NONE && o.activity == PedActivity.NONE &&
+                !a.jogger && !o.jogger && a.startled <= 0f && o.startled <= 0f && o.state == 0 && rnd.nextFloat() < .006f) {
+                val t = 6f + rnd.nextFloat() * 8f
+                a.activity = PedActivity.CHAT; a.linger = t; o.activity = PedActivity.CHAT; o.linger = t
+                a.heading = atan2(dx, -dy); o.heading = atan2(-dx, dy)
+                return
+            }
             if (facing < 0f) a.dodge = min(a.dodge + dt * 2.2f, .9f)
             else if (o.speed < speed) { if (ahead < 1.1f) speed = min(speed, o.speed); a.dodge = min(a.dodge + dt * 1.2f, .9f) }
             nearest = min(nearest, ahead)
@@ -748,7 +827,15 @@ class Traffic(private val rnd: Random = Random(7)) {
                     a.tx = dx + doors[k * 5 + 3] * 2.4f; a.ty = dy + doors[k * 5 + 4] * 2.4f
                     return
                 }
+                // or stop and look in the window a moment
+                if (!a.jogger && a.activity == PedActivity.NONE && abs(dx - a.x) < 2.5f && abs(dy - a.y) < 2.5f && rnd.nextFloat() < .1f) {
+                    a.activity = PedActivity.WINDOW; a.linger = 3f + rnd.nextFloat() * 4f
+                    a.heading = atan2(doors[k * 5 + 3], -doors[k * 5 + 4])
+                    return
+                }
             }
+            // now and then one gets their phone out and slows to read it
+            if (!a.jogger && a.activity == PedActivity.NONE && rnd.nextFloat() < .006f) { a.activity = PedActivity.PHONE; a.linger = 6f + rnd.nextFloat() * 8f }
         }
         a.speed += (speed - a.speed).coerceIn(-4f * dt, 3f * dt)
         a.phase += dt * a.speed * 3f
@@ -757,7 +844,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             planCorner(g, a, e, to)
             return
         }
-        at(e, a.from, a.s, max(pedOffset(e, a) - a.dodge, e.cls.halfWidth + .3f) * a.side, tmp)
+        at(e, a.from, a.s, (pedOffset(e, a) - a.dodge).coerceIn(e.cls.halfWidth + .3f, e.cls.outer - .35f) * a.side, tmp)
         val hx = tmp[0] - a.x; val hy = tmp[1] - a.y
         if (hx * hx + hy * hy > 1e-6f) a.heading = atan2(hx, -hy)
         a.x = tmp[0]; a.y = tmp[1]
@@ -859,6 +946,8 @@ class Traffic(private val rnd: Random = Random(7)) {
     }
 
     companion object {
+        /** Running kit: bright tops for the joggers. */
+        private val JOG_COLORS = intArrayOf(0xFFFF5A36.toInt(), 0xFF2ED1A2.toInt(), 0xFFFFD23F.toInt(), 0xFF3DA5FF.toInt(), 0xFFFF3D8B.toInt())
         /** Floats per entry in [obstacles]. */
         const val OBSTACLE = 5
         /** Seconds round a scramble crossing's lights: two road phases, then the walk. */
@@ -899,12 +988,16 @@ class Traffic(private val rnd: Random = Random(7)) {
         val r = a.width * .5f + .3f
         if (a.inJunction) {
             var travelled = 0f; var px = a.x; var py = a.y
+            // the whole body along the curve (a bus's ends swing wide of the line its middle follows): front, middle, back
+            val reach = max(0f, a.length * .5f - a.width * .5f)
             for (i in 1..6) {
                 val t = a.jt + (1f - a.jt) * i / 6f; val u = 1f - t
                 val x = u * u * a.jx0 + 2 * u * t * a.jcx + t * t * a.jx1
                 val y = u * u * a.jy0 + 2 * u * t * a.jcy + t * t * a.jy1
+                val tx = 2 * u * (a.jcx - a.jx0) + 2 * t * (a.jx1 - a.jcx); val ty = 2 * u * (a.jcy - a.jy0) + 2 * t * (a.jy1 - a.jcy)
+                val tl = sqrt(tx * tx + ty * ty).coerceAtLeast(1e-4f)
                 travelled += dist(px, py, x, y); px = x; py = y
-                if (nearObstacle(x, y, r)) return travelled
+                if (nearObstacle(x, y, r) || nearObstacle(x + tx / tl * reach, y + ty / tl * reach, r) || nearObstacle(x - tx / tl * reach, y - ty / tl * reach, r)) return travelled
             }
             val e = g.edges[a.edge]
             for (k in 1..3) {

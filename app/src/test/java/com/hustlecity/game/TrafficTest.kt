@@ -45,8 +45,13 @@ class TrafficTest {
             frames++
             for ((i, a) in t.cars.withIndex()) {
                 val d = sqrt((a.x - px[i]) * (a.x - px[i]) + (a.y - py[i]) * (a.y - py[i]))
-                // a respawn far away is fine; a short hop is a glitch
-                if (d > 1.5f && d < 60f) carJumps++
+                // a respawn far away is fine (cars leaving the simulated area, 230 m out, come back in elsewhere on its
+                // edge, far beyond what the camera sees); a short hop in view is a glitch
+                val edgeOfArea = sqrt((px[i] - fx) * (px[i] - fx) + (py[i] - fy) * (py[i] - fy)) > 215f || sqrt((a.x - fx) * (a.x - fx) + (a.y - fy) * (a.y - fy)) > 215f
+                if (d > 1.5f && d < 60f && !edgeOfArea) {
+                    carJumps++
+                    if (System.getenv("HC_PROBE") != null) println("JUMP ${city.mapId} car $i d=%.1f from %.0f,%.0f (%.0f m from focus) to %.0f,%.0f (%.0f m) jn=${a.inJunction} edge=${a.edge} style=${a.style}".format(d, px[i], py[i], sqrt((px[i] - fx) * (px[i] - fx) + (py[i] - fy) * (py[i] - fy)), a.x, a.y, sqrt((a.x - fx) * (a.x - fx) + (a.y - fy) * (a.y - fy))))
+                }
                 movingSum += a.speed
                 maxSpeed = maxOf(maxSpeed, a.speed)
                 if (a.speed < .2f) { stuck[i]++; maxStuck = maxOf(maxStuck, stuck[i]) } else stuck[i] = 0

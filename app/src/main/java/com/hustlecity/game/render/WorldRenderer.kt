@@ -126,6 +126,8 @@ class WorldRenderer(private val e: GameEngine) {
 
     companion object {
         val WATER = c(0xFF27445C)
+        /** A phone in a passer-by's hand. */
+        private val PHONE_COLOR = c(0xFF1E2228)
         /** Paint of the cars parked along the streets. */
         private val PARKED_COLORS = intArrayOf(c(0xFFC0392B), c(0xFFE0E0E0), c(0xFF2C3E50), c(0xFF7F8C8D), c(0xFF1F3A93), c(0xFF212121),
             c(0xFFF2F2F2), c(0xFF6D4C41), c(0xFF27AE60), c(0xFFB0B7BF))
@@ -1621,9 +1623,12 @@ class WorldRenderer(private val e: GameEngine) {
         // most people carry an umbrella in the rain (and some in the snow)
         val v = e.skyVis
         val umbrella = if ((v.rain > .25f && i % 10 < 7) || (v.snow > .4f && i % 10 < 3)) PersonPainter.UMBRELLAS[i % PersonPainter.UMBRELLAS.size] else 0
+        // joggers and people getting out of a car's way run; a phone in hand, a shopping bag from the shop
+        val running = a.jogger || a.startled > 0f
         people.draw(a.x, a.y, 0f, a.heading, a.phase, (a.speed / 1.3f).coerceIn(0f, 1f),
             a.color, PersonPainter.PANTS[(i * 3) % PersonPainter.PANTS.size], SKIN_TONES[(i * 7) % SKIN_TONES.size], PersonPainter.HAIR[(i * 5) % PersonPainter.HAIR.size],
-            umbrella = umbrella)
+            umbrella = if (running) 0 else umbrella, pose = if (running && a.speed > .5f) Pose.RUN else Pose.STAND,
+            held = if (a.activity == com.hustlecity.game.world.PedActivity.PHONE) PHONE_COLOR else 0, bag = a.bag && !running)
     }
 
     private fun drawPlayer() {

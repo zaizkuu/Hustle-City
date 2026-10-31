@@ -58,6 +58,9 @@ class CarCollisionTest {
                 for (a in t.cars) if (box(a.x, a.y, a.heading, a.length, a.width).overlaps(mine)) a.placed = false
                 t.update(0f, cx, cy, 230f, -9999f, -9999f)
                 val near = HashSet<Int>()
+                // (the car is dropped in, where no car can appear from: a bus already half way round a corner beside
+                // it gets a second and a half to stop, as it would have seen the car coming)
+                repeat(45) { t.update(1f / 30f, cx, cy, 230f, -9999f, -9999f) }
                 repeat(30 * 40) {
                     t.update(1f / 30f, cx, cy, 230f, -9999f, -9999f)
                     frames++
