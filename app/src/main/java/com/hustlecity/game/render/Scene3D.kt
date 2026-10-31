@@ -193,11 +193,39 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     /** Forces the next polygons to be emissive (self-lit) on the GPU. */
     var glow = false
     /**
-     * Building the GPU's cached city: cull against a screen widened by half a screen on every side, since the cache is
-     * drawn from nearby camera positions (moved, turned or zoomed a little) until it's rebuilt; culling to this
-     * frame's screen would leave holes at the edges.
+     * Building the GPU's cached city: cull against a screen widened by [cacheMargin] on every side ([cacheMarginBelow]
+     * below it), since the cache is drawn from nearby camera positions (moved, turned or zoomed a little) until it's
+     * rebuilt; culling to this frame's screen would leave holes at the edges.
      */
     var cacheBuild = false
+    /** While building the cache: how far off screen (in screen sizes) polygons are still kept, so the cache lasts while the view moves. */
+    var cacheMargin = .5f
+    /** The same below the screen, where the ground near the camera comes into view as it moves. */
+    var cacheMarginBelow = 1f
+    /** Tests: told of every polygon the cache leaves out for being off screen. */
+    internal var onCulled: ((Int, FloatArray, FloatArray, FloatArray) -> Unit)? = null
+
+    /** Tests: whether any of a polygon falls on screen as this frame's camera sees it (its screen bounds into [box]). */
+    internal fun onScreen(n: Int, xs: FloatArray, ys: FloatArray, zs: FloatArray, box: FloatArray? = null): Boolean {
+        var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+        // clipped at the near plane, as the GPU would
+        for (i in 0 until n) {
+            val j = (i + 1) % n
+            val ci = proj.camXOf(xs[i], ys[i], zs[i]); val ui = proj.camYOf(xs[i], ys[i], zs[i]); val zi = proj.camZOf(xs[i], ys[i], zs[i])
+            val cj = proj.camXOf(xs[j], ys[j], zs[j]); val uj = proj.camYOf(xs[j], ys[j], zs[j]); val zj = proj.camZOf(xs[j], ys[j], zs[j])
+            for (k in 0..1) {
+                val cx: Float; val cy: Float; val cz: Float
+                if (k == 0) { if (zi < proj.near) continue; cx = ci; cy = ui; cz = zi }
+                else { if ((zi < proj.near) == (zj < proj.near)) continue; val t = (proj.near - zi) / (zj - zi); cx = ci + (cj - ci) * t; cy = ui + (uj - ui) * t; cz = proj.near }
+                val px = proj.centerX + proj.focal * cx / cz
+                val py = proj.centerY - proj.focal * cy / cz
+                minX = min(minX, px); maxX = max(maxX, px); minY = min(minY, py); maxY = max(maxY, py)
+            }
+        }
+        if (minX > maxX) return false
+        if (box != null) { box[0] = minX; box[1] = minY; box[2] = maxX; box[3] = maxY }
+        return !(maxX < 0f || minX > proj.screenW || maxY < 0f || minY > proj.screenH)
+    }
     /** Level of detail for GPU spheres: 0 far .. 2 near. */
     var sphereDetail = 1
     /** Surface material for the GPU shaders (see [Mat]); [topMaterial] overrides it on box tops (roofs) when set. */
@@ -385,8 +413,11 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
                 if (py < minY) minY = py; if (py > maxY) maxY = py
             }
             if (behind == n) return
-            val mx = if (cacheBuild) proj.screenW * .5f else 0f; val my = if (cacheBuild) proj.screenH * .5f else 0f
-            if (behind == 0 && (maxX < -mx || minX > proj.screenW + mx || maxY < -my || minY > proj.screenH + my)) return
+            val mx = if (cacheBuild) proj.screenW * cacheMargin else 0f; val my = if (cacheBuild) proj.screenH * cacheMargin else 0f
+            val below = if (cacheBuild) proj.screenH * cacheMarginBelow else 0f
+            // (a long strip of ground passing under the camera spans screens and swings far with a small turn: kept)
+            val huge = cacheBuild && (maxX - minX > proj.screenW * 4f || maxY - minY > proj.screenH * 4f)
+            if (behind == 0 && !huge && (maxX < -mx || minX > proj.screenW + mx || maxY < -my || minY > proj.screenH + below)) { onCulled?.invoke(n, xs, ys, zs); return }
             g.poly(streamFor(color), n, xs, ys, zs, color, isEmissive(color), materialFor(color))
             return
         }

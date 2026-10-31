@@ -39,10 +39,10 @@ class TreePainter(private val scene: Scene3D) {
 
     /**
      * Draws tree [i] of [kind] standing at ([x], [y]): canopy radius [r], height [h], color [tone], in calendar [month]
-     * (0 = January). [near] adds the fine detail.
+     * (0 = January). [near] adds the fine detail; a [far] tree (small on screen) gets coarser round crowns.
      */
-    fun draw(x: Float, y: Float, r: Float, h: Float, tone: Int, kind: Int, month: Int, i: Int, near: Boolean) {
-        scene.sphereDetail = if (near) 2 else 1
+    fun draw(x: Float, y: Float, r: Float, h: Float, tone: Int, kind: Int, month: Int, i: Int, near: Boolean, far: Boolean = false) {
+        scene.sphereDetail = if (near) 2 else if (far) 0 else 1
         val white = scene.lit(0xFFF2F5F8.toInt(), 1f)
         if (kind == 4) { palm(x, y, r, h, tone, i, near, white); return }
         if (kind == 5 && month == 10 && scene.snow < .3f) {

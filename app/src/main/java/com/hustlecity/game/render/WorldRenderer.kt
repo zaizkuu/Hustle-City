@@ -131,6 +131,8 @@ class WorldRenderer(private val e: GameEngine) {
         /** Paint of the cars parked along the streets. */
         private val PARKED_COLORS = intArrayOf(c(0xFFC0392B), c(0xFFE0E0E0), c(0xFF2C3E50), c(0xFF7F8C8D), c(0xFF1F3A93), c(0xFF212121),
             c(0xFFF2F2F2), c(0xFF6D4C41), c(0xFF27AE60), c(0xFFB0B7BF))
+        /** The camera's height at the usual zoom (70 m out at 52 degrees), which detail distances are tuned for. */
+        private const val USUAL_CAM_Z = 55f
         /** How far a film's camera sees the city, at the least. */
         const val CINEMA_FAR = 1100f
         val SIDEWALK = c(0xFFB9BCC1)
@@ -198,6 +200,7 @@ class WorldRenderer(private val e: GameEngine) {
         this.density = density
         scene.gpu = gpu
         setupCamera(w, h)
+        lodLift = if (cinematic || mapMode) 0f else max(0f, proj.camZ * proj.camZ - USUAL_CAM_Z * USUAL_CAM_Z)
         val day = e.daylight()
         scene.applyDaylight(if (mapMode) max(day, .75f) else day)
         val v = e.skyVis
@@ -335,23 +338,66 @@ class WorldRenderer(private val e: GameEngine) {
     private val stageBox = FloatArray(4)
     private var stageCamX = 0f; private var stageCamY = 0f; private var stageYaw = 0f; private var stageDist = 1f
     private var stageHard = 0L; private var stageSoft = 0L
+    // The cache keeps what's within half a screen of the view (a screen below it, where the ground near the camera comes
+    // into view as it moves): enough for a 34 m move or a .27 radian turn. A view being turned is cached a screen wide
+    // either side instead, and lasts through a half-radian turn. (CacheMarginTest checks both.)
+    private var stageMargin = .5f
+    private var sTurnLimit = .27f
+    /** Tests: the cache margin to use instead of choosing one. */
+    internal var forceMargin = -1f
+    internal var testMarginBelow = -1f
+    /** Tests: rebuild the cache on the next frame. */
+    internal fun invalidateCache() { staticValid = false; stageActive = false }
+
+    /** Triangles in the cached city now drawn (for the bench). */
+    fun staticTris() = if (published < 0) 0 else staticFrames[published].streams.sumOf { it.ni } / 3
+
+    /** Whole-cache rebuilds done in a single frame (the view ran off the cache before the background build caught up). */
+    var blockingRebuilds = 0
+        private set
+
+    /** Time each frame may spend building the next cache in the background (the bench lowers it to stand in for a slow phone). */
+    var stageBudgetNs = 2_500_000L
+
+    // how fast the camera is moving over the ground (m/s), turning (rad/s) and zooming (fraction per second), smoothed,
+    // so the next cache can be started early enough
+    private var camSpeed = 0f; private var camTurn = 0f; private var camZoom = 0f
+    private var lastCamX = 0f; private var lastCamY = 0f; private var lastCamYaw = 0f; private var lastCamDist = 1f; private var lastCamT = -1f
 
     private fun ensureStatic(gpu: GpuFrame) {
         val hard = hardKey(); val soft = softKey(gpu)
+        val now = e.realTime
+        val dt = now - lastCamT
+        if (lastCamT >= 0f && dt > 1e-4f && dt < .5f) {
+            val k = min(1f, dt * 4f)
+            camSpeed += (min(dist(proj.camX, proj.camY, lastCamX, lastCamY) / dt, 80f) - camSpeed) * k
+            camTurn += (min(abs(wrapAngle(proj.yaw - lastCamYaw)) / dt, 6f) - camTurn) * k
+            camZoom += (min(abs(proj.dist / lastCamDist - 1f) / dt, 4f) - camZoom) * k
+        } else if (dt >= .5f || dt < 0f) { camSpeed = 0f; camTurn = 0f; camZoom = 0f }
+        lastCamX = proj.camX; lastCamY = proj.camY; lastCamYaw = proj.yaw; lastCamDist = max(proj.dist, 1f); lastCamT = now
         val moved = dist(proj.camX, proj.camY, sCamX, sCamY)
         val far = if (mapMode) proj.dist * .25f else 34f
         val outside = bbox[0] < staticBox[0] || bbox[1] < staticBox[1] || bbox[2] > staticBox[2] || bbox[3] > staticBox[3]
         val turn = abs(wrapAngle(proj.yaw - sYaw)); val zoom = abs(proj.dist / sDist - 1f)
-        val must = !staticValid || staticCity !== e.city || hard != sHard || moved > far || turn > .3f || zoom > .2f || outside
+        val must = !staticValid || staticCity !== e.city || hard != sHard || moved > far || turn > sTurnLimit || zoom > .2f || outside
         if (must) {
+            blockingRebuilds++
             stageActive = false
             startStage(hard, soft)
             finishStage(Long.MAX_VALUE)
         } else {
-            // close to needing one: start building the next cache now, a little each frame
-            val nearEdge = bbox[0] - staticBox[0] < 25f || bbox[1] - staticBox[1] < 25f || staticBox[2] - bbox[2] < 25f || staticBox[3] - bbox[3] < 25f
-            if (!stageActive && (soft != sSoft || moved > far * .5f || turn > .14f || zoom > .08f || nearEdge)) startStage(hard, soft)
-            if (stageActive) finishStage(2_500_000L)
+            // close to needing one: start building the next cache now, a little each frame; at speed, start sooner
+            // (where the camera will be in a second), so the build is done before the view runs off the old cache
+            val lead = camSpeed * 1f
+            val edge = min(min(bbox[0] - staticBox[0], bbox[1] - staticBox[1]), min(staticBox[2] - bbox[2], staticBox[3] - bbox[3]))
+            val nearEdge = edge < 25f + lead
+            if (!stageActive && (soft != sSoft || moved + lead > far * .5f || turn + camTurn * .4f > sTurnLimit * .47f || zoom + camZoom * .4f > .08f || nearEdge)) startStage(hard, soft)
+            if (stageActive) {
+                // the closer the view is to needing a whole rebuild in one frame, the more of each frame the build may take
+                val urgency = maxOf(moved / far, turn / sTurnLimit, zoom / .2f, 1f - edge / 25f)
+                val boost = 1f + 1.5f * ((urgency - .7f) / .3f).coerceIn(0f, 1f)
+                finishStage((stageBudgetNs * boost).toLong())
+            }
         }
         gpu.staticGeom = staticFrames[published]
     }
@@ -363,6 +409,7 @@ class WorldRenderer(private val e: GameEngine) {
         stageIdx = idx
         stageHard = hard; stageSoft = soft
         stageCamX = proj.camX; stageCamY = proj.camY; stageYaw = proj.yaw; stageDist = proj.dist
+        stageMargin = if (forceMargin >= 0f) forceMargin else if (camTurn > .25f) 1f else .5f
         // a margin around the view so small moves don't need a rebuild (a film's view is already wide)
         val mx = if (cinematic) 70f else max(70f, (bbox[2] - bbox[0]) * .3f); val my = if (cinematic) 70f else max(70f, (bbox[3] - bbox[1]) * .3f)
         stageBox[0] = bbox[0] - mx; stageBox[1] = bbox[1] - my; stageBox[2] = bbox[2] + mx; stageBox[3] = bbox[3] + my
@@ -395,7 +442,7 @@ class WorldRenderer(private val e: GameEngine) {
                     dType[0] = stageType[stagePos]; dIdx[0] = stageId[stagePos]; dKey[0] = stageKeyArr[stagePos]; order[0] = 0
                     drawList()
                     stagePos++
-                    if ((stagePos and 7) == 0 && System.nanoTime() - t0 > budgetNs) break
+                    if (System.nanoTime() - t0 > budgetNs) break
                 }
             }
             if (stagePos < stageCount) return
@@ -407,6 +454,7 @@ class WorldRenderer(private val e: GameEngine) {
         stageLabels.clear(); stageLabels.addAll(t); recycle(stageLabels)
         stageBox.copyInto(staticBox)
         sCamX = stageCamX; sCamY = stageCamY; sYaw = stageYaw; sDist = stageDist; sHard = stageHard; sSoft = stageSoft
+        sTurnLimit = if (stageMargin > .5f) .5f else .27f
         staticValid = true
         staticCity = e.city
         stageActive = false
@@ -421,6 +469,8 @@ class WorldRenderer(private val e: GameEngine) {
         labelOut = stageLabels
         staticPass = true
         scene.cacheBuild = true
+        scene.cacheMargin = stageMargin
+        scene.cacheMarginBelow = if (testMarginBelow >= 0f) testMarginBelow else stageMargin + .5f
         try { block() } finally {
             scene.cacheBuild = false
             staticPass = false
@@ -504,7 +554,9 @@ class WorldRenderer(private val e: GameEngine) {
                     drawCar(c.x, c.y, c.heading, c.length, c.width, 1.45f, color, if (c.seed % 5 == 0) 1 else if (c.seed % 7 == 0) 9 else 0, false)
                 }
                 8 -> {
-                    props.draw(scene, dIdx[i], dKey[i] < 55f * 55f, e.realTime)
+                    // a hydrant or bench a few pixels high is left out (the camera's height counts toward how far off it is)
+                    if (!cinematic && StreetProps.small(props.kind[dIdx[i]]) && proj.focal < tinyPropPx() * sqrt(dKey[i] + proj.camZ * proj.camZ)) continue
+                    props.draw(scene, dIdx[i], dKey[i] + lodLift < 55f * 55f, e.realTime)
                     if (props.kind[dIdx[i]] == StreetProps.VENDOR && dKey[i] < 120f * 120f) vendor(dIdx[i])
                 }
                 12 -> features.draw(scene, dIdx[i], e.realTime, scene.gpu == null, mapMode, if (e.hasGame) e.state.hour else 12)
@@ -1281,6 +1333,14 @@ class WorldRenderer(private val e: GameEngine) {
         return dx * dx + dy * dy
     }
 
+    /**
+     * Squared distance for choosing how much detail to draw: across the ground, plus however much higher the camera is
+     * than at the usual zoom. Zoomed out, the camera is high and what's beneath it is small on screen, though it's near
+     * across the ground; at the usual zoom or closer this is the same as [keyFor].
+     */
+    private fun lodKey(x: Float, y: Float): Float = keyFor(x, y) + lodLift
+    private var lodLift = 0f
+
     private fun keyForRect(b: Building): Float {
         val nx = proj.camX.coerceIn(b.minX, b.maxX)
         val ny = proj.camY.coerceIn(b.minY, b.maxY)
@@ -1407,7 +1467,7 @@ class WorldRenderer(private val e: GameEngine) {
     }
 
     private fun drawBuilding(b: Building) {
-        if (b.kind == BKind.GAS) { painter.draw(b, b.roof, b.facade, sqrt(keyFor(b.cx, b.cy)), !mapMode); return }
+        if (b.kind == BKind.GAS) { painter.draw(b, b.roof, b.facade, sqrt(lodKey(b.cx, b.cy)), !mapMode); return }
         val s = e.state
         val p = s.player
         var alpha = 1f
@@ -1431,7 +1491,7 @@ class WorldRenderer(private val e: GameEngine) {
             scene.clearFrame()
             return
         }
-        painter.draw(b, roof, facade, sqrt(keyFor(b.cx, b.cy)), true)
+        painter.draw(b, roof, facade, sqrt(lodKey(b.cx, b.cy)), true)
     }
 
     private fun brighten(color: Int, f: Float): Int {
@@ -1473,13 +1533,23 @@ class WorldRenderer(private val e: GameEngine) {
         val pr = props
         if (pr.hiddenTree[i]) return
         val t = e.city.trees[i]
-        trees.draw(t.x, t.y, t.r, t.h, t.tone, pr.treeKind[i], e.weather.month(), i, keyFor(t.x, t.y) < 70f * 70f)
+        val d2 = keyFor(t.x, t.y)
+        // a tree only a few dozen pixels across gets coarser spheres for its crown: a third of the triangles
+        val far = !mapMode && !cinematic && t.r * proj.focal < farTreePx() * sqrt(d2 + proj.camZ * proj.camZ)
+        trees.draw(t.x, t.y, t.r, t.h, t.tone, pr.treeKind[i], e.weather.month(), i, d2 + lodLift < 70f * 70f, far)
+        scene.sphereDetail = 1
     }
+
+    /** Small street props less than this many pixels to the meter are left out. */
+    private fun tinyPropPx() = when (e.settings.quality) { 0 -> 9f; 1 -> 6f; else -> 4f } * density / 2f
+
+    /** Crowns smaller than this on screen (radius, pixels) are drawn coarser. */
+    private fun farTreePx() = when (e.settings.quality) { 0 -> 34f; 1 -> 24f; else -> 14f } * density / 2f
 
     private fun drawCar(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int, owned: Boolean,
                         taxi: Boolean = false, braking: Boolean = false, accent: Int = 0, pitch: Float = 0f, roll: Float = 0f, police: Int = 0) {
         val lod = when (e.settings.quality) { 0 -> 45f; 1 -> 80f; else -> 120f }
-        val near = !mapMode && keyFor(x, y) < lod * lod
+        val near = !mapMode && lodKey(x, y) < lod * lod
         cars.leftHand = e.city.leftHand
         cars.clock = e.realTime
         cars.draw(x, y, heading, len, wid, hgt, color, style, near, taxi, braking, accent, pitch, roll, police)
@@ -1576,7 +1646,7 @@ class WorldRenderer(private val e: GameEngine) {
         val tin = scene.snowy(c(0xFF9AA0A6))
         val u0 = 1.5f; val u1 = len - 1.5f
         // riders queue under the roof (drawn first so the roof covers them from above)
-        if (keyFor(b.cx, b.cy) < 110f * 110f) {
+        if (lodKey(b.cx, b.cy) < 110f * 110f) {
             val riders = ((u1 - u0) / 1.5f).toInt().coerceIn(2, 12)
             val face = atan2(-b.cs, b.sn)
             scene.clearFrame()

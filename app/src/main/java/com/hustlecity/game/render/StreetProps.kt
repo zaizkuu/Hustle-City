@@ -34,6 +34,8 @@ class StreetProps(val city: City) {
         const val BUNTING = 15
         /** Manila's residential lanes: a home-made basketball hoop on a post, hanging over the street. */
         const val HOOP = 16
+        /** The props about knee to head high, that are a dot or two on screen from far off and can be left out there. */
+        fun small(kind: Int) = kind == HYDRANT || kind == BIN || kind == BENCH || kind == NEWS || kind == MAILBOX || kind == BIKE_RACK || kind == PLANTER
         /** Heights of the two strings of banderitas and of the lantern string where they're tied. */
         const val BUNTING_LOW = 5.2f; const val BUNTING_HIGH = 5.75f; const val LANTERN_Z = 4.3f
         /** A pole's service drops: how far along the street each runs, and the heights it leaves the pole and meets the wall. */
