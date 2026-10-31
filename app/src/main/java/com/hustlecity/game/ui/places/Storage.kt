@@ -58,8 +58,8 @@ import com.hustlecity.game.ui.theme.HC
 import com.hustlecity.game.ui.theme.HT
 
 /**
- * Manage storage, as in Big Ambitions: the vehicle's cargo slots on one side, what you carry with
- * (hands, hand truck or store cart) on the other. Tap a box to move it across.
+ * Manage storage: the vehicle's cargo slots on one side, what you carry with (hands, hand truck or store cart) on the
+ * other. Tap a box to move it across.
  */
 @Composable
 fun ManageStoragePanel(e: GameEngine, vehicleId: Int) {

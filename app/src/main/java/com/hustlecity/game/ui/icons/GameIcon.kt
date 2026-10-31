@@ -80,7 +80,7 @@ fun GIcon(icon: GameIcon, size: Dp, modifier: Modifier = Modifier, tint: Color =
 @Composable
 fun GIcon(id: String, size: Dp, modifier: Modifier = Modifier, tint: Color = Color.White) = GIcon(GameIcons[id], size, modifier, tint)
 
-/** A glyph on a colored badge: round like the map pins, or a rounded square like the BizPhone apps. */
+/** A glyph on a colored badge: round like the map pins, or a rounded square like the phone's apps. */
 @Composable
 fun IconBadge(id: String, size: Dp, color: Color, modifier: Modifier = Modifier, round: Boolean = true, tint: Color = Color.White, glyph: Float = .6f) {
     val shape = if (round) CircleShape else RoundedCornerShape(size * .26f)

@@ -51,7 +51,7 @@ object Objectives {
             ),
         ),
         ObjectiveGroup(
-            "Big Ambitions", "Now we're talking. Grow the brand, beat the rivals, own this city.",
+            "Uncle Sal", "Now we're talking. Grow the brand, beat the rivals, own this city.",
             listOf(
                 Objective("marketing", "Run a marketing campaign at Buzz Marketing", "buzz", flag("marketing")),
                 Objective("two", "Own 2 businesses", "realty") { e -> e.state.businesses.count { !it.type.facility } >= 2 },

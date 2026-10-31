@@ -7,8 +7,8 @@ import com.hustlecity.game.model.PlacedItem
 import kotlin.math.roundToInt
 
 /**
- * The staff-only back room of a rented store, like the default layouts in Big Ambitions: the back rows of the floor
- * (the side away from the entrance) behind a wall with a doorway, for storage shelves and the cleaning station.
+ * The staff-only back room of a rented store: the back rows of the floor (the side away from the entrance) behind a
+ * wall with a doorway, for storage shelves and the cleaning station.
  * The wall runs along the tile edge at y = [depth], so it takes no floor space. Customers never go in.
  */
 class BackRoom(val depth: Int, val doorX: Int, val doorW: Int) {

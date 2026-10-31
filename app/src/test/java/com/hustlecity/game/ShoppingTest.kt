@@ -30,7 +30,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** Big Ambitions-style walk-in shopping: browse the displays, carry with hands/cart/hand truck, pay, load the car. */
+/** Walk-in shopping: browse the displays, carry with hands/cart/hand truck, pay, load the car. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class ShoppingTest {

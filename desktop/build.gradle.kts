@@ -69,7 +69,7 @@ compose.desktop {
             packageVersion = "1.7.0"
             description = "Hustle City - a business life simulation"
             vendor = "Hustle City"
-            copyright = "Hustle City is an independent fan project."
+            copyright = "Copyright © 2026 Hustle City"
             modules("java.desktop", "java.instrument", "jdk.unsupported")
 
             windows {

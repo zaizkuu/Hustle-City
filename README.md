@@ -1,6 +1,6 @@
 # Hustle City
 
-A business life-simulation game for Android and Windows, inspired by *Big Ambitions*. Start with a small apartment, a beat-up car and $5,000. Rent a storefront, furnish it, stock it, hire staff, and grow a business empire in a living 3D city.
+A business life-simulation game for Android and Windows. Start with a small apartment, a beat-up car and $5,000. Rent a storefront, furnish it, stock it, hire staff, and grow a business empire in a living 3D city.
 
 Native Kotlin + Jetpack Compose with a custom 3D engine. In HD mode the world is drawn by an OpenGL ES 3 renderer with per-pixel lighting, real-time sun shadows, photo materials scanned from real surfaces (brick, stone, asphalt, concrete, sidewalk slabs, grass, wood, tiles, corrugated metal, gravel, plaster) with bump maps, glass that reflects the sky, water with wind waves, a glittering sun path and foam along the quays, modelled cars, and 4x anti-aliasing; a lightweight Canvas renderer with procedural materials is the fallback for older devices.
 
@@ -50,7 +50,7 @@ Saves and settings are kept in `%APPDATA%\HustleCity`.
 - Energy, hunger and happiness. Sleep at home, eat from your fridge or at restaurants, and avoid passing out.
 - Courses at Hustle Business School unlock hiring, logistics, marketing, importing and real estate.
 
-**Businesses** (21 types, the full Big Ambitions roster)
+**Businesses** (21 types)
 - Shops: Florist, Fruit & Vegetable Store, Coffee Shop, Supermarket, Fast Food, Hairdresser, Gym, Gift Shop, Liquor Store, Clothing, Bookstore, Electronics, Jewelry.
 - Nightlife and shows: Nightclub (needs a DJ), Cinema (projectionist, licence fees) and Theater (actors, licence fees).
 - Office firms: Law Firm, Web Development Agency, Graphic Designer, Travel Agency and Event Planning Agency. Professionals at desks bill clients by the hour; clients come from reputation and advertising.
@@ -184,4 +184,4 @@ python3 tools/cinema/banger.py frames app/build/cinema audio banger.mp4
 
 `CinemaRender` draws the recordings with the game's own HD renderer through the desktop build's OpenGL; `tools/cinema/render.mjs` does the same in a headless browser.
 
-*Hustle City is an independent fan project. It is not affiliated with Hovgaard Games or Big Ambitions. All names of in-game companies are fictional.*
+*All in-game companies and people are fictional.*

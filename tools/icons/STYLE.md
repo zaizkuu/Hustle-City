@@ -1,7 +1,6 @@
 # Hustle City icon style
 
-Hustle City draws its own icons instead of emojis. They follow the look of Big Ambitions' UI: flat, bold, friendly
-shapes that read instantly at small sizes.
+Hustle City draws its own icons instead of emojis: flat, bold, friendly shapes that read instantly at small sizes.
 
 ## Format
 
@@ -32,8 +31,8 @@ Then open the PNG with the Read tool and check every icon. The game renderer giv
 ## Two kinds of icons
 
 **Glyphs** (business types, places, map filters, phone apps, HUD, actions, weather): single-color silhouettes using
-only `TINT` layers (no explicit colors). The game draws them white on a colored round pin (Voogle Maps), white on a
-rounded-square gradient tile (BizPhone apps) or dark on light cards. Rules:
+only `TINT` layers (no explicit colors). The game draws them white on a colored round pin (the Maps app), white on a
+rounded-square gradient tile (phone apps) or dark on light cards. Rules:
 - Solid filled shapes, not thin outlines. Strokes only for small accents (steam, motion lines) and at least 1.5 wide.
 - Keep about 2 units of padding: draw inside roughly x 2..22, y 2..22, centred, and fill the space (no tiny glyphs).
 - Use `alpha = .55f`–`.7f` layers for a secondary tone (e.g. the liquid in a glass, a shelf behind products).
@@ -51,10 +50,3 @@ full-color flat illustrations with explicit colors on every layer. Rules:
   must look different (e.g. a single tulip bunch vs a rose bouquet in paper; a plain tee vs a tailored blazer).
 - Services and tickets (gym fee, haircut, legal hour, movie ticket, club entry…) get an object that stands for the
   service: dumbbell with a ticket, scissors and comb, gavel, film ticket, wristband…
-
-## References
-
-Big Ambitions screenshots provided by the player, in `/root/.claude/uploads/12bc0a81-bb70-5ca1-ac7a-dd544428124c/`
-(open them with the Read tool): `3ca2fbad-image.jpg` (map pins and filter list icons), `5fd5903a-image.jpg` (filter
-list icons), `e419c2d4-image.jpg` and `1f9508f5-image.jpg` (BizPhone app icons), `1981ee79-image.jpg` (vehicle HUD
-icons: car, parking P, boxes, fuel pump, gear). Match the clarity and weight of those glyphs, but draw our own shapes.

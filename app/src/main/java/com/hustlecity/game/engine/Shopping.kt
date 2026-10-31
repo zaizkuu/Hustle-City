@@ -10,9 +10,9 @@ import com.hustlecity.game.world.dist
 import kotlin.math.min
 
 /*
- * Walk-in shopping and carrying boxes, the way Big Ambitions does it: bare hands hold one box,
- * a hand truck four, and the flatbed carts at a store's entrance eight. Items picked off a display
- * are unpaid until you pay at the register; then you push them out to your vehicle and load the trunk.
+ * Walk-in shopping and carrying boxes: bare hands hold one box, a hand truck four, and the flatbed carts at a store's
+ * entrance eight. Items picked off a display are unpaid until you pay at the register; then you push them out to your
+ * vehicle and load the trunk.
  */
 
 object Carrier {

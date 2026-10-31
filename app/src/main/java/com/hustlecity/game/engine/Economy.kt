@@ -497,8 +497,8 @@ class Economy(private val e: GameEngine) {
     }
 
     /**
-     * Takes stock into a store the way Big Ambitions does: onto its displays while they have room, and what doesn't
-     * fit boxed on the back room's storage shelves. Returns the units taken (the rest fits nowhere).
+     * Takes stock into a store: onto its displays while they have room, and what doesn't fit boxed on the back room's
+     * storage shelves. Returns the units taken (the rest fits nowhere).
      */
     fun stockIn(b: Business, pid: String, qty: Int, unitCost: Double): Int {
         if (qty <= 0) return 0

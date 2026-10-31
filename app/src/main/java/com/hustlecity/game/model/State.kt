@@ -58,7 +58,7 @@ data class PlayerState(
 )
 
 /**
- * How the world treats you, set when the game starts (like Big Ambitions' custom game). Multipliers are 1 for a
+ * How the world treats you, set when the game starts (a custom game's options). Multipliers are 1 for a
  * normal game: customer demand, rents, wages, loan interest, how hard rivals push, and how fast you get tired and hungry.
  */
 @Serializable
