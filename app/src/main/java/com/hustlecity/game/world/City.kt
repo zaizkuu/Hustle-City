@@ -333,6 +333,8 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC, val layout: Int = L
     val neighborhoods: List<Neighborhood>
     /** World area the player can reach: x0, y0, x1, y1. */
     val bounds: FloatArray
+    /** The cars parked along the streets and in the lots, and the bays for them. */
+    val parked: ParkedCars by lazy { ParkedCars(this) }
     /** Paved ground (on maps without land outlines): [bounds], out to wherever the roads run on past its edge. */
     val paved: FloatArray
     val maxHeight: Float

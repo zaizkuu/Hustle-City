@@ -280,6 +280,16 @@ class Traffic(private val rnd: Random = Random(7)) {
         return if (leftHand) -o else o
     }
 
+    /**
+     * Where a vehicle drives across [e] in [lane]: wide ones (buses, trucks) keep a little toward the centre line on
+     * ordinary streets, so they clear the cars parked along the curb.
+     */
+    private fun laneOffset(e: RoadEdge, lane: Int, a: Agent): Float {
+        val o = laneOffset(e, lane)
+        if (e.cls != RoadClass.STREET || a.width <= 2f) return o
+        return o - (a.width - 1.9f) * .5f * sign(o)
+    }
+
     /** World position [s] meters from node [from] along [e], [off] meters to the right of travel. */
     private fun at(e: RoadEdge, from: Int, s: Float, off: Float, out: FloatArray) {
         val fwd = from == e.a
@@ -603,7 +613,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             // one that's been stuck a while is likely waiting for us
             if (o.speed < .3f && o.blocked > 2f) continue
             // where our own curve would start: a car that started there is just ahead of us in the queue
-            if (!mine) { at(e, a.from, sEnd, laneOffset(e, a.lane), tmp2); mine = true }
+            if (!mine) { at(e, a.from, sEnd, laneOffset(e, a.lane, a), tmp2); mine = true }
             if (abs(o.jx0 - tmp2[0]) > 1f || abs(o.jy0 - tmp2[1]) > 1f) return true
         }
         return false
@@ -638,7 +648,7 @@ class Traffic(private val rnd: Random = Random(7)) {
             val sEnd = e.len - clearAt(e, to)
             a.s += d
             if (a.s < sEnd) {
-                at(e, a.from, a.s, laneOffset(e, a.lane) + a.shift, tmp)
+                at(e, a.from, a.s, laneOffset(e, a.lane, a) + a.shift, tmp)
                 a.x = tmp[0]; a.y = tmp[1]
                 a.heading = headingOf(e, a.from)
                 return
@@ -654,9 +664,9 @@ class Traffic(private val rnd: Random = Random(7)) {
             }
             // a curve through the junction, from the end of this lane to the start of the next
             a.shift = 0f
-            at(e, a.from, sEnd, laneOffset(e, a.lane), tmp)
+            at(e, a.from, sEnd, laneOffset(e, a.lane, a), tmp)
             val lane = a.nextLane.coerceIn(0, ne.cls.lanes - 1)
-            at(ne, nFrom, clearAt(ne, nFrom), laneOffset(ne, lane), tmp2)
+            at(ne, nFrom, clearAt(ne, nFrom), laneOffset(ne, lane, a), tmp2)
             a.jx0 = tmp[0]; a.jy0 = tmp[1]; a.jx1 = tmp2[0]; a.jy1 = tmp2[1]
             val d0x = if (a.from == e.a) e.ux else -e.ux; val d0y = if (a.from == e.a) e.uy else -e.uy
             val d1x = if (nFrom == ne.a) ne.ux else -ne.ux; val d1y = if (nFrom == ne.a) ne.uy else -ne.uy

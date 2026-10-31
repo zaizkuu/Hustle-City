@@ -126,6 +126,9 @@ class WorldRenderer(private val e: GameEngine) {
 
     companion object {
         val WATER = c(0xFF27445C)
+        /** Paint of the cars parked along the streets. */
+        private val PARKED_COLORS = intArrayOf(c(0xFFC0392B), c(0xFFE0E0E0), c(0xFF2C3E50), c(0xFF7F8C8D), c(0xFF1F3A93), c(0xFF212121),
+            c(0xFFF2F2F2), c(0xFF6D4C41), c(0xFF27AE60), c(0xFFB0B7BF))
         /** How far a film's camera sees the city, at the least. */
         const val CINEMA_FAR = 1100f
         val SIDEWALK = c(0xFFB9BCC1)
@@ -296,6 +299,7 @@ class WorldRenderer(private val e: GameEngine) {
         var k = (if (mapMode) 1L else 0L) + e.settings.quality * 3
         k = k * 31 + e.ui.selected
         k = k * 31 + e.ui.mapFilters.hashCode()
+        k = k * 31 + e.city.parked.version
         if (e.hasGame) {
             for (b in st.businesses) k = k * 31 + b.buildingId * 7 + (if (b.tempClosed) 1 else 0) + b.openHour * 3 + b.closeHour * 5 + b.typeId.hashCode()
             for (r in st.rentals) k = k * 31 + r.buildingId
@@ -493,6 +497,10 @@ class WorldRenderer(private val e: GameEngine) {
                 }
                 6 -> drawTrafficLight(dIdx[i])
                 7 -> drawParkedCar(dIdx[i])
+                15 -> e.city.parked.bays.getOrNull(dIdx[i])?.car?.let { c ->
+                    val color = PARKED_COLORS[c.seed % PARKED_COLORS.size]
+                    drawCar(c.x, c.y, c.heading, c.length, c.width, 1.45f, color, if (c.seed % 5 == 0) 1 else if (c.seed % 7 == 0) 9 else 0, false)
+                }
                 8 -> {
                     props.draw(scene, dIdx[i], dKey[i] < 55f * 55f, e.realTime)
                     if (props.kind[dIdx[i]] == StreetProps.VENDOR && dKey[i] < 120f * 120f) vendor(dIdx[i])
@@ -1181,6 +1189,17 @@ class WorldRenderer(private val e: GameEngine) {
                 }
             }
             if (!near) continue
+            // parking bays along the curbs: a line across each end, and one along the traffic side
+            e.city.parked.bysEdge[ed.id]?.let { bays ->
+                val hw2 = ed.cls.halfWidth
+                for (bay in bays) {
+                    val o0 = bay.side * (hw2 - 2.25f); val o1 = bay.side * (hw2 - .15f)
+                    strip(ed, bay.s - 3.06f, bay.s - 2.94f, min(o0, o1), max(o0, o1), .031f, worn(white, ed.id * 5 + bay.side, (bay.s * 7).toInt(), fade))
+                    strip(ed, bay.s + 2.94f, bay.s + 3.06f, min(o0, o1), max(o0, o1), .031f, worn(white, ed.id * 3 + bay.side, (bay.s * 5).toInt(), fade))
+                    val oi = bay.side * (hw2 - 2.25f); val oj = bay.side * (hw2 - 2.13f)
+                    strip(ed, bay.s - 3f, bay.s + 3f, min(oi, oj), max(oi, oj), .031f, worn(white, ed.id * 11 + bay.side, (bay.s * 3).toInt(), fade))
+                }
+            }
             // crosswalks where the road meets a junction, painted the city's way, with stop lines at the lights
             for (end in 0..1) {
                 val node = g.nodes[if (end == 0) ed.a else ed.b]
@@ -1293,6 +1312,15 @@ class WorldRenderer(private val e: GameEngine) {
                 return@forBuildingsIn
             }
             add(0, b.id, keyForRect(b))
+        }
+        // cars parked in the bays along the streets (cached with the street)
+        if (stat && !mapMode && proj.dist < 300) {
+            val bays = city.parked.bays
+            for (i in bays.indices) {
+                val c = bays[i].car ?: continue
+                if (c.x < bbox[0] - 4f || c.x > bbox[2] + 4f || c.y < bbox[1] - 4f || c.y > bbox[3] + 4f) continue
+                add(15, i, keyFor(c.x, c.y))
+            }
         }
         // landmarks, viaducts, bridges and walls are cached; trains and the wheel's rotor move (the Canvas path draws
         // them with the span or landmark they're on, so they sort with it). Taken before the crowds of small things,

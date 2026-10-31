@@ -205,6 +205,10 @@ class GameEngine(context: Context?) {
         // a used starter car parked on the street in front of home
         val spot = curbSpot(home, 4f)
         s.vehicles += OwnedVehicle(s.newId(), "tico", spot.first, spot.second, curbHeadingFor(home), fuel = .6, condition = .75)
+        // a clear run along the curb ahead, so a new player's first press of the gas doesn't end in the car in front
+        val h0 = curbHeadingFor(home)
+        city.parked.vacate(spot.first, spot.second)
+        city.parked.vacate(spot.first + sin(h0) * 16f, spot.second - cos(h0) * 16f, 16f)
         // rivals and their businesses
         economy.rivals.seed(Random(seed + 7))
         weather.ensure()
@@ -237,6 +241,7 @@ class GameEngine(context: Context?) {
         state = s
         city = City(s.seed, s.mapId, s.layout)
         traffic.attach(city)
+        for (v in s.vehicles) city.parked.vacate(v.x, v.y)
         rnd = Random(System.nanoTime())
         economy.rivals.migrate()
         weather.ensure()
@@ -826,6 +831,7 @@ class GameEngine(context: Context?) {
                 city.collide(nx, ny, .45f, tmp)
                 var px = tmp[0]; var py = tmp[1]
                 if (traffic.bump(px, py, .45f, tmp)) { px = tmp[0]; py = tmp[1] }
+                if (city.parked.bump(px, py, .45f, tmp)) { px = tmp[0]; py = tmp[1] }
                 if (cartAllows(px, py) || !cartAllows(p.x, p.y)) { p.x = px; p.y = py }
                 else if (cartWarn <= 0f) { toast("Store carts have to stay in the parking lot", ToastKind.INFO, "hand_truck"); cartWarn = 4f }
                 p.heading = atan2(wx, -wy)
@@ -987,6 +993,7 @@ class GameEngine(context: Context?) {
             val sy = if (k == 0) hy else -hy
             if (city.collide(cx + sx, cy + sy, r, tmp)) { cx += tmp[0] - (cx + sx); cy += tmp[1] - (cy + sy); hit = true }
             if (traffic.bump(cx + sx, cy + sy, r, tmp)) { cx += tmp[0] - (cx + sx); cy += tmp[1] - (cy + sy); hit = true }
+            if (city.parked.bump(cx + sx, cy + sy, r, tmp)) { cx += tmp[0] - (cx + sx); cy += tmp[1] - (cy + sy); hit = true }
         }
         v.x = cx; v.y = cy
         if (hit) {
@@ -1073,11 +1080,17 @@ class GameEngine(context: Context?) {
         var px = e.ax + e.ux * sAlong + e.uy * off * side
         var py = e.ay + e.uy * sAlong - e.ux * off * side
         val heading = city.curbHeading(e, side)
-        // leave room for the other cars you own
-        val ax = -sin(heading); val ay = cos(heading)
-        var tries = 0
-        while (tries++ < 6 && state.vehicles.any { it.id != v.id && dist(it.x, it.y, px, py) < 5.5f }) { px += ax * 6f; py += ay * 6f }
-        v.x = px; v.y = py; v.heading = heading
+        // a street with marked bays: the nearest free one along this curb (not on top of a parked car)
+        val bay = city.parked.freeBay(px, py, 40f, e.id, side) { b -> state.vehicles.any { it.id != v.id && dist(it.x, it.y, b.x, b.y) < 4f } }
+        var finalHeading = heading
+        if (bay != null) { px = bay.x; py = bay.y; finalHeading = bay.heading }
+        else {
+            // leave room for the other cars you own
+            val ax = -sin(heading); val ay = cos(heading)
+            var tries = 0
+            while (tries++ < 6 && state.vehicles.any { it.id != v.id && dist(it.x, it.y, px, py) < 5.5f }) { px += ax * 6f; py += ay * 6f }
+        }
+        v.x = px; v.y = py; v.heading = finalHeading
         exitVehicle()
         toast("Parked at the curb")
         return true

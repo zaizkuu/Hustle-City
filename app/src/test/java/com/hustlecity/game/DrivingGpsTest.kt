@@ -15,7 +15,12 @@ import kotlin.math.abs
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class DrivingGpsTest {
-    private fun game() = GameEngine(null).also { it.newGame("T", 0, 0, 1); it.ui.tip = null; it.ui.phoneOpen = false }
+    // (the street cleared of parked cars, so driving straight on along the curb tests the car, not the parking)
+    private fun game() = GameEngine(null).also {
+        it.newGame("T", 0, 0, 1); it.ui.tip = null; it.ui.phoneOpen = false
+        val v = it.state.vehicles.first()
+        it.city.parked.vacate(v.x, v.y, 90f)
+    }
 
     private fun run(e: GameEngine, seconds: Float) { repeat((seconds * 30).toInt()) { e.frame(1 / 30f) } }
 
