@@ -1,5 +1,9 @@
 package com.hustlecity.game.ui.hud
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.tween
 import com.hustlecity.game.ui.icons.GIcon
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -88,6 +92,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hustlecity.game.audio.Audio
 import com.hustlecity.game.data.Catalog
+import com.hustlecity.game.engine.eatOwnStock
+import com.hustlecity.game.engine.findFood
 import com.hustlecity.game.engine.rentOf
 import com.hustlecity.game.engine.AppId
 import com.hustlecity.game.engine.BizCalc
@@ -164,13 +170,28 @@ fun Avatar(p: PlayerState, size: androidx.compose.ui.unit.Dp, modifier: Modifier
 }
 
 @Composable
-private fun NeedBar(icon: String, color: Color, value: Float, barWidth: androidx.compose.ui.unit.Dp) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(20.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
-            GIcon(icon, 13.dp)
+private fun NeedBar(icon: String, color: Color, value: Float, barWidth: androidx.compose.ui.unit.Dp, onClick: (() -> Unit)? = null) {
+    // nearly empty: the icon and the bar pulse with a red glow until it's seen to
+    val low = value < .2f
+    val pulse = if (low) {
+        val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "need")
+        t.animateFloat(0f, 1f, infiniteRepeatable(
+            tween(650), RepeatMode.Reverse), label = "pulse").value
+    } else 0f
+    var mod: Modifier = Modifier
+    if (onClick != null) mod = mod.clickable(onClick = onClick)
+    Row(mod, verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) {
+            if (low) Box(Modifier.size((20 + 6 * pulse).dp).clip(CircleShape).background(HC.Red.copy(alpha = .35f + .45f * pulse)))
+            Box(Modifier.size(20.dp).clip(CircleShape).background(if (low) androidx.compose.ui.graphics.lerp(color, HC.Red, pulse) else color), contentAlignment = Alignment.Center) {
+                GIcon(icon, 13.dp)
+            }
         }
-        Spacer(Modifier.width(4.dp))
-        Bar(value, if (value < .2f) HC.Red else color, Modifier.width(barWidth), height = 6.dp)
+        Spacer(Modifier.width(2.dp))
+        Box(contentAlignment = Alignment.Center) {
+            if (low) Box(Modifier.width(barWidth + 4.dp).height(10.dp).clip(RoundedCornerShape(5.dp)).background(HC.Red.copy(alpha = .25f + .4f * pulse)))
+            Bar(value, if (low) HC.Red else color, Modifier.width(barWidth), height = 6.dp)
+        }
     }
 }
 
@@ -202,7 +223,8 @@ fun TopBar(e: GameEngine) {
             ) {
                 val bw = if (tiny) 20.dp else if (compact) 30.dp else 62.dp
                 NeedBar("energy", HC.Energy, (p.energy / 100).toFloat(), bw)
-                NeedBar("hunger", HC.Hunger, (p.hunger / 100).toFloat(), bw)
+                // tap the food bar to head for the nearest place to eat
+                NeedBar("hunger", HC.Hunger, (p.hunger / 100).toFloat(), bw) { e.findFood() }
                 NeedBar("happiness", HC.Happy, (p.happiness / 100).toFloat(), bw)
                 Box(Modifier.width(1.dp).height(26.dp).background(Color(0x40FFFFFF)))
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { e.ui.app = AppId.FINANCE }) {
@@ -555,6 +577,7 @@ fun BuildingCard(e: GameEngine, modifier: Modifier = Modifier, avoidPhone: Boole
                 rental != null -> "RENTED BY YOU" to HC.Orange
                 biz != null -> null
                 rival != null && rival.rivalId == com.hustlecity.game.engine.SUBSIDIARY -> "YOUR SUBSIDIARY" to HC.Orange
+                rival != null && rival.rivalId == com.hustlecity.game.engine.INDEPENDENT -> "LOCAL INDEPENDENT · PLACE TO EAT" to HC.Orange
                 rival != null -> "OWNED BY ${s.rivals.firstOrNull { it.id == rival.rivalId }?.name?.uppercase()}" to Color(0xFFBFC7D1)
                 e.isVacant(b.id) -> "FOR RENT · ${e.money(e.rentOf(b))}/MONTH" to HC.GreenLight
                 b.solid && place == null -> "BUILDING OWNED BY ${b.landlord.uppercase()}" to Color(0xFFBFC7D1)
@@ -657,6 +680,11 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                     HButton(if (working) "Skip to end of shift (%02d:00)".format(biz.closeHour) else "Work until %02d:00 (skip ahead)".format(biz.closeHour), full, small = true,
                         color = HC.Teal, icon = Icons.Filled.FastForward) { e.workUntilClosing(biz) }
                     HButton("Clean (${biz.cleanliness.roundToInt()}%)", full, small = true, color = HC.GlassLight) { e.cleanStore(biz) }
+                    if (com.hustlecity.game.engine.servesFood(biz)) {
+                        val meal = com.hustlecity.game.engine.ownMealIn(biz)
+                        HButton(if (meal != null) "Eat here: ${meal.third.substringAfter(' ')}" else "Eat here (out of stock)", full, small = true, color = HC.Orange,
+                            enabled = meal != null) { e.eatOwnStock(biz) }
+                    }
                     HButton("Music: " + musicLabel(e, biz), full, small = true, color = HC.Purple, icon = Icons.Filled.MusicNote) { e.ui.panel = Panel.StoreMusic(biz.id) }
                     // the back room: boxes waiting on the storage shelves
                     val shelves = BizCalc.storageBoxes(biz)

@@ -102,6 +102,7 @@ fun MapsOverlay(e: GameEngine, @Suppress("UNUSED_PARAMETER") r: Renderers) {
                 }
                 FilterRow("Shops & services", null, f["places"] != false) { f["places"] = it }
                 FilterRow("For rent", HC.Green, f["rent"] == true) { f["rent"] = it }
+                FilterRow("Places to eat", HC.Orange, f["food"] == true) { f["food"] = it }
                 Section("Neighborhoods")
                 for (n in e.city.neighborhoods) {
                     FilterRow(n.name, n.color.toColor(), f["hood:${n.id}"] == true, onGo = {

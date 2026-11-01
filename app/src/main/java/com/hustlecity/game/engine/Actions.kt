@@ -619,7 +619,54 @@ fun GameEngine.eat(cost: Double, hunger: Double, energy: Double = 0.0, happiness
     p.hunger = (p.hunger + hunger).coerceAtMost(100.0)
     p.energy = (p.energy + energy).coerceIn(0.0, 100.0)
     p.happiness = (p.happiness + happiness).coerceIn(0.0, 100.0)
+    if (hunger > 0.0) ui.eatingUntil = realTime + 3f
     toast("You had $label", ToastKind.GOOD)
+}
+
+/** What you can make yourself from your own food store's stock: product, hunger, energy, how it's said. */
+private val OWN_MEALS = listOf(
+    Triple("burger", 40.0, "a burger"), Triple("pizza", 40.0, "a slice of pizza"), Triple("hotdog", 30.0, "a hot dog"),
+    Triple("fresh_food", 35.0, "a fresh meal"), Triple("frozen_food", 30.0, "a microwave meal"), Triple("fries", 15.0, "some fries"),
+    Triple("croissant", 15.0, "a croissant"), Triple("cupcake", 12.0, "a cupcake"), Triple("snacks", 12.0, "a snack"),
+)
+
+/** The food you could make yourself in [biz] right now (first that's on its menu and in stock), or null. */
+fun ownMealIn(biz: com.hustlecity.game.model.Business): Triple<String, Double, String>? =
+    OWN_MEALS.firstOrNull { (pid, _, _) -> biz.type.products.any { it.first == pid } && (biz.stock[pid] ?: 0) > 0 }
+
+/** True if [biz] sells anything you could eat. */
+fun servesFood(biz: com.hustlecity.game.model.Business) = OWN_MEALS.any { (pid, _, _) -> biz.type.products.any { it.first == pid } }
+
+/** In your own food business: make yourself something from its stock (you've already paid for it). */
+fun GameEngine.eatOwnStock(biz: com.hustlecity.game.model.Business) {
+    val meal = ownMealIn(biz) ?: run { toast("Nothing to eat in stock: restock ${biz.name} first"); return }
+    val (pid, hunger, label) = meal
+    biz.stock[pid] = (biz.stock[pid] ?: 1) - 1
+    val p = state.player
+    p.hunger = (p.hunger + hunger).coerceAtMost(100.0)
+    p.happiness = (p.happiness + 1).coerceAtMost(100.0)
+    if (pid == "croissant" || pid == "cupcake") p.energy = (p.energy + 4).coerceAtMost(100.0)
+    ui.eatingUntil = realTime + 3f
+    toast("You made yourself $label at ${biz.name}", ToastKind.GOOD)
+    bump()
+}
+
+/** Types of business you can sit down and eat at, as a customer. */
+val EATING_TYPES = setOf("fastfood", "coffee")
+
+/** The nearest place you can get a meal (a fast food place or a cafe, a rival's or your own), from where you are. */
+fun GameEngine.nearestFood(): com.hustlecity.game.world.Building? {
+    val (fx, fy) = focusPoint()
+    val ids = state.rivalBusinesses.filter { it.typeId in EATING_TYPES }.map { it.buildingId } +
+        state.businesses.filter { it.typeId in EATING_TYPES }.map { it.buildingId }
+    return ids.mapNotNull { city.building(it) }.minByOrNull { dist(fx, fy, it.doorX, it.doorY) }
+}
+
+/** Sets the GPS to the nearest place to eat. */
+fun GameEngine.findFood() {
+    val b = nearestFood() ?: run { toast("No place to eat nearby"); return }
+    if (state.player.waypoint != b.id) setWaypoint(b.id)
+    toast("Heading to ${buildingName(b)} for a bite", ToastKind.GOOD)
 }
 
 fun GameEngine.eatAtHome() {
@@ -628,6 +675,7 @@ fun GameEngine.eatAtHome() {
     if (p.fridgeMeals <= 0) { toast("Your fridge is empty. Buy groceries at a supermarket."); return }
     p.fridgeMeals--
     p.hunger = (p.hunger + 40).coerceAtMost(100.0)
+    ui.eatingUntil = realTime + 3f
     toast("You ate a home-cooked meal (${p.fridgeMeals} left)", ToastKind.GOOD)
     bump()
 }

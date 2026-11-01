@@ -59,6 +59,8 @@ class UiState {
     var ending by mutableStateOf<String?>(null)
     /** Time of the last rendered frame, for widgets that redraw every frame (minimap). */
     var frameTime by mutableStateOf(0L)
+    /** The player is eating until this moment ([GameEngine.realTime]): their character acts it out. */
+    var eatingUntil = 0f
     /** One-time tip (title, text). */
     var tip by mutableStateOf<Pair<String, String>?>(null)
 }

@@ -28,6 +28,9 @@ import kotlin.math.sqrt
 /** [com.hustlecity.game.model.RivalBusiness.rivalId] of a rival store you have bought: it trades for you under its old manager. */
 const val SUBSIDIARY = -1
 
+/** [com.hustlecity.game.model.RivalBusiness.rivalId] of a local independent (a fast food place no company runs). */
+const val INDEPENDENT = -2
+
 /** The standard shifts, as (start, end) hours. */
 enum class Shift(val label: String, val start: Int, val end: Int) {
     MORNING("Morning", 6, 14), AFTERNOON("Afternoon", 14, 22), GRAVEYARD("Graveyard", 22, 6);

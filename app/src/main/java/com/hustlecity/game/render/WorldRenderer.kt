@@ -1481,6 +1481,9 @@ class WorldRenderer(private val e: GameEngine) {
             val rented = b.id in rentedBuildings
             if (rented) { roof = c(0xFF5FD38D); facade = c(0xFF3FAE6E) }
             else if (e.ui.mapFilters["rent"] == true && vacant(b)) { roof = c(0xFF9FE3B8); facade = c(0xFF7CCB9B) }
+            else if (e.ui.mapFilters["food"] == true && (rivalByBuilding[b.id]?.typeId ?: bizByBuilding[b.id]?.typeId) in com.hustlecity.game.engine.EATING_TYPES) {
+                roof = c(0xFFFFB74D); facade = c(0xFFF2994A)
+            }
             if (b.id == e.ui.selected) { roof = c(0xFFFFE08A); facade = c(0xFFE6B84A) }
         } else if (b.id == e.ui.selected) {
             roof = brighten(roof, 1.25f); facade = brighten(facade, 1.15f)
@@ -1877,6 +1880,7 @@ class WorldRenderer(private val e: GameEngine) {
             else {
                 val rb = rivalByBuilding[b.id]
                 if (rb != null && f["type:${rb.typeId}"] == true) { icon = Catalog.type(rb.typeId).icon; ring = c(0xFF7D8793); name = rb.name }
+                else if (rb != null && f["food"] == true && rb.typeId in com.hustlecity.game.engine.EATING_TYPES) { icon = Catalog.type(rb.typeId).icon; ring = c(0xFFF2994A); name = rb.name }
                 else if (f["rent"] == true && b.kind == BKind.RETAIL && vacant(b)) { icon = "for_rent"; ring = c(0xFF27AE60) }
             }
             if (icon == null) continue

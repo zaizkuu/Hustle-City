@@ -547,7 +547,11 @@ private fun RivalShop(e: GameEngine, buildingId: Int) {
     val owner = e.state.rivals.firstOrNull { it.id == rb.rivalId }
     val mineNow = rb.rivalId == com.hustlecity.game.engine.SUBSIDIARY
     Modal(rb.name, { close(e) }, maxWidth = 640.dp) {
-        Text(if (mineNow) "${type.name} · your subsidiary, run by its manager" else "${type.name} · owned by ${owner?.name}", style = HT.body, color = HC.InkSoft)
+        Text(when {
+            mineNow -> "${type.name} · your subsidiary, run by its manager"
+            owner == null -> "${type.name} · a local independent"
+            else -> "${type.name} · owned by ${owner.name}"
+        }, style = HT.body, color = HC.InkSoft)
         Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (mineNow) {
                 Text("Yesterday: ${e.money(rb.revenue)} sales, ${e.money(rb.profit)} profit (paid to you nightly)", style = HT.small, color = HC.Ink, modifier = Modifier.weight(1f))
@@ -571,7 +575,12 @@ private fun RivalShop(e: GameEngine, buildingId: Int) {
             CardTitle("Buy", modifier = Modifier.padding(top = 10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (type.id) {
-                    "fastfood" -> { HButton("Burger meal \$9", small = true) { e.eat(9.0, 45.0, label = "a burger meal") }; HButton("Fries \$3", small = true) { e.eat(3.0, 15.0, label = "fries") } }
+                    "fastfood" -> {
+                        HButton("Burger meal \$9", small = true) { e.eat(9.0, 45.0, label = "a burger meal") }
+                        HButton("Chicken wrap \$7", small = true) { e.eat(7.0, 32.0, label = "a chicken wrap") }
+                        HButton("Fries \$3", small = true) { e.eat(3.0, 15.0, label = "fries") }
+                        HButton("Soda \$2", small = true) { e.eat(2.0, 4.0, energy = 3.0, label = "a soda") }
+                    }
                     "coffee" -> { HButton("Coffee & croissant \$6", small = true) { e.eat(6.0, 15.0, energy = 12.0, label = "coffee and a croissant") }; HButton("Espresso \$3", small = true) { e.eat(3.0, 2.0, energy = 8.0, label = "an espresso") } }
                     "supermarket", "produce" -> { HButton("Groceries (4 meals) \$32", small = true) { e.buyGroceries() }; HButton("Snack \$3", small = true) { e.eat(3.0, 12.0, label = "a snack") } }
                     "liquor" -> HButton("Drink \$8", small = true) { e.eat(8.0, 2.0, energy = -5.0, happiness = 6.0, label = "a drink") }
@@ -589,7 +598,7 @@ private fun RivalShop(e: GameEngine, buildingId: Int) {
             }
             CardTitle("Side job", modifier = Modifier.padding(top = 14.dp))
             val wage = 16.0 + (type.baseDemand / 20.0).roundToInt()
-            Text("Work a shift for ${owner?.name} at ${e.money(wage)}/hour. Paid at the end of the shift. Tiring!", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(bottom = 6.dp))
+            Text("Work a shift for ${owner?.name ?: "the owner"} at ${e.money(wage)}/hour. Paid at the end of the shift. Tiring!", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(bottom = 6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (h in listOf(2, 4, 8)) HButton("$h hours", small = true, color = HC.Teal) { e.sideJob(h, wage, rb.name) }
             }

@@ -19,6 +19,7 @@ import kotlin.random.Random
  * start a price war, buy its buildings or close a store that loses money.
  */
 class RivalAI(private val e: GameEngine) {
+
     /** Projected day for a store. */
     class Day(val revenue: Double, val cogs: Double, val costs: Double, val customers: Int, val lost: Int) {
         val profit get() = revenue - cogs - costs
@@ -27,6 +28,14 @@ class RivalAI(private val e: GameEngine) {
     private class Personality(val strategy: Int, val aggression: Double, val focus: List<String>)
 
     companion object {
+        /** Local fast food independents, by city. */
+        val EATERY_NAMES = mapOf(
+            "nyc" to listOf("Patty Wagon", "Slice of the Block", "Hudson Fry House", "Fourth Street Franks", "Big Borough Grill", "Corner Dumpling Co.", "Bodega Burgers", "Pier Fish & Chips"),
+            "tokyo" to listOf("Ramen Hinata", "Katsu Kitchen Ichi", "Onigiri Corner", "Gyudon Go", "Teriyaki Stop", "Yatai Burger", "Soba Shinkansen", "Curry Lantern"),
+            "seoul" to listOf("Tteok Spot", "Hongdae Fried Chicken", "Seoul Bowl", "Bibim Bar", "Night Market Fry", "Mandu House", "Gimbap Go", "Jjigae Corner"),
+            "manila" to listOf("Silog Stop", "Inasal Grill", "Lumpia Lou's", "Pancit Place", "Sizzling Kanto", "Turon Time", "Adobo Express", "Halo-Halo Hut"),
+            "classic" to listOf("Burger Barn", "Crispy Corner", "Taco Tower", "Wrap & Roll", "Golden Fries", "Noodle Nook", "Hot Dog Harbor", "Pizza Porch"),
+        )
         val STRATEGIES = listOf("Balanced", "Aggressive", "Premium", "Discounter", "Specialist")
         private val MARKETING_COST = mapOf(.1 to 120.0, .22 to 350.0, .35 to 800.0)
         /** Rival stores are run by managers, not by you: fewer customers than a well-run player store. */
@@ -227,6 +236,31 @@ class RivalAI(private val e: GameEngine) {
             level = if (rr.nextDouble() < .3) 2 else 1, reputation = .4 + rr.nextDouble() * .35,
             priceFactor = basePrice(r), opened = -rr.nextInt(400), owned = rr.nextDouble() < .05,
         )
+    }
+
+    /**
+     * Somewhere to eat in every neighborhood: where no fast food place trades (a rival's or yours), a local independent
+     * opens in a vacant shop on its busiest street. Run on a new game and on loading one from before they existed;
+     * they stay put (no company runs them, so none closes, sells up or starts a price war).
+     */
+    fun ensureEateries() {
+        val s = e.state
+        val names = (EATERY_NAMES[e.city.mapId] ?: EATERY_NAMES.getValue("classic")).toMutableList()
+        names.removeAll { n -> s.rivalBusinesses.any { it.name == n } }
+        var added = 0
+        for (hood in e.city.neighborhoods) {
+            val inHood = { id: Int -> e.city.building(id)?.hood?.id == hood.id }
+            val served = s.rivalBusinesses.any { it.typeId == "fastfood" && inHood(it.buildingId) } || s.businesses.any { it.typeId == "fastfood" && inHood(it.buildingId) }
+            if (served) continue
+            val spots = e.city.buildings.filter { it.hood.id == hood.id && it.kind == BKind.RETAIL && it.frontEdge >= 0 && it.placeId == null && e.isVacant(it.id) }
+                .sortedByDescending { it.traffic }.take(5)
+            if (spots.isEmpty()) continue
+            val b = spots[((hood.id * 7919 + e.city.seed.toInt()) and 0x7fffffff) % spots.size]
+            val name = names.removeFirstOrNull() ?: "${hood.name} Grill"
+            s.rivalBusinesses += RivalBusiness(s.newId(), INDEPENDENT, b.id, "fastfood", name, level = 1, reputation = .62, opened = -365)
+            added++
+        }
+        if (added > 0) version++
     }
 
     /** Saves from before rivals had personalities. */

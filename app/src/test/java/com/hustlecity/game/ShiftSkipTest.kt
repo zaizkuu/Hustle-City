@@ -6,6 +6,7 @@ import com.hustlecity.game.engine.InteriorMode
 import com.hustlecity.game.engine.InteriorScene
 import com.hustlecity.game.engine.startBusiness
 import com.hustlecity.game.engine.toggleWork
+import com.hustlecity.game.engine.workUntilClosing
 import com.hustlecity.game.model.Rental
 import com.hustlecity.game.model.SkipKind
 import com.hustlecity.game.world.BKind
@@ -34,6 +35,19 @@ class ShiftSkipTest {
         e.interior = sc
         e.ui.phoneOpen = false
         return Triple(e, sc, biz)
+    }
+
+    @Test
+    fun theShiftStopsWhenYouRunOutOfFood() {
+        val (e, _, biz) = store()
+        e.toggleWork(biz)
+        e.state.player.hunger = 3.0
+        e.workingHere()?.let { e.workUntilClosing(it) }
+        assertTrue(e.skip != null)
+        var guard = 0
+        while (e.skip != null && guard++ < 20000) e.frame(1 / 30f)
+        assertTrue("stopped well before closing (at ${e.state.hour}:00)", e.state.hour < biz.closeHour - 2)
+        assertTrue(e.ui.toasts.any { it.text.contains("starving") })
     }
 
     @Test

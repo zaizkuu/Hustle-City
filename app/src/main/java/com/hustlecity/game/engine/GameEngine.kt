@@ -224,6 +224,7 @@ class GameEngine(context: Context?) {
         city.parked.vacate(spot.first + sin(h0) * 16f, spot.second - cos(h0) * 16f, 16f)
         // rivals and their businesses
         economy.rivals.seed(Random(seed + 7))
+        economy.rivals.ensureEateries()
         weather.ensure()
         message("Uncle Sal", Objectives.groups[0].intro, notify = false)
         message("Uncle Sal", "Your old Tico Compact is parked outside your apartment at ${home.address}. Tap the phone apps to get around — Maps shows the whole city.", notify = false)
@@ -257,6 +258,7 @@ class GameEngine(context: Context?) {
         for (v in s.vehicles) city.parked.vacate(v.x, v.y)
         rnd = Random(System.nanoTime())
         economy.rivals.migrate()
+        economy.rivals.ensureEateries()
         weather.ensure()
         interior = null
         minuteAcc = 0.0
@@ -685,6 +687,14 @@ class GameEngine(context: Context?) {
             if (p.hunger <= 0) drain *= 1.6
             p.energy = (p.energy - drain).coerceAtLeast(0.0)
             p.hunger = (p.hunger - 100.0 / (14 * 60) * p.rules.needs).coerceAtLeast(0.0)
+            // a shift (or a course, a workout...) fast-forwarded stops when there's nothing left in the tank
+            skip?.let { job ->
+                if (job.kind in AWAKE_SKIPS && (p.hunger <= 0.0 || p.energy <= 0.0)) {
+                    finishSkip(true, force = true)
+                    if (p.hunger <= 0.0) toast("You're starving! Stopped to get something to eat.", ToastKind.BAD)
+                    else toast("You're exhausted! Stopped to rest.", ToastKind.BAD)
+                }
+            }
             if (p.energy <= 0.0 && skip == null) passOut()
         }
     }
@@ -1378,5 +1388,7 @@ class GameEngine(context: Context?) {
         private const val KEY_PARK = 6
         private const val KEY_CAR = 7
         private const val KEY_SHIFT = 8
+        /** Fast-forwards you're awake through: they stop when you run out of food or energy. */
+        private val AWAKE_SKIPS = setOf(SkipKind.WORK, SkipKind.SIDE_JOB, SkipKind.CLEAN, SkipKind.WORKOUT, SkipKind.COURSE, SkipKind.WAIT, SkipKind.REST)
     }
 }
