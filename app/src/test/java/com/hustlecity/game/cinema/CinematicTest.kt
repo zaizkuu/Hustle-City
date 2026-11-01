@@ -1682,8 +1682,8 @@ class CinematicTest {
         val biz = e.state.businessAt(sc.building.id)!!
         // a spill by the checkout: six tiles, enough that the mop stays on them the whole shot
         biz.dirt = MutableList(sc.w * sc.d) { k -> if (k / sc.w in sc.d - 4..sc.d - 3 && k % sc.w in sc.w / 2 - 2..sc.w / 2) 30f else 0f }
-        // from the front of the shop, looking down over the spill as the cleaner works across it
-        inside(e, "l28_mop", 2.6f, { u -> floatArrayOf(sc.w / 2f - .5f + .4f * u, sc.d - 3.2f, 6.2f - .6f * u, .3f - .15f * u, 40f) }, warm = 8f)
+        // steeply down on the cleaner as they work across it, over the tops of the shelves
+        closeUp(e, "l28_mop", 2.6f, dist = 6.2f, pitch = 52f, turn = .8f, lift = .3f, warm = 8f) { s -> s.staff.firstOrNull { it.job == Job.CLEAN } }
     }
 
     /** Restocking the shelves from the back. */
