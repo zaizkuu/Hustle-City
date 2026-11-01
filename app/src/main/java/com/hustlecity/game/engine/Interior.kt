@@ -73,6 +73,8 @@ class Person(var x: Float, var y: Float, var shirt: Int, var skin: Int) {
     var bagged = false
     /** What a staff member is doing at their post ([Job]), for the renderer to act out. */
     var job = 0
+    /** Seconds a customer has been waiting to be served (in a salon chair, or at the front of a till's line). */
+    var waitedFor = 0f
     /** Debugging and screenshots: the action to show instead of the one the renderer would pick (-1 for none). */
     internal var showAct = -1
     /** How long paying at the till takes this customer (seconds; 0 when not at a till): their goods go on the counter, are
@@ -511,6 +513,68 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         return kotlin.math.atan2(-side * fx, side * fy)
     }
 
+    /** The station (a salon chair, a wash basin) the player works at as the stylist, or -1. */
+    var playerStation = -1; private set
+
+    /** Stations (item indices) where a customer is served one to one by staff: salon chairs and wash basins. */
+    private var stationItems: Set<Int> = emptySet()
+    /** Stations with their server there right now, and tills with someone behind them. */
+    private val servedStations = HashSet<Int>()
+    private val staffedTills = HashSet<Int>()
+    /** How many can serve at the stations right now (stylists on shift, or you); with none, nobody waits for one. */
+    private var stationServers = 0
+    /** True when the tills are worked by someone (a cashier on shift, or you): customers then pay only once they're there. */
+    private var tillsManned = false
+    /** The station each server (a staff key, or [PLAYER_KEY]) was last given. */
+    private val stationOf = HashMap<Int, Int>()
+
+    /** True while a customer at [item] is being served there (a stylist with them). */
+    fun isServed(item: Int) = item in servedStations
+    /** True when [item] is a station whose customers wait for a server. */
+    fun needsServer(item: Int) = item in stationItems && stationServers > 0
+
+    private fun stationList(): List<Int> = items.withIndex().filter { (_, p) -> Catalog.item(p.itemId)?.tags?.any { it in SERVICE_TAGS } == true }.map { it.index }
+
+    /** You're working here, it has salon stations, and no stylist is on shift: you serve the clients yourself. */
+    private fun playerServesStations(): Boolean {
+        val biz = business ?: return false
+        if (mode != InteriorMode.BUSINESS || e.state.player.workingAt != biz.id) return false
+        if (items.none { p -> Catalog.item(p.itemId)?.tags?.any { it in SERVICE_TAGS } == true }) return false
+        val s = e.state
+        return s.employees.none { it.businessId == biz.id && it.role == StaffRole.HAIRSTYLIST && it.worksAt(s.hour, s.weekday) }
+    }
+
+    /**
+     * Which station each of [keys] (stylists by staff key, or [PLAYER_KEY]) works at. Whoever is with a seated client
+     * stays until they're done; the others go to the client who has waited longest (the nearest free stylist first),
+     * then to clients on their way to a chair; anyone left over stays at the station they were at.
+     */
+    private fun assignStations(keys: List<Int>, where: (Int) -> Pair<Float, Float>?): Map<Int, Int> {
+        val out = HashMap<Int, Int>()
+        val free = stationItems.toMutableList()
+        fun seated(ci: Int) = visitors.firstOrNull { it.seated && it.item == ci }
+        fun coming(ci: Int) = visitors.any { it.item == ci && it.seat != null && !it.seated && it.counter < 0 }
+        for (k in keys) { val cur = stationOf[k] ?: continue; if (cur in free && seated(cur) != null) { out[k] = cur; free -= cur } }
+        val waiting = free.filter { seated(it) != null }.sortedByDescending { seated(it)!!.waitedFor } + free.filter { seated(it) == null && coming(it) }
+        for (ci in waiting) {
+            val left = keys.filter { it !in out }
+            if (left.isEmpty()) break
+            val st = items[ci]
+            out[left.minByOrNull { k -> where(k)?.let { (x, y) -> kotlin.math.abs(x - st.x) + kotlin.math.abs(y - st.y) } ?: 999f }!!] = ci
+            free -= ci
+        }
+        for (k in keys) if (k !in out) {
+            val cur = stationOf[k]
+            val ci = (if (cur != null && cur in free) cur else free.firstOrNull()) ?: continue
+            out[k] = ci; free -= ci
+        }
+        stationOf.clear(); stationOf.putAll(out)
+        return out
+    }
+
+    /** The tile a server stands on at station [ci]: behind the client (or beside, if something's behind). */
+    private fun stationTile(ci: Int, occ: BooleanArray): Int? = items.getOrNull(ci)?.let { st -> frontTiles(st, occ).firstOrNull() ?: besideTile(st, occ) }
+
     /** Where the player stands when working the floor. */
     fun workSpot(): Pair<Float, Float>? {
         val occ = occupancy()
@@ -528,9 +592,10 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     fun update(dt: Float, simRunning: Boolean) {
         val step = if (simRunning) dt else 0f
         // player walking
-        playerJob = Job.NONE; playerTill = -1
+        playerJob = Job.NONE; playerTill = -1; playerStation = -1
         if (e.state.player.workingAt >= 0 && business != null && e.state.player.workingAt == business.id) {
-            workSpot()?.let { (sx, sy) ->
+            // with no stylist on shift you do the cutting (updateStaff puts you at the client); otherwise the till
+            if (!playerServesStations()) workSpot()?.let { (sx, sy) ->
                 px = sx; py = sy
                 // turned to the till (or the display) they're working at
                 workFacing?.let { f ->
@@ -921,7 +986,15 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     private fun stepVisitor(v: Person, dt: Float, occ: BooleanArray) {
         if (dt <= 0f) return
         if (v.heldIn > 0f) v.heldIn -= dt
-        if (v.wait > 0f) { v.wait -= dt; if (v.pose == 2 || v.pose == 3) v.phase += dt * 5f; return }
+        if (v.wait > 0f) {
+            // in a salon chair: the clock only runs while a stylist is with them; they wait their turn, up to a point
+            if (v.seated && needsServer(v.item) && !isServed(v.item)) {
+                v.waitedFor += dt
+                if (v.waitedFor > SERVICE_PATIENCE) { v.wait = 0f; v.stopIdx = v.stops.size; v.counter = -2; v.stage = 3; v.goal = -1 }
+                return
+            }
+            v.wait -= dt; if (v.pose == 2 || v.pose == 3) v.phase += dt * 5f; return
+        }
         if (v.goal < 0 || v.stage == 3) standUp(v)
         when (v.stage) {
             0 -> { // browsing displays / using machines
@@ -947,6 +1020,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                         v.heldCount++
                         v.heldIn = ShelfStock.TAKE_TIME
                     }
+                    v.waitedFor = 0f
                     v.wait = when (typeId) {
                         "gym", "hairdresser" -> 7f + e.rnd.nextFloat() * 5f
                         else -> if (typeId?.let { Catalog.type(it).office } == true) 10f + e.rnd.nextFloat() * 6f else 1.2f + e.rnd.nextFloat() * 2.5f
@@ -956,7 +1030,9 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             }
             1 -> { // join the shortest queue (if every line is full, look around a bit longer, or give up)
                 v.claim = -1
-                val best = counters().filter { queueSlots.containsKey(it) }.minByOrNull { queues[it]?.size ?: 0 }
+                val open = counters().filter { queueSlots.containsKey(it) }
+                // with cashiers about, the lines at tills they're at (any till while they're still on their way)
+                val best = (if (tillsManned) open.filter { it in staffedTills }.ifEmpty { open } else open).minByOrNull { queues[it]?.size ?: 0 }
                 if (best == null) { v.stage = 3; v.goal = -1; return }
                 if ((queues[best]?.size ?: 0) >= (queueSlots[best]?.size ?: 0)) {
                     if (v.retries++ < 4) { v.wait = 2f; return }
@@ -964,6 +1040,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 }
                 v.counter = best
                 queues.getOrPut(best) { ArrayList() } += v
+                v.waitedFor = 0f
                 v.stage = 2
                 v.goal = -1
             }
@@ -976,6 +1053,15 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 val slot = slots[pos]
                 if (v.goal != slot) goTo(v, slot, occ)
                 if (walk(v, dt, occ) && pos == 0) {
+                    if (v.blockedFor >= 0f && tillsManned && v.counter !in staffedTills) {
+                        // nobody behind this till: wait for them, or try another line
+                        v.waitedFor += dt
+                        if (v.waitedFor > TILL_PATIENCE) {
+                            leaveQueue(v); v.counter = -1; v.goal = -1
+                            v.stage = if (v.retries++ < 3) 1 else 3
+                        }
+                        return
+                    }
                     if (v.blockedFor >= 0f) {
                         // at the till: face it, put the goods down, pay and take the bag
                         v.wait = 2.6f + e.rnd.nextFloat() * 1.2f; v.payTime = v.wait; v.blockedFor = -1f
@@ -1053,6 +1139,8 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     private fun updateStaff(dt: Float, occ: BooleanArray) {
         val s = e.state
         jobs.clear()
+        stationItems = stationList().toSet()
+        stationServers = 0; tillsManned = false
         val posts = LinkedHashMap<Int, Post>()
         val looks = HashMap<Int, Pair<Int, Int>>()
         when (mode) {
@@ -1062,26 +1150,23 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 val counters = counters()
                 var regIdx = 0
                 var desk = 0
-                val chairs = itemsWith("hair_chair")
                 val desks = itemsWith("desk").map { it.index }
                 val working = s.employees.filter { it.businessId == b.id && it.worksAt(s.hour, s.weekday) }
                 // where you stand working the till, which staff leave to you
                 val playerTile = if (playerJob == Job.TILL) idx(floor(px).toInt(), floor(py).toInt()) else -1
-                // stylists go to the chairs with a client in them first, then those a client is on the way to; one with a
-                // client already stays with them
-                fun waiting(ci: Int) = if (visitors.any { it.seated && it.item == ci }) 0
-                    else if (visitors.any { it.item == ci && it.seat != null && it.counter < 0 }) 1 else 2
-                val chairFor = HashMap<Int, Int>()
-                val freeChairs = chairs.map { it.index }.toMutableList()
-                val stylists = working.filter { it.role == StaffRole.HAIRSTYLIST }
-                for (emp in stylists) {
-                    val cur = staffById[emp.id]?.item ?: continue
-                    if (cur in freeChairs && waiting(cur) < 2) { chairFor[emp.id] = cur; freeChairs -= cur }
+                // stylists (or you, with none on shift) serve one client at a time: see assignStations
+                val playerServes = playerServesStations()
+                val stylistKeys = working.filter { it.role == StaffRole.HAIRSTYLIST }.map { it.id } + (if (playerServes) listOf(PLAYER_KEY) else emptyList())
+                stationServers = stylistKeys.size
+                val chairFor = assignStations(stylistKeys) { k -> if (k == PLAYER_KEY) px to py else staffById[k]?.let { it.x to it.y } }
+                if (playerServes) chairFor[PLAYER_KEY]?.let { ci ->
+                    stationTile(ci, occFull)?.let { t ->
+                        px = t % w + .5f; py = t / w + .5f
+                        playerHeading = faceItem(items[ci], px, py)
+                        playerJob = Job.HAIR; playerStation = ci
+                    }
                 }
-                for (emp in stylists) if (emp.id !in chairFor) {
-                    val ci = freeChairs.minByOrNull { waiting(it) } ?: break
-                    chairFor[emp.id] = ci; freeChairs -= ci
-                }
+                tillsManned = playerTill >= 0 || working.any { it.role == StaffRole.CUSTOMER_SERVICE }
                 for ((n, emp) in working.withIndex()) {
                     fun behind(item: Int?): Post? = item?.let { ii -> items.getOrNull(ii)?.let { frontTiles(it, occFull, true).firstOrNull { t -> t != playerTile } ?: frontTiles(it, occFull).firstOrNull { t -> t != playerTile } }?.let { Post(it, ii) } }
                     fun onFloor(): Post? = browseTargets().getOrNull(n)?.let { it2 -> items.indexOf(it2).let { ii -> frontTiles(it2, occFull).lastOrNull { t -> t != playerTile }?.let { Post(it, ii) } } }
@@ -1109,8 +1194,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                             else (e.economy.dirt.dirtiest(b, 6).randomOrNull(e.rnd) ?: cleanerRest(occFull) ?: freeTile(occFull, e.rnd.nextInt(w * d))).let { staffTimer[emp.id] = 4f; Post(it) }
                         }
                         // a stylist stands behind a chair, at the client's back (or beside it, if something's behind)
-                        StaffRole.HAIRSTYLIST -> chairFor[emp.id]?.let { ci -> items.getOrNull(ci)?.let { ch ->
-                            (frontTiles(ch, occFull).firstOrNull() ?: besideTile(ch, occFull))?.let { Post(it, ci) } } } ?: onFloor()
+                        StaffRole.HAIRSTYLIST -> chairFor[emp.id]?.let { ci -> stationTile(ci, occFull)?.let { Post(it, ci) } } ?: onFloor()
                         StaffRole.DJ -> behind(itemsWith("dj_booth").firstOrNull()?.index)
                         StaffRole.ACTOR -> itemsWith("stage").firstOrNull()?.let { st -> frontTiles(st.value, occFull).getOrNull(n % 4)?.let { Post(it, -1) } }
                         StaffRole.PROJECTIONIST -> behind(itemsWith("screen").firstOrNull()?.index)
@@ -1130,7 +1214,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                         emp.role == StaffRole.ACTOR && post != null -> Job.STAGE
                         emp.role == StaffRole.PROJECTIONIST && post != null -> Job.PROJECT
                         b.type.office && post?.seat != null -> Job.DESK
-                        emp.role == StaffRole.HAIRSTYLIST && post != null && post.face in chairs.map { it.index } -> Job.HAIR
+                        emp.role == StaffRole.HAIRSTYLIST && post != null && post.face in stationItems -> Job.HAIR
                         emp.role == StaffRole.GYM_TRAINER -> Job.TRAIN
                         post != null -> Job.FLOOR
                         else -> Job.NONE
@@ -1150,6 +1234,15 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 val occFull = occupancy()
                 counters().firstOrNull()?.let { ci ->
                     items.getOrNull(ci)?.let { reg -> frontTiles(reg, occFull, true).firstOrNull()?.let { t -> posts[-1] = Post(t, ci); jobs[-1] = Job.TILL; looks[-1] = c(0xFF2C3E50) to SKIN_TONES[building.id % SKIN_TONES.size] } }
+                }
+                tillsManned = posts.containsKey(-1)
+                // a rival salon has a stylist for every two chairs, serving the same way
+                if (mode == InteriorMode.RIVAL && stationItems.isNotEmpty()) {
+                    val keys = (0 until (stationItems.size + 1) / 2).map { -10 - it }
+                    stationServers = keys.size
+                    for ((key, ci) in assignStations(keys) { k -> staffById[k]?.let { it.x to it.y } }) {
+                        stationTile(ci, occFull)?.let { t -> posts[key] = Post(t, ci); jobs[key] = Job.HAIR; looks[key] = SHIRT_COLORS[(building.id - key) % SHIRT_COLORS.size] to SKIN_TONES[(building.id - key) % SKIN_TONES.size] }
+                    }
                 }
             }
             else -> {}
@@ -1190,6 +1283,14 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         }
         staff.clear()
         staff.addAll(staffById.values)
+        // who's at their station or till right now
+        servedStations.clear(); staffedTills.clear()
+        for (p in staff) if (p.pathIdx >= p.path.size) when (p.job) {
+            Job.HAIR -> servedStations += p.item
+            Job.TILL -> staffedTills += p.item
+        }
+        if (playerStation >= 0) servedStations += playerStation
+        if (playerTill >= 0) staffedTills += playerTill
     }
 
     /** A staff member bringing a box: to the box ([from]: a storage shelf or the door), pick it up, to the display, unpack. */
@@ -1403,6 +1504,13 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     }
 
     companion object {
+        /** Stations where a staff member serves one customer at a time (salon chairs and wash basins). */
+        val SERVICE_TAGS = setOf("hair_chair", "hair_wash")
+        /** The key the player has among the servers at those stations. */
+        const val PLAYER_KEY = Int.MIN_VALUE
+        /** Seconds a seated client waits for a stylist, and a customer at an empty till, before giving up. */
+        const val SERVICE_PATIENCE = 60f
+        const val TILL_PATIENCE = 20f
         private val DX = intArrayOf(1, -1, 0, 0)
         private val DY = intArrayOf(0, 0, 1, -1)
 

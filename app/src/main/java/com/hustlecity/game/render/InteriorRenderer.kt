@@ -533,14 +533,16 @@ class InteriorRenderer(private val e: GameEngine) {
             Job.PROJECT -> Act.TYPE
             Job.STAGE -> Act.PERFORM
             Job.TRAIN -> Act.COACH
-            // cutting when someone's in their chair; between clients, tidying the station now and then
-            Job.HAIR -> if (sc.visitors.any { it.seated && (it.item == v.item || kotlin.math.hypot(it.x - v.x, it.y - v.y) < 1.7f) }) Act.HAIR
-                else if ((e.realTime + v.shirt) % 9f < 3.5f) Act.TIDY else Act.NONE
+            // cutting only while a client sits in the chair they're at
+            Job.HAIR -> if (clientIn(sc, v.item)) Act.HAIR else Act.NONE
             // straightening the displays now and then
             Job.FLOOR -> if ((e.realTime + v.shirt) % 9f < 3.5f) Act.TIDY else Act.NONE
             else -> Act.NONE
         }
     }
+
+    /** True when a client sits at station [item]. */
+    private fun clientIn(sc: InteriorScene, item: Int) = item >= 0 && sc.visitors.any { it.seated && it.item == item }
 
     /** Working till [till]: in time with the customer at it, scan their goods, bag them, hand the bag over. */
     private fun tillAct(sc: InteriorScene, till: Int): Int {
@@ -561,6 +563,7 @@ class InteriorRenderer(private val e: GameEngine) {
         if (sc.playerMoving > .2f) return Act.NONE
         return when (sc.playerJob) {
             Job.TILL -> tillAct(sc, sc.playerTill)
+            Job.HAIR -> if (clientIn(sc, sc.playerStation)) Act.HAIR else Act.NONE
             Job.FLOOR -> if (now % 9f < 3.5f) Act.TIDY else Act.NONE
             else -> if (e.ui.phoneOpen) Act.PHONE else Act.NONE
         }
@@ -578,6 +581,8 @@ class InteriorRenderer(private val e: GameEngine) {
         sc.shelf?.let { sh -> for (k in sh.takes.indices) if (sh.takes[k].person === v) return Act.REACH }
         val item = sc.items.getOrNull(v.item)?.let { Catalog.item(it.itemId) }
         if (v.seated) return when {
+            // waiting their turn in the salon chair: on the phone till the stylist comes
+            sc.needsServer(v.item) && !sc.isServed(v.item) -> Act.PHONE
             item?.id == "workout_bench" -> Act.PRESS
             item?.id == "rowing_machine" -> Act.ROW
             item?.fn == ItemFn.SEATING && sc.businessType in EATERIES -> Act.EAT
