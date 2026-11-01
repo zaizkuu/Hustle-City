@@ -44,10 +44,20 @@ class GpsLaneTest {
                     val len = sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
                     if (len < 40f) continue
                     val ux = (bx - ax) / len; val uy = (by - ay) / len
+                    // a hairpin at either end (a turn back more than 120 degrees, onto a diagonal avenue) sweeps across
+                    // the oncoming lanes for a good way: leave more of the stretch to the turn there
+                    fun dirOf(i: Int): Pair<Float, Float>? {
+                        if (i < 0 || i >= gps.points - 1) return null
+                        val dx = c[i * 2 + 2] - c[i * 2]; val dy = c[i * 2 + 3] - c[i * 2 + 1]
+                        val l = sqrt(dx * dx + dy * dy).takeIf { it > 1e-3f } ?: return null
+                        return dx / l to dy / l
+                    }
+                    fun clearance(other: Int) = dirOf(other)?.let { (ox, oy) -> if (ox * ux + oy * uy < -.5f) 45f else 18f } ?: 18f
+                    val startClear = clearance(q - 1); val endClear = clearance(q + 1)
                     for (k in 0 until gps.lanePoints - 1) {
                         val mx = (r[k * 2] + r[k * 2 + 2]) / 2; val my = (r[k * 2 + 1] + r[k * 2 + 3]) / 2
                         val along = (mx - ax) * ux + (my - ay) * uy
-                        if (along < 18f || along > len - 18f) continue
+                        if (along < startClear || along > len - endClear) continue
                         // right of the way the route goes (y points south: right of (ux, uy) is (-uy, ux))
                         val right = (mx - ax) * -uy + (my - ay) * ux
                         if (kotlin.math.abs(right) > 14f) continue

@@ -156,7 +156,7 @@ class UiSnapshotTest {
         e.takeCart(b.id)
         e.ui.tip = null
         for (id in listOf("shelf", "drinks_fridge", "cash_register")) e.pickUp(id)
-        sc.inspect = sc.forSale.entries.first { it.value == "treadmill" }.key
+        sc.inspect = sc.forSale.entries.first { it.value == "self_checkout" }.key
         sc.px = 7.5f; sc.py = sc.d - 4.5f
         shoot(e, "ui_store_shopping.png")
     }

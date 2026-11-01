@@ -271,6 +271,9 @@ class GameEngine(context: Context?) {
         val s = saves.load() ?: return false
         state = s
         city = City(s.seed, s.mapId, s.layout)
+        // a store added since this save was made mustn't stand where you (or a rival) already are
+        city.clearStoresFrom((s.rentals.map { it.buildingId } + s.businesses.map { it.buildingId } +
+            s.rivalBusinesses.map { it.buildingId } + listOf(s.player.home)).toSet())
         traffic.attach(city)
         for (v in s.vehicles) city.parked.vacate(v.x, v.y)
         rnd = Random(System.nanoTime())

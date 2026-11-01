@@ -111,12 +111,18 @@ fun GameEngine.startBusiness(buildingId: Int, typeId: String, name: String): Bus
     message("Uncle Sal", when (type.id) {
         "warehouse" -> "A warehouse! Put pallet racks in it (OfficePlus Supply or Essentials Appliances), then fill it with wholesale stock. Your delivery contracts and purchasing agents take stock from here first, at no markup."
         "hq" -> "Your own Headquarters! Furnish it with office desks from OfficePlus Supply, then hire an HR Manager and Purchasing Agents at Apex Recruitment and assign them here."
-        "nightclub" -> "A nightclub! You need a Cocktail Bar (Prime Kitchen Supply), a Dance Floor and a DJ Booth (Essentials Appliances). Hire a DJ and bar staff at Apex Recruitment: no DJ, no party. Stock beer and cocktails from the wholesalers."
-        "cinema" -> "A cinema! Put in a Cinema Screen and rows of seats (Essentials Appliances), a Concession Stand and a register (Prime Kitchen Supply). A Projectionist must be on shift to run the films. Licences cost ${money(type.dailyFee)} a day."
-        "theater" -> "A theater! Build a Stage and rows of seats (Essentials Appliances) plus a register. Hire Actors at Apex Recruitment: the show needs a cast on shift. Licences cost ${money(type.dailyFee)} a day, but tickets sell for a lot."
+        "nightclub" -> "A nightclub! You need a Cocktail Bar (Prime Kitchen Supply), a Dance Floor and a DJ Booth (Stagecraft Sound & Light). Hire a DJ and bar staff at Apex Recruitment: no DJ, no party. Stock beer and cocktails from the wholesalers."
+        "cinema" -> "A cinema! Put in a Cinema Screen and rows of seats (Stagecraft Sound & Light), a Concession Stand and a register (Prime Kitchen Supply). A Projectionist must be on shift to run the films. Licences cost ${money(type.dailyFee)} a day."
+        "theater" -> "A theater! Build a Stage and rows of seats (Stagecraft Sound & Light) plus a register. Hire Actors at Apex Recruitment: the show needs a cast on shift. Licences cost ${money(type.dailyFee)} a day, but tickets sell for a lot."
         else -> if (type.office) "${biz.name} is open for business! Each ${type.staffRole.label} needs an Office Desk (OfficePlus Supply)" +
             (type.requirements.drop(1).joinToString("") { ", plus a ${it.label}" }) + ". Clients pay by the hour, so a good reputation and advertising bring in work. Hire ${type.staffRole.label}s at Apex Recruitment."
-        else "${biz.name} — great name! Now buy furniture: check the requirements in BizHub. Essentials Appliances and Prime Kitchen Supply sell what you need."
+        else "${biz.name} — great name! Now buy furniture: check the requirements in BizHub. " + when (type.id) {
+            "hairdresser" -> "SalonPro Beauty Supply has the hair chairs and wash basins; registers are at Essentials Appliances too."
+            "gym" -> "FitZone Fitness Equipment sells the machines, lockers, showers and the drinks fridge."
+            "coffee", "fastfood" -> "Prime Kitchen Supply sells the kitchen gear, registers, kiosks and tables."
+            "clothing", "jewelry", "electronics", "florist" -> "Lux Interiors has the displays; registers are at Essentials Appliances."
+            else -> "Essentials Appliances sells registers, shelves and fridges."
+        }
     })
     toast("${biz.name} founded!", ToastKind.GOOD)
     bump()

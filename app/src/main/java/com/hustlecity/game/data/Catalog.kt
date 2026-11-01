@@ -1035,18 +1035,17 @@ object Catalog {
 
     // ---------------------------------------------------------------- places
     val places = listOf(
-        PlaceDef("essentials", "Essentials Appliances", PlaceKind.FURNITURE_STORE, "If you need it, we've got it.", c(0xFF2F80ED), "place_furniture",
-            listOf("cash_register", "shelf", "drinks_fridge", "fresh_fridge", "freezer", "treadmill", "workout_bench", "weight_rack", "boxing_bag",
-                "gym_locker", "shower", "fitness_board", "bookshelf", "bench", "barstool", "neon_cactus", "neon_circle", "speaker_small",
-                "speaker_medium", "speaker_large", "cleaning_station", "storage_shelf", "wall_lamp", "pallet_rack", "dance_floor", "dj_booth", "cinema_screen", "cinema_seats", "stage",
-                "checkout_counter", "shopping_baskets", "security_camera", "security_gate", "trash_can", "exercise_bike", "rowing_machine", "coat_check", "stage_lights", "hand_truck",
-                "self_checkout", "waiting_chairs", "coffee_table")),
-        PlaceDef("primekitchen", "Prime Kitchen Supply", PlaceKind.FURNITURE_STORE, "Pro gear for food & beauty.", c(0xFFF2994A), "place_kitchen",
-            listOf("coffee_machine", "pastry_case", "grill", "fryer", "pizza_oven", "ice_cream_freezer", "digital_scale", "hair_chair", "hair_wash", "cash_register", "checkout_counter",
-                "home_fridge", "bed", "tv", "table_set", "cocktail_bar", "concession_stand", "trash_can", "order_kiosk", "self_checkout", "waiting_chairs")),
+        PlaceDef("essentials", "Essentials Appliances", PlaceKind.FURNITURE_STORE, "Store fixtures, fridges and the basics.", c(0xFF2F80ED), "place_furniture",
+            listOf("cash_register", "checkout_counter", "self_checkout", "shelf", "drinks_fridge", "fresh_fridge", "freezer", "produce", "digital_scale",
+                "shopping_baskets", "security_camera", "security_gate", "storage_shelf", "pallet_rack", "cleaning_station", "trash_can", "hand_truck",
+                "wall_lamp", "bookshelf", "bench", "waiting_chairs", "coffee_table", "speaker_small", "home_fridge", "tv")),
+        PlaceDef("primekitchen", "Prime Kitchen Supply", PlaceKind.FURNITURE_STORE, "Pro gear for restaurants, cafés and bars.", c(0xFFF2994A), "place_kitchen",
+            listOf("coffee_machine", "pastry_case", "grill", "fryer", "pizza_oven", "ice_cream_freezer", "cocktail_bar", "concession_stand", "drinks_fridge",
+                "cash_register", "order_kiosk", "table_set", "barstool", "trash_can")),
         PlaceDef("lux", "Lux Interiors", PlaceKind.FURNITURE_STORE, "Make it beautiful.", c(0xFF9B51E0), "place_lux",
-            listOf("plant_large", "plant_small", "painting", "clothing_rack", "round_rack", "fitting_room", "mannequin", "shoe_rack", "electronics_table", "jewelry_case", "flower_stand",
-                "produce", "magazine_rack", "bookshelf", "rug", "floor_lamp", "lounge_sofa", "sofa", "table_set", "neon_circle", "coffee_table", "waiting_chairs")),
+            listOf("plant_large", "plant_small", "painting", "rug", "floor_lamp", "sofa", "lounge_sofa", "coffee_table", "bed", "clothing_rack", "round_rack",
+                "fitting_room", "mannequin", "shoe_rack", "electronics_table", "jewelry_case", "flower_stand", "magazine_rack", "bookshelf", "table_set",
+                "neon_circle", "neon_cactus", "waiting_chairs")),
         PlaceDef("metro", "Metro Wholesale", PlaceKind.WHOLESALER, "Bulk groceries, drinks, snacks & food supplies.", c(0xFF27AE60), "place_wholesale"),
         PlaceDef("distro", "CityDistro Wholesale", PlaceKind.WHOLESALER, "Flowers, gifts, books, fashion & cocktail mixes in bulk.", c(0xFF00897B), "place_wholesale"),
         PlaceDef("imports", "Global Imports Co.", PlaceKind.IMPORTER, "Electronics & jewelry from overseas.", c(0xFF455A64), "place_import"),
@@ -1061,8 +1060,21 @@ object Catalog {
             listOf("pallet_rack", "office_desk", "graphic_tablet", "desk_globe", "desk_calendar", "copier", "meeting_table", "whiteboard", "filing_cabinet", "water_cooler",
                 "plant_large", "painting", "speaker_small", "wall_lamp", "cleaning_station", "storage_shelf", "trash_can", "security_camera", "bench", "hand_truck",
                 "waiting_chairs", "coffee_table")),
+        // speciality stores (placed by the city after the map's own: see City.placeSpecialtyStores)
+        PlaceDef("salonpro", "SalonPro Beauty Supply", PlaceKind.FURNITURE_STORE, "Chairs, basins and all a salon needs.", c(0xFFE91E63), "biz_hairdresser",
+            listOf("hair_chair", "hair_wash", "shelf", "cash_register", "waiting_chairs", "coffee_table", "lounge_sofa", "plant_small", "plant_large",
+                "rug", "floor_lamp", "painting", "speaker_small", "cleaning_station", "trash_can")),
+        PlaceDef("fitzone", "FitZone Fitness Equipment", PlaceKind.FURNITURE_STORE, "Everything to get a gym going.", c(0xFFD32F2F), "biz_gym",
+            listOf("treadmill", "exercise_bike", "rowing_machine", "workout_bench", "weight_rack", "boxing_bag", "gym_locker", "shower", "fitness_board",
+                "drinks_fridge", "water_cooler", "bench", "speaker_small", "speaker_medium", "cash_register", "cleaning_station", "trash_can")),
+        PlaceDef("stagecraft", "Stagecraft Sound & Light", PlaceKind.FURNITURE_STORE, "For clubs, cinemas and theaters.", c(0xFF6A1B9A), "biz_nightclub",
+            listOf("dance_floor", "dj_booth", "speaker_small", "speaker_medium", "speaker_large", "stage_lights", "stage", "cinema_screen", "cinema_seats",
+                "coat_check", "neon_cactus", "neon_circle", "lounge_sofa", "barstool", "cash_register", "order_kiosk")),
     )
     fun place(id: String) = places.first { it.id == id }
+
+    /** Furniture stores the city opens on every map besides the map's own places, and next to which of those. */
+    val SPECIALTY_STORES = listOf("salonpro" to "lux", "fitzone" to "essentials", "stagecraft" to "officeplus")
 
     fun sourcePlaceId(source: Source) = when (source) {
         Source.METRO -> "metro"

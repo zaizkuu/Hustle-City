@@ -774,7 +774,7 @@ fun DesignerBar(e: GameEngine, modifier: Modifier = Modifier) {
                     HButton("Sell ${e.money((def?.price ?: 0.0) * .5)}", small = true, color = HC.Red) { e.sellItem(sc.selectedIndex) }
                 }
                 storage.isNullOrEmpty() -> Text(
-                    "Storage is empty. Buy furniture at Essentials Appliances, Prime Kitchen Supply or Lux Interiors, then unload it here. Tap placed items to move or sell them.",
+                    "Storage is empty. Buy furniture at the furniture stores (Essentials Appliances, Prime Kitchen Supply, Lux Interiors, SalonPro, FitZone, Stagecraft), then unload it here. Tap placed items to move or sell them.",
                     color = Color.White.copy(alpha = .85f), fontSize = 12.sp,
                 )
                 else -> androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

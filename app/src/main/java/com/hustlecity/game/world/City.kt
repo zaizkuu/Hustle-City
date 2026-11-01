@@ -339,6 +339,8 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC, val layout: Int = L
     val paved: FloatArray
     val maxHeight: Float
     val placeBuildings = HashMap<String, MutableList<Int>>()
+    /** The speciality furniture stores' buildings as they were before (kind, floor area, height), to move a store elsewhere. */
+    private val storeWas = HashMap<Int, Triple<BKind, Int, Float>>()
     /** Cars keep left (Tokyo) instead of right. */
     val leftHand: Boolean
 
@@ -372,6 +374,7 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC, val layout: Int = L
         walls = layout.walls
         neighborhoods = layout.neighborhoods
         bounds = layout.bounds
+        placeSpecialtyStores()
         if (this.layout >= 3) for (b in buildings) b.fitRooms()
         paved = bounds.copyOf().also { p ->
             for (e in roads.edges) {
@@ -397,6 +400,58 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC, val layout: Int = L
     }
 
     fun building(id: Int): Building? = buildings.getOrNull(id)
+
+
+    /**
+     * Opens the speciality furniture stores ([com.hustlecity.game.data.Catalog.SPECIALTY_STORES]) in big buildings with a
+     * street front, in the neighbourhood of the map's store each goes with. They draw their own random numbers, after
+     * the map's places, so nothing else in the city moves for them.
+     */
+    private fun placeSpecialtyStores() {
+        val rnd = kotlin.random.Random(seed * 31 + 0x5EED)
+        for ((placeId, near) in com.hustlecity.game.data.Catalog.SPECIALTY_STORES) {
+            val hood = buildings.firstOrNull { it.placeId == near }?.hood?.id
+            storeSpot(hood, emptySet(), rnd)?.let { openStore(placeId, it, rnd) }
+        }
+    }
+
+    private fun storeSpot(hood: Int?, avoid: Set<Int>, rnd: kotlin.random.Random): Building? {
+        fun ok(b: Building, minW: Float, anyKind: Boolean) = b.placeId == null && b.solid && b.kind != BKind.SPECIAL && b.frontEdge >= 0 &&
+            b.w >= minW && b.d >= 12f && b.id !in avoid && (anyKind || b.kind == BKind.RETAIL || b.kind == BKind.WAREHOUSE)
+        val near = buildings.filter { it.hood.id == hood }
+        val c = near.filter { ok(it, 18f, false) }.ifEmpty { near.filter { ok(it, 14f, false) } }
+            .ifEmpty { buildings.filter { ok(it, 18f, false) } }.ifEmpty { buildings.filter { ok(it, 14f, true) } }
+        return if (c.isEmpty()) null else c[rnd.nextInt(c.size)]
+    }
+
+    private fun openStore(placeId: String, b: Building, rnd: kotlin.random.Random) {
+        storeWas[b.id] = Triple(b.kind, b.area, b.height)
+        b.placeId = placeId
+        b.kind = BKind.SPECIAL
+        b.area = 1000
+        b.height = 12f + rnd.nextFloat() * 6f
+    }
+
+    /**
+     * Moves any speciality store that opened in one of [busy] (a building an older save has you, your business or a
+     * rival in) to another building, putting the old one back as it was. True if one moved.
+     */
+    fun clearStoresFrom(busy: Set<Int>): Boolean {
+        var moved = false
+        val rnd = kotlin.random.Random(seed * 31 + 0x5EED + 1)
+        for ((placeId, near) in com.hustlecity.game.data.Catalog.SPECIALTY_STORES) {
+            val b = placeBuilding(placeId) ?: continue
+            if (b.id !in busy) continue
+            storeWas.remove(b.id)?.let { (k, a, h) -> b.kind = k; b.area = a; b.height = h }
+            b.placeId = null
+            placeBuildings.remove(placeId)
+            val nb = storeSpot(placeBuilding(near)?.hood?.id, busy, rnd) ?: continue
+            openStore(placeId, nb, rnd)
+            placeBuildings[placeId] = mutableListOf(nb.id)
+            moved = true
+        }
+        return moved
+    }
 
     /** The big junction a scramble-crossing landmark stands on, if any. */
     fun scrambleNode(l: Landmark): RoadNode? =
