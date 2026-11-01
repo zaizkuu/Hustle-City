@@ -670,9 +670,38 @@ fun GameEngine.nearestFood(): com.hustlecity.game.world.Building? {
 
 /** Sets the GPS to the nearest place to eat. */
 fun GameEngine.findFood() {
+    // a street food cart close by is quicker than any restaurant: say where it is
+    val (fx, fy) = focusPoint()
+    nearestCart(fx, fy, 150f)?.let { (i, d) ->
+        val b = nearestFood()
+        if (b == null || d < com.hustlecity.game.world.dist(fx, fy, b.doorX, b.doorY)) {
+            val pr = props
+            toast("${StreetFood.cartName(city.mapId)} ${d.roundToInt()} m ${compass(pr.x[i] - fx, pr.y[i] - fy)}: walk up to it for a snack", ToastKind.GOOD)
+            return
+        }
+    }
     val b = nearestFood() ?: run { toast("No place to eat nearby"); return }
     if (state.player.waypoint != b.id) setWaypoint(b.id)
     toast("Heading to ${buildingName(b)} for a bite", ToastKind.GOOD)
+}
+
+/** The street food cart nearest (x, y) within [range] meters: its index in [GameEngine.props] and how far it is. */
+fun GameEngine.nearestCart(x: Float, y: Float, range: Float): Pair<Int, Float>? {
+    val pr = props
+    var best = -1; var bestD = range
+    pr.forIn(x - range, y - range, x + range, y + range) { i ->
+        if (pr.kind[i] == com.hustlecity.game.render.StreetProps.VENDOR) {
+            val d = com.hustlecity.game.world.dist(x, y, pr.x[i], pr.y[i])
+            if (d < bestD) { bestD = d; best = i }
+        }
+    }
+    return if (best >= 0) best to bestD else null
+}
+
+/** Which way (dx, dy) points, as a compass direction (y runs south). */
+fun compass(dx: Float, dy: Float): String {
+    val a = Math.toDegrees(kotlin.math.atan2(dx.toDouble(), -dy.toDouble())).let { if (it < 0) it + 360 else it }
+    return listOf("north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west")[((a + 22.5) / 45).toInt() % 8]
 }
 
 fun GameEngine.eatAtHome() {

@@ -278,16 +278,16 @@ class StreetProps(val city: City) {
                 val curb = e.cls.halfWidth + .6f
                 val s0 = e.clearA + 4f; val s1 = e.len - e.clearB - 4f
                 if (s1 - s0 < 6f) continue
-                // the food cart on this side of the block, if there is one: nothing else is put down in its way
+                // the props put down on this side of the block so far: nothing else goes in a food cart's way
+                val sideStart = count
                 var cart = -1
                 fun at(s: Float, off: Float, k: Int): Int {
                     val px = e.ax + e.ux * s + nx * off; val py = e.ay + e.uy * s + ny * off
                     if (city.shore.anyWater(px, py) || city.parks.any { Geo.inside(px, py, it.poly) } || city.reserved(px, py)) return -1
                     if (!clearSpot(px, py, e.ux, e.uy, nx, ny, k)) return -1
-                    if (cart >= 0 && dist(px, py, x[cart], y[cart]) < footprint(k) + 2.6f) return -1
+                    if (cart >= 0) for (c in sideStart until count) if (kind[c] == VENDOR && dist(px, py, x[c], y[c]) < footprint(k) + 2.6f) return -1
                     return add(px, py, k, -nx, -ny)
                 }
-                val sideStart = count
                 val hood = city.neighborhoodAt(e.ax + e.ux * (s0 + s1) * .5f + nx * 12f, e.ay + e.uy * (s0 + s1) * .5f + ny * 12f)
                 val busy = hood.traffic > .3f
                 val wall = e.cls.halfWidth + e.cls.sidewalk - .45f
@@ -319,18 +319,23 @@ class StreetProps(val city: City) {
                 // pavement; poles and lamps already put down keep their room
                 val cartRate = when {
                     manila -> if (busy) .7f else .3f
-                    seoul -> if (busy) .4f else .14f
-                    tokyo -> if (busy) .26f else .1f
-                    city.mapId == com.hustlecity.game.world.Maps.NYC -> if (busy) .38f else .12f
-                    else -> if (busy) .3f else .1f
+                    seoul -> if (busy) .55f else .26f
+                    tokyo -> if (busy) .5f else .3f
+                    city.mapId == com.hustlecity.game.world.Maps.NYC -> if (busy) .62f else .38f
+                    else -> if (busy) .65f else .45f
                 }
-                if ((busy || e.cls.rank >= 1) && s1 - s0 > 18f && rand() < cartRate) {
-                    val s = s0 + 8f + rand() * (s1 - s0 - 16f).coerceAtLeast(1f)
+                // a long block can have a second cart further along (the far half), less often
+                val halves = if (s1 - s0 > 90f) 2 else 1
+                for (h in 0 until halves) {
+                    if (!((busy || e.cls.rank >= 1) && s1 - s0 > 18f && rand() < cartRate * (if (h == 0) 1f else .5f))) continue
+                    val a0 = if (halves == 2) s0 + (s1 - s0) * .5f * h else s0
+                    val a1 = if (halves == 2) a0 + (s1 - s0) * .5f else s1
+                    val s = a0 + 8f + rand() * (a1 - a0 - 16f).coerceAtLeast(1f)
                     val off = curb + CART_OFF
                     val px = e.ax + e.ux * s + nx * off; val py = e.ay + e.uy * s + ny * off
                     var clear = !nearTree(px, py, 3.2f)
-                    for (k in sideStart until count) if (clear && dist(px, py, x[k], y[k]) < 2.6f) clear = false
-                    if (clear) cart = at(s, off, VENDOR)
+                    for (k in sideStart until count) if (clear && dist(px, py, x[k], y[k]) < (if (kind[k] == VENDOR) 20f else 2.6f)) clear = false
+                    if (clear) { val c = at(s, off, VENDOR); if (c >= 0) cart = c }
                 }
                 // Manila's barangays: a basketball hoop by the lane, banderitas strung across the street from house to house
                 val barangay = manila && e.cls.rank <= 1 && hood.id in BARANGAYS
@@ -438,6 +443,21 @@ class StreetProps(val city: City) {
                 s += 12f; k++
             }
             offRoad(ax + ux * 2f, ay + uy * 2f, BIN, ux, uy)
+            // a snack cart beside most long paths: the cook on the grass, customers on the path (a tree in the way is
+            // left out, as round the fountain)
+            if (len > 30f && rand() < .85f) {
+                for (attempt in 0 until 5) {
+                    val sAt = len * (.2f + rand() * .6f)
+                    val side = if (rand() < .5f) 1f else -1f
+                    val px = ax + ux * sAt - uy * 2.8f * side; val py = ay + uy * sAt + ux * 2.8f * side
+                    if (dist(px, py, cx, cy) < 11f || city.shore.anyWater(px, py) || city.reserved(px, py) || !Geo.inside(px, py, p.poly) ||
+                        city.roads.nearAsphalt(px, py, 2.5f) || (0 until count).any { k -> dist(px, py, x[k], y[k]) < (if (kind[k] == VENDOR) 30f else 2.2f) }) continue
+                    for ((ti, t) in city.trees.withIndex()) if (abs(t.x - px) < 2.6f && abs(t.y - py) < 2.6f) hiddenTree[ti] = true
+                    // its "road" side (where the cook stands) away from the path
+                    add(px, py, VENDOR, -uy * side, ux * side)
+                    break
+                }
+            }
         }
     }
 

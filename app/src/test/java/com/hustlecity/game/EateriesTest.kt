@@ -7,6 +7,7 @@ import com.hustlecity.game.engine.eatOwnStock
 import com.hustlecity.game.engine.buyStreetFood
 import com.hustlecity.game.engine.clearOfCarts
 import com.hustlecity.game.engine.findFood
+import com.hustlecity.game.engine.nearestCart
 import com.hustlecity.game.engine.nearestFood
 import com.hustlecity.game.engine.startBusiness
 import com.hustlecity.game.model.Rental
@@ -58,8 +59,14 @@ class EateriesTest {
         e.newGame("T", 0, 0, 1)
         val food = e.nearestFood()
         assertTrue(food != null && (e.state.rivalBusinessAt(food.id)?.typeId in EATING_TYPES))
+        // with a street food cart nearer than any restaurant, the food bar points you to the cart instead
+        val (fx, fy) = e.focusPoint()
+        val cart = e.nearestCart(fx, fy, 150f)
         e.findFood()
-        assertEquals(food!!.id, e.state.player.waypoint)
+        if (cart != null && cart.second < com.hustlecity.game.world.dist(fx, fy, food!!.doorX, food.doorY)) {
+            assertEquals(-1, e.state.player.waypoint)
+            assertTrue(e.ui.toasts.any { it.text.contains(com.hustlecity.game.engine.StreetFood.cartName(e.city.mapId)) })
+        } else assertEquals(food!!.id, e.state.player.waypoint)
         // your own fast food place: a burger from the stock
         val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.placeId == null }
         e.state.rentals += Rental(b.id, b.baseRent, 1)
@@ -100,6 +107,23 @@ class EateriesTest {
             val tmp = FloatArray(2)
             assertTrue(e.clearOfCarts(pr.x[i], pr.y[i], .45f, tmp))
             assertTrue("${map.id}: pushed out of the cart", kotlin.math.hypot(tmp[0] - pr.x[i], tmp[1] - pr.y[i]) > .8f)
+        }
+    }
+
+    /** Street food is easy to come by in every city: from most shop doors there's a cart within a short walk. */
+    @Test
+    fun streetFoodIsNeverFar() {
+        for (map in Maps.all) {
+            val city = com.hustlecity.game.world.City(1337L, map.id)
+            val pr = com.hustlecity.game.render.StreetProps(city)
+            val carts = (0 until pr.count).filter { pr.kind[it] == com.hustlecity.game.render.StreetProps.VENDOR }
+            val shops = city.buildings.filter { it.kind == BKind.RETAIL && it.frontEdge >= 0 }
+            val near = shops.count { b -> carts.any { kotlin.math.hypot(pr.x[it] - b.doorX, pr.y[it] - b.doorY) < 60f } }
+            println("${map.id}: ${carts.size} carts, $near of ${shops.size} shop doors within 60 m of one")
+            assertTrue("${map.id}: a cart within 60 m of most shops ($near of ${shops.size})", near * 10 >= shops.size * 7)
+            // and no two carts crowd the same stretch of pavement
+            for (a in carts) for (b in carts) if (a < b) assertTrue("${map.id}: carts $a and $b too close",
+                kotlin.math.hypot(pr.x[a] - pr.x[b], pr.y[a] - pr.y[b]) > 3f)
         }
     }
 }

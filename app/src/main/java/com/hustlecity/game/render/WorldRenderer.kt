@@ -1942,6 +1942,20 @@ class WorldRenderer(private val e: GameEngine) {
                 canvas.drawText(name, px, py - r * 1.4f, textPaint)
             }
         }
+        // street food carts, with the places to eat
+        if (f["food"] == true) {
+            val pr = props
+            val small = proj.dist > 500f
+            for (i in 0 until pr.count) {
+                if (pr.kind[i] != StreetProps.VENDOR) continue
+                if (!proj.project(pr.x[i], pr.y[i], 2.5f, tmp)) continue
+                if (tmp[0] < -r || tmp[0] > proj.screenW + r || tmp[1] < -r || tmp[1] > proj.screenH + r) continue
+                if (small) {
+                    pillPaint.color = 0xFFFFFFFF.toInt(); canvas.drawCircle(tmp[0], tmp[1], 4.2f * density, pillPaint)
+                    pillPaint.color = c(0xFFF2994A); canvas.drawCircle(tmp[0], tmp[1], 3f * density, pillPaint)
+                } else pin(canvas, tmp[0], tmp[1] - r * .9f, "biz_fastfood", c(0xFFF2994A), r * .7f)
+            }
+        }
         features.mapLabels(canvas, proj, density)
         // player marker
         val (fx, fy) = e.focusPoint()
