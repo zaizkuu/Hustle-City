@@ -346,6 +346,8 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
     private val emissiveRgb = intArrayOf(
         0xFFE3A0, 0xFFE6A8, 0xFFD27A, 0xFFF3C4, 0xFFF4D6, 0xFFEBA8, 0xFF5FD8, 0x5FE3FF, 0xFFE680, 0x2EE87A, 0xFFD34D,
         0xFF4D4D, 0xFFF1C9, 0xFFF0C2, 0xFFF2B0, 0xFFD98A, 0xFF2E2E, 0xFFF4D6,
+        // lit windows: dimmer lamps, a cool white, the blue of a TV
+        0xF2C77E, 0xFFF1D6, 0xA9C4F2,
     )
 
     fun isEmissive(color: Int): Boolean {

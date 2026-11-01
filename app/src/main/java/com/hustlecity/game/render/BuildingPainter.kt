@@ -59,6 +59,25 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         private val NEON_TOKYO = intArrayOf(c(0xFFFF2A9D), c(0xFF22D3FF), c(0xFFFFD21F), c(0xFF27F06A), c(0xFFFF4A1F), c(0xFF9B5CFF))
         private val NEON = intArrayOf(c(0xFFFF5FD8), c(0xFF5FE3FF), c(0xFFFFE680), c(0xFF2EE87A), c(0xFFFFD34D), c(0xFFFF4D4D))
         private val SIGN_DAY = intArrayOf(c(0xFFD23C6E), c(0xFF2F80ED), c(0xFFF2C94C), c(0xFF27AE60), c(0xFFE0E0E0), c(0xFFEB5757))
+        /** Curtains and blinds seen through the glass. */
+        /** Front doors: painted wood in a few colors. */
+        private val DOORS = intArrayOf(c(0xFF3B2A22), c(0xFF1F3A5F), c(0xFF7A1F2B), c(0xFF2E4A3A), c(0xFF3B2A22), c(0xFF2A2D31), c(0xFF8C5A2B))
+        private val CURTAINS = intArrayOf(c(0xFFE9DCC0), c(0xFFB23A48), c(0xFF3F6E9C), c(0xFFF2E6D0), c(0xFF6B8E5A), c(0xFFD9A441), c(0xFF8C6BB1))
+        private val FLOWERS = intArrayOf(c(0xFFE53935), c(0xFFFF80AB), c(0xFFFDD835), c(0xFFFFFFFF), c(0xFFAB47BC), c(0xFFFF7043))
+        /** Flat roofs: tar, white membrane, gravel, weathered green, warm grey. */
+        private val ROOF_SKINS = intArrayOf(c(0xFF55585C), c(0xFFCFD2D4), c(0xFFA39C90), c(0xFF6F7F6C), c(0xFF8E857B), c(0xFF6A6560))
+        /** Seoul's rooftops, painted green against the rain. */
+        private val SEOUL_GREEN = intArrayOf(c(0xFF4E9A63), c(0xFF5FAE73), c(0xFF3F8A58))
+        private val UMBRELLAS = intArrayOf(c(0xFFF2F0EA), c(0xFFE07A5F), c(0xFF3D5A80), c(0xFF81B29A), c(0xFFF2CC8F), c(0xFF2A2D31))
+        /** Lit windows at night: mostly warm, some dimmer lamps, the odd blue of a TV. */
+        private val WINDOW_LIGHTS = intArrayOf(c(0xFFFFE3A0), c(0xFFFFE3A0), c(0xFFFFE3A0), c(0xFFF2C77E), c(0xFFFFF1D6), c(0xFFA9C4F2))
+        /** Mural palettes: warm sunset, cool waves, bright pop, earth. */
+        private val MURALS = arrayOf(
+            intArrayOf(c(0xFF2B2D42), c(0xFFEF476F), c(0xFFFFD166), c(0xFFF78C6B), c(0xFF8E3B5E)),
+            intArrayOf(c(0xFF0B3C5D), c(0xFF328CC1), c(0xFFD9B310), c(0xFF1D7874), c(0xFFF4F4F4)),
+            intArrayOf(c(0xFFF7F7F2), c(0xFFFF595E), c(0xFFFFCA3A), c(0xFF8AC926), c(0xFF1982C4)),
+            intArrayOf(c(0xFF3D405B), c(0xFFE07A5F), c(0xFFF2CC8F), c(0xFF81B29A), c(0xFFF4F1DE)),
+        )
     }
 
     fun hash(a: Int, b: Int, c: Int): Int {
@@ -318,7 +337,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         if (st != Arch.DECO && st != Arch.INDUSTRIAL) roofline(b, st, d0, near)
         if (d0 > 330f) return
         visibleFaces(0f, 0f, b.w, b.d) { face -> facade(b, st, face, d0, near) }
-        if (d0 < 300f && q >= 1) rooftop(b, st, d0)
+        if (d0 < 300f && q >= 1) { rooftop(b, st, d0); roofLife(b, st, d0) }
         b.placeId?.let { landmark(b, it, d0) }
     }
 
@@ -612,7 +631,11 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         val glass = scene.lit(WorldRenderer.GLASS, shade)
         val floors = ((h - baseZ - .8f) / 3.3f).toInt()
         val tr = scene.lit(trim(b), shade)
-        val lit = { f: Int, cIdx: Int -> if (hash(b.id, f * 64 + cIdx, face) % 100 < 40) WorldRenderer.LIT else scene.lit(WorldRenderer.GLASS_NIGHT, 1f) }
+        val lit = { f: Int, cIdx: Int ->
+            val hv = hash(b.id, f * 64 + cIdx, face)
+            if (hv % 100 < 40) WINDOW_LIGHTS[(hv / 100) % WINDOW_LIGHTS.size] else scene.lit(WorldRenderer.GLASS_NIGHT, 1f)
+        }
+        if (face == muralFace(b, st) && len >= 6f && h >= 6f) { mural(b, face, len, h, shade, near); return }
         when (st) {
             Arch.COLONIAL -> colonialFacade(b, face, len, h, shade, near, front && hasShop, night)
             Arch.TROPICAL -> tropicalFacade(b, face, len, h, shade, near, front && hasShop, night)
@@ -690,12 +713,16 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
                     if (detailed) {
                         for (cIdx in 0 until cols) {
                             val u0 = start + cIdx * colW + .7f; val u1 = u0 + colW - 1.4f
-                            faceQuad(x0, y0, x1, y1, face, u0, u1, z0, z1, if (night) lit(f, cIdx) else glass)
+                            val wc = if (night) lit(f, cIdx) else glass
+                            scene.glow = night && wc != scene.lit(WorldRenderer.GLASS_NIGHT, 1f)
+                            faceQuad(x0, y0, x1, y1, face, u0, u1, z0, z1, wc)
+                            scene.glow = false
                             if (d0 < 110f) {
                                 faceQuad(x0, y0, x1, y1, face, u0 - .15f, u1 + .15f, z1, z1 + .28f, tr, .06f)
                                 faceBox(x0, y0, x1, y1, face, u0 - .1f, u1 + .1f, z0 - .14f, z0, .14f, trim(b), trim(b))
                                 // a mullion splits the window
                                 faceQuad(x0, y0, x1, y1, face, (u0 + u1) / 2 - .04f, (u0 + u1) / 2 + .04f, z0, z1, tr, .05f)
+                                windowLife(b, st, face, u0, u1, z0, z1, f, cIdx, shade, night, wc, d0 < 80f)
                             }
                         }
                     } else {
@@ -739,9 +766,10 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
             return
         }
         val doorZ = if (st == Arch.BROWNSTONE) 1.5f else 0f
-        faceQuad(x0, y0, x1, y1, face, u - .8f, u + .8f, doorZ, doorZ + 2.5f, scene.lit(c(0xFF3B2A22), shade), .06f)
+        faceQuad(x0, y0, x1, y1, face, u - .8f, u + .8f, doorZ, doorZ + 2.5f, scene.lit(DOORS[hash(b.id, 9, 2) % DOORS.size], shade), .06f)
         faceQuad(x0, y0, x1, y1, face, u - 1f, u + 1f, doorZ + 2.5f, doorZ + 2.8f, scene.lit(trim(b), shade), .07f)
         if (!near) return
+        doorLife(b, st, face, u, doorZ, scene.daylight < .5f)
         if (st == Arch.BROWNSTONE) {
             // the stoop: steps up to the parlor floor with iron railings
             for (s in 0 until 5) {
@@ -875,6 +903,9 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
             if (b.kind == BKind.RETAIL && r.isVacant(b) && d0 < 160f) r.forRentLabel(b, face)
             return
         }
+        // after dark an open shop spills light onto the pavement, and its hanging sign is lit
+        if (night && open) shopGlow(b, face, len)
+        if (near && len >= 5f) bladeSign(b, face, brand, night && open)
         // sign band with a trim line
         faceQuad(x0, y0, x1, y1, face, .5f, len - .5f, 3.3f, 4.3f, scene.lit(brand, shade), .06f)
         faceQuad(x0, y0, x1, y1, face, .5f, len - .5f, 4.3f, 4.42f, scene.lit(c(0xFFF4F4F4), shade), .07f)
@@ -979,6 +1010,332 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
                 // A-frame sandwich board
                 val (x, y) = at(len - 1.6f, 1.5f)
                 scene.box(x - .3f, y - .12f, 0f, x + .3f, y + .12f, .9f, brand, c(0xFF2C2F33))
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ personality
+
+    /** What people do with their windows: curtains half drawn or blinds down, a flower box, an air conditioner under the sill. */
+    private fun windowLife(b: Building, st: Arch, face: Int, u0: Float, u1: Float, z0: Float, z1: Float, f: Int, col: Int, shade: Float,
+                           night: Boolean, glassColor: Int, closeUp: Boolean) {
+        val k = hash(b.id, f * 31 + col, face + 40) % 100
+        val home = b.kind == BKind.RESIDENTIAL || st == Arch.WALKUP || st == Arch.BROWNSTONE || st == Arch.TROPICAL
+        val cc = CURTAINS[(hash(b.id, f, col + 3) / 7) % CURTAINS.size]
+        // a lit window's curtains glow with the light behind them
+        val backlit = night && glassColor != scene.lit(WorldRenderer.GLASS_NIGHT, 1f)
+        if (k < 34) {
+            // curtains drawn to each side
+            val cw = (u1 - u0) * .27f
+            val shown = if (backlit) scene.mix(cc, glassColor, .45f) else scene.lit(cc, shade * (if (night) .45f else 1f))
+            scene.glow = backlit
+            faceQuad(0f, 0f, b.w, b.d, face, u0, u0 + cw, z0, z1, shown, .045f)
+            faceQuad(0f, 0f, b.w, b.d, face, u1 - cw, u1, z0, z1, shown, .045f)
+            scene.glow = false
+        } else if (k < 46) {
+            // blinds part way down
+            val shown = if (backlit) scene.mix(c(0xFFE8E2D4), glassColor, .5f) else scene.lit(c(0xFFE8E2D4), shade * (if (night) .45f else 1f))
+            scene.glow = backlit
+            faceQuad(0f, 0f, b.w, b.d, face, u0, u1, z1 - (z1 - z0) * (.3f + (k % 4) * .1f), z1, shown, .045f)
+            scene.glow = false
+        }
+        if (!home || f < 0 || !closeUp) return
+        val m = (u0 + u1) / 2
+        if (k >= 90) {
+            // a window air conditioner, its grille facing out
+            faceBox(0f, 0f, b.w, b.d, face, m - .36f, m + .36f, z0 - .5f, z0 - .1f, .42f, scene.snowy(c(0xFFE3E5E8)), c(0xFFB9BEC4))
+            faceQuad(0f, 0f, b.w, b.d, face, m - .3f, m + .3f, z0 - .44f, z0 - .16f, scene.lit(c(0xFF8C939B), shade), .425f)
+        } else if (k >= 78 && st != Arch.GLASS) {
+            // a flower box under the sill, in bloom in two colors
+            faceBox(0f, 0f, b.w, b.d, face, u0 - .05f, u1 + .05f, z0 - .34f, z0 - .1f, .3f, c(0xFF6B4A3A), c(0xFF5A3B2E))
+            val leaf = scene.lit(c(0xFF4C8C3F), shade)
+            faceSlab(0f, 0f, b.w, b.d, face, u0, m, z0 - .1f, z0 + .12f, .05f, .27f, scene.snowy(FLOWERS[k % FLOWERS.size], .6f), leaf)
+            faceSlab(0f, 0f, b.w, b.d, face, m, u1, z0 - .1f, z0 + .08f, .05f, .27f, scene.snowy(FLOWERS[(k + 3) % FLOWERS.size], .6f), leaf)
+        }
+    }
+
+    /** By the front door: a lamp each side (lit after dark), a potted plant or two, a doormat. */
+    private fun doorLife(b: Building, st: Arch, face: Int, u: Float, doorZ: Float, night: Boolean) {
+        val k = hash(b.id, 21, 8)
+        val lamp = if (night) c(0xFFFFE6A8) else c(0xFFE8E4DA)
+        if (k % 3 != 0) for (s in intArrayOf(-1, 1)) {
+            faceBox(0f, 0f, b.w, b.d, face, u + s * 1.15f - .12f, u + s * 1.15f + .12f, doorZ + 1.9f, doorZ + 2.25f, .18f, lamp, IRON)
+        }
+        if (st == Arch.BROWNSTONE) return
+        if (k % 2 == 0) for (s in intArrayOf(-1, 1)) {
+            // planters either side of the steps
+            val pu = u + s * 1.6f
+            faceBox(0f, 0f, b.w, b.d, face, pu - .28f, pu + .28f, 0f, .5f, .55f, c(0xFF8C939B), c(0xFF6E757C))
+            val (gx, gy) = facePoint(b, face, pu, .28f)
+            scene.blob(gx, gy, .85f, .36f, scene.lit(scene.mix(c(0xFF4C8C3F), c(0xFFF2F5F8), scene.snow * .5f), 1f), 5)
+        }
+        faceSlab(0f, 0f, b.w, b.d, face, u - .7f, u + .7f, 0f, .02f, .1f, .8f, c(0xFF6B4A3A), c(0xFF6B4A3A))
+    }
+
+    /** The world point (in the building's frame) [u] along [face] and [out] in front of it, on the ground. */
+    private fun facePoint(b: Building, face: Int, u: Float, out: Float): Pair<Float, Float> {
+        pt(0f, 0f, b.w, b.d, face, u, out, 0f, 15)
+        return px[15] to py[15]
+    }
+
+    /** Warm light from an open shop's windows lying across the pavement after dark. */
+    private fun shopGlow(b: Building, face: Int, len: Float) {
+        pt(0f, 0f, b.w, b.d, face, .6f, .15f, .03f, 0); pt(0f, 0f, b.w, b.d, face, len - .6f, .15f, .03f, 1)
+        pt(0f, 0f, b.w, b.d, face, len - 1.4f, 3.2f, .03f, 2); pt(0f, 0f, b.w, b.d, face, 1.4f, 3.2f, .03f, 3)
+        scene.glow = true
+        scene.poly(4, px, py, pz, scene.withAlpha(c(0xFFFFE3A0), .22f))
+        scene.glow = false
+    }
+
+    /** A sign hanging out over the pavement on a bracket, in the shop's colors; lit after dark while it's open. */
+    private fun bladeSign(b: Building, face: Int, brand: Int, lit: Boolean) {
+        val u = .9f
+        faceSlab(0f, 0f, b.w, b.d, face, u - .03f, u + .03f, 4.55f, 4.62f, 0f, 1.15f, IRON, IRON)
+        val col = if (lit) scene.mix(brand, c(0xFFFFFFFF), .25f) else brand
+        scene.glow = lit
+        faceSlab(0f, 0f, b.w, b.d, face, u - .06f, u + .06f, 3.55f, 4.5f, .25f, 1.05f, col, col)
+        scene.glow = false
+        faceSlab(0f, 0f, b.w, b.d, face, u - .07f, u + .07f, 3.75f, 4.3f, .4f, .9f, c(0xFFF4F4F4), c(0xFFF4F4F4))
+    }
+
+    /** The side wall (2 west or 3 east) with a mural instead of windows, on some walk-ups, shops and sheds; -1 for none. */
+    private fun muralFace(b: Building, st: Arch): Int {
+        if (st != Arch.WALKUP && st != Arch.SHOP && st != Arch.INDUSTRIAL && st != Arch.TROPICAL && st != Arch.PENCIL) return -1
+        if (b.placeId != null || b.height < 6f) return -1
+        val k = hash(b.id, 33, 7)
+        return if (k % 6 == 0) 2 + (k / 6) % 2 else -1
+    }
+
+    /** A painted wall: one of a few designs in one of a few palettes, the whole height of the side wall. */
+    private fun mural(b: Building, face: Int, len: Float, h: Float, shade: Float, near: Boolean) {
+        val k = hash(b.id, 34, 9)
+        val pal = MURALS[k % MURALS.size]
+        fun col(i: Int) = scene.lit(scene.snowy(pal[i % pal.size], .4f), shade)
+        val top = h - .4f
+        val bottom = .4f
+        // the painted ground
+        faceQuad(0f, 0f, b.w, b.d, face, .3f, len - .3f, bottom, top, col(0), .03f)
+        when ((k / 4) % 4) {
+            0 -> {
+                // sunset: bands of sky, a half sun, hills in front
+                val bands = 4
+                for (i in 1..bands) faceQuad(0f, 0f, b.w, b.d, face, .3f, len - .3f, bottom + (top - bottom) * (i / (bands + 1f)), top, col(i), .032f + i * .001f)
+                faceDisc(b, face, len * .5f, bottom + (top - bottom) * .35f, min(len, top - bottom) * .3f, col(2), .04f, half = true)
+                for (i in 0 until 3) {
+                    val cu = len * (.2f + .3f * i); val w = len * .28f
+                    faceTri(b, face, cu - w, bottom, cu + w, bottom, cu, bottom + (top - bottom) * (.22f + .08f * (i % 2)), col(0), .045f)
+                }
+            }
+            1 -> {
+                // waves: rolling bands across the wall
+                val n = 5
+                for (i in 0 until n) {
+                    val z = bottom + (top - bottom) * (i + .5f) / n
+                    var u = .3f
+                    while (u < len - .3f) {
+                        val u2 = min(u + 1.6f, len - .3f)
+                        val dz = sin((u + i) * 1.3f) * .35f
+                        faceQuad(0f, 0f, b.w, b.d, face, u, u2, z + dz, z + dz + .55f, col(1 + i % 4), .035f)
+                        u = u2
+                    }
+                }
+            }
+            2 -> {
+                // pop: big overlapping circles
+                for (i in 0 until 5) {
+                    val hk = hash(b.id, 40 + i, 3)
+                    val cu = .8f + (hk % 100) / 100f * (len - 1.6f)
+                    val cz = bottom + 1f + ((hk / 100) % 100) / 100f * (top - bottom - 2f)
+                    faceDisc(b, face, cu, cz, .8f + (hk % 7) * .25f, col(1 + i % 4), .035f + i * .002f)
+                }
+            }
+            else -> {
+                // stripes: bold diagonals
+                val n = (len / 1.8f).toInt().coerceAtLeast(2)
+                for (i in 0 until n) {
+                    val u = .3f + i * (len - .6f) / n
+                    val w = (len - .6f) / n * .5f
+                    val zTop = min(top, bottom + (top - bottom) * .9f)
+                    pt(0f, 0f, b.w, b.d, face, u, .035f, bottom, 0); pt(0f, 0f, b.w, b.d, face, u + w, .035f, bottom, 1)
+                    pt(0f, 0f, b.w, b.d, face, (u + w + 1.5f).coerceAtMost(len - .3f), .035f, zTop, 2); pt(0f, 0f, b.w, b.d, face, (u + 1.5f).coerceAtMost(len - .3f), .035f, zTop, 3)
+                    scene.poly(4, px, py, pz, col(1 + i % 4))
+                }
+            }
+        }
+        // the artist's tag in the corner
+        if (near) faceQuad(0f, 0f, b.w, b.d, face, len - 1.6f, len - .5f, bottom + .25f, bottom + .55f, col(4), .05f)
+    }
+
+    /** A disc (or the top half of one) painted on a face, centred [cu] along it at height [cz]. */
+    private fun faceDisc(b: Building, face: Int, cu: Float, cz: Float, r: Float, color: Int, out: Float, half: Boolean = false) {
+        val n = 14
+        for (i in 0 until n) {
+            val a = (if (half) Math.PI.toFloat() else 2f * Math.PI.toFloat()) * i / (n - 1) + (if (half) 0f else 0f)
+            pt(0f, 0f, b.w, b.d, face, cu + kotlin.math.cos(a) * r, out, cz + sin(a) * r, i)
+        }
+        scene.poly(n, px, py, pz, color)
+    }
+
+    private fun faceTri(b: Building, face: Int, ua: Float, za: Float, ub: Float, zb: Float, uc: Float, zc: Float, color: Int, out: Float) {
+        pt(0f, 0f, b.w, b.d, face, ua, out, za, 0); pt(0f, 0f, b.w, b.d, face, ub, out, zb, 1); pt(0f, 0f, b.w, b.d, face, uc, out, zc, 2)
+        scene.poly(3, px, py, pz, color)
+    }
+
+    /**
+     * What makes a flat roof somebody's: the membrane in its own color, the stairs up, air conditioners and vents, a
+     * satellite dish, and on some a terrace with umbrellas, plants and string lights that glow after dark. Seoul's roofs
+     * are painted green, often with a rooftop room and kimchi jars; Manila's have washing out to dry.
+     */
+    private fun roofLife(b: Building, st: Arch, d0: Float) {
+        if (pitched(b, st) || st == Arch.GLASS || st == Arch.DECO || st == Arch.INDUSTRIAL || st == Arch.MODERN || b.placeId != null) return
+        val w = b.w; val d = b.d
+        if (w < 6f || d < 6f) return
+        val h = b.height
+        val k = hash(b.id, 11, 29)
+        val night = scene.daylight < .5f
+        val seoul = e.city.mapId == Maps.SEOUL && b.kind == BKind.RESIDENTIAL
+        val manila = e.city.mapId == Maps.MANILA
+        // what's up there already (water towers and tanks, chimneys, billboards, the map's boxes): keep clear of it
+        val taken = ArrayList<FloatArray>()
+        for (rb in b.roofBoxes) taken += floatArrayOf(rb.x0, rb.y0, rb.x1, rb.y1)
+        val k0 = hash(b.id, 5, 17)
+        if ((st == Arch.WALKUP || st == Arch.BROWNSTONE) && k0 % 3 == 0 && w > 9f) taken += floatArrayOf(w * .7f - 2.2f, d * .35f - 2.2f, w * .7f + 2.2f, d * .35f + 2.2f)
+        if (st == Arch.WALKUP || st == Arch.BROWNSTONE) taken += floatArrayOf(0f, d - 2.4f, w, d)
+        if (st == Arch.TROPICAL) taken += floatArrayOf(w - 3.4f, 1f, w - 1f, 3.4f)
+        if (st == Arch.PENCIL) taken += floatArrayOf(w * .5f - 1.6f, .6f, w * .5f + 1.6f, d * .35f + 1.6f)
+        if ((st == Arch.SHOP && k0 % 4 == 0 && w > 10f) || (st == Arch.PENCIL && k0 % 5 == 0 && w > 7f)) taken += floatArrayOf(0f, d - 2f, w, d)
+        val edge = .7f
+        fun free(x0: Float, y0: Float, x1: Float, y1: Float): Boolean {
+            if (x0 < edge || y0 < edge || x1 > w - edge || y1 > d - edge) return false
+            for (t in taken) if (x0 < t[2] && x1 > t[0] && y0 < t[3] && y1 > t[1]) return false
+            return true
+        }
+        fun claim(x0: Float, y0: Float, x1: Float, y1: Float) { taken += floatArrayOf(x0 - .3f, y0 - .3f, x1 + .3f, y1 + .3f) }
+        // the roof's own skin: an inset sheet in its color (Seoul's painted green)
+        val skin = if (seoul) SEOUL_GREEN[k % SEOUL_GREEN.size] else ROOF_SKINS[k % ROOF_SKINS.size]
+        scene.material = Mat.ROOF
+        // (above a cornice's top, which caps the whole roof of a walk-up)
+        scene.box(.35f, .35f, h + .06f, w - .35f, d - .35f, h + .1f, scene.snowy(skin), skin)
+        scene.material = Mat.PLAIN
+        // the stairs up: a little housing with a door
+        if (h > 7f && k % 5 < 3) {
+            val bx = if (k % 2 == 0) edge + .2f else w - edge - 2.6f
+            val by = edge + .2f
+            if (free(bx, by, bx + 2.4f, by + 2.6f)) {
+                val wall = scene.mix(trim(b), c(0xFF8C939B), .4f)
+                scene.box(bx, by, h, bx + 2.4f, by + 2.6f, h + 2.5f, scene.snowy(c(0xFF6E757C)), wall)
+                scene.box(bx + .7f, by + 2.6f, h, bx + 1.6f, by + 2.62f, h + 2.05f, c(0xFF3B2A22), c(0xFF3B2A22))
+                if (night) { scene.glow = true; scene.box(bx + .95f, by + 2.62f, h + 2.15f, bx + 1.35f, by + 2.7f, h + 2.35f, c(0xFFFFE6A8), c(0xFFFFE6A8)); scene.glow = false }
+                claim(bx, by, bx + 2.4f, by + 3.6f)
+            }
+        }
+        // air conditioners, a fan on top of each
+        val units = 1 + k % 3
+        for (i in 0 until units) {
+            val ux = edge + .5f + ((hash(b.id, 50 + i, 1) % 100) / 100f) * (w - 2 * edge - 2.2f)
+            val uy = edge + .5f + ((hash(b.id, 60 + i, 1) % 100) / 100f) * (d - 2 * edge - 1.8f)
+            if (!free(ux, uy, ux + 1.6f, uy + 1.2f)) continue
+            scene.box(ux, uy, h, ux + 1.6f, uy + 1.2f, h + 1f, scene.snowy(c(0xFFD5D8DC)), c(0xFFAEB4BA))
+            scene.disc(ux + .8f, uy + .6f, h + 1.01f, .42f, .42f, 10, c(0xFF3A3D42))
+            if (d0 < 150f) scene.box(ux + .78f, uy + .2f, h + 1.02f, ux + .82f, uy + 1f, h + 1.04f, c(0xFF8C939B), c(0xFF8C939B))
+            claim(ux, uy, ux + 1.6f, uy + 1.2f)
+        }
+        if (d0 < 170f) {
+            // vent pipes, and a satellite dish on some
+            for (i in 0 until 2 + k % 3) {
+                val vx = edge + 1f + ((hash(b.id, 70 + i, 2) % 100) / 100f) * (w - 2 * edge - 2f)
+                val vy = edge + 1f + ((hash(b.id, 80 + i, 2) % 100) / 100f) * (d - 2 * edge - 2f)
+                if (free(vx - .2f, vy - .2f, vx + .2f, vy + .2f)) cylinder(vx, vy, .12f, h, h + .8f + (i % 2) * .4f, 6, c(0xFF8C939B), c(0xFF5C6066))
+            }
+            if (k % 4 == 1) {
+                val sx = w - edge - 1.2f; val sy = d * .5f
+                if (free(sx - .7f, sy - .7f, sx + .7f, sy + .7f)) {
+                    scene.box(sx - .05f, sy - .05f, h, sx + .05f, sy + .05f, h + 1.1f, c(0xFF9AA3AD), c(0xFF9AA3AD))
+                    val n = 10
+                    for (i in 0 until n) {
+                        val a = 2f * Math.PI.toFloat() * i / n
+                        px[i] = sx + kotlin.math.cos(a) * .55f * .5f; py[i] = sy + kotlin.math.cos(a) * .0f + sin(a) * .55f
+                        pz[i] = h + 1.25f + kotlin.math.cos(a) * .45f
+                    }
+                    scene.poly(n, px, py, pz, scene.lit(c(0xFFE9EDF2), 1f))
+                    claim(sx - .7f, sy - .7f, sx + .7f, sy + .7f)
+                }
+            }
+        }
+        // Seoul: a rooftop room, kimchi jars on the green
+        if (seoul && k % 3 == 0 && w > 7f && d > 7f) {
+            val rx = w - edge - 3.6f; val ry = d - edge - 3.2f
+            if (free(rx, ry, rx + 3.6f, ry + 3.2f)) {
+                scene.box(rx, ry, h, rx + 3.6f, ry + 3.2f, h + 2.4f, scene.snowy(c(0xFF8C939B)), c(0xFFE8E4DA))
+                scene.box(rx - .2f, ry - .2f, h + 2.4f, rx + 3.8f, ry + 3.4f, h + 2.55f, scene.snowy(c(0xFF3D6E8C)), c(0xFF3D6E8C))
+                scene.box(rx + .5f, ry - .02f, h, rx + 1.3f, ry, h + 2f, c(0xFF2F80ED), c(0xFF2F80ED))
+                val win = if (night && k % 2 == 0) c(0xFFFFE3A0) else c(0xFF4F7FA6)
+                scene.box(rx + 1.8f, ry - .02f, h + 1f, rx + 3f, ry, h + 1.8f, win, win)
+                claim(rx, ry, rx + 3.6f, ry + 3.2f)
+            }
+            if (d0 < 170f) for (i in 0 until 5) {
+                val jx = edge + 1f + i * .7f; val jy = d - edge - 1.1f
+                if (free(jx - .3f, jy - .3f, jx + .3f, jy + .3f)) scene.blob(jx, jy, h + .32f, .3f, scene.lit(c(0xFF5D3A22), 1f), 5, squash = 1.15f)
+            }
+        }
+        // Manila: washing out to dry on a line
+        if (manila && k % 3 != 2 && d0 < 200f) {
+            val lx0 = edge + .6f; val lx1 = min(w - edge - .6f, lx0 + 5.5f); val ly = d * .6f
+            if (lx1 - lx0 > 2.5f && free(lx0, ly - .5f, lx1, ly + .5f)) {
+                for (x in floatArrayOf(lx0, lx1)) scene.box(x - .04f, ly - .04f, h, x + .04f, ly + .04f, h + 1.9f, c(0xFF8C939B), c(0xFF8C939B))
+                scene.box(lx0, ly - .01f, h + 1.85f, lx1, ly + .01f, h + 1.87f, c(0xFFE8E4DA), c(0xFFE8E4DA))
+                var x = lx0 + .3f; var i = 0
+                while (x < lx1 - .5f) {
+                    val cw = .35f + (hash(b.id, 90 + i, 4) % 3) * .12f
+                    val cc = scene.snowy(FLOWERS[(k + i) % FLOWERS.size], .2f)
+                    scene.box(x, ly - .02f, h + 1.85f - (.5f + (i % 3) * .2f), x + cw, ly + .02f, h + 1.85f, cc, cc)
+                    x += cw + .15f; i++
+                }
+                claim(lx0, ly - .5f, lx1, ly + .5f)
+            }
+        }
+        // a roof terrace: a deck, umbrellas over chairs, plants and string lights (lit after dark)
+        if ((k / 4) % 5 < 2 && h < 40f && w > 7f && d > 7f) {
+            val tx0 = edge + .3f; val tx1 = w - edge - .3f
+            val ty1 = d - edge - (if (st == Arch.WALKUP || st == Arch.BROWNSTONE) 1.9f else .3f)
+            val ty0 = max(d * .45f, ty1 - 6f)
+            if (ty1 - ty0 > 3f && free(tx0, ty0, tx1, ty1)) {
+                scene.material = Mat.WOOD
+                scene.box(tx0, ty0, h, tx1, ty1, h + .12f, scene.snowy(c(0xFFA77B52)), c(0xFF8B6A4E))
+                scene.material = Mat.PLAIN
+                val n = ((tx1 - tx0) / 4f).toInt().coerceIn(1, 3)
+                for (i in 0 until n) {
+                    val ux = tx0 + (i + .5f) * (tx1 - tx0) / n; val uy = (ty0 + ty1) * .5f
+                    val uc = UMBRELLAS[(k + i) % UMBRELLAS.size]
+                    scene.box(ux - .04f, uy - .04f, h + .12f, ux + .04f, uy + .04f, h + 2.3f, c(0xFFE8E4DA), c(0xFFE8E4DA))
+                    cone(ux, uy, 1.3f, h + 1.95f, h + 2.45f, 8, uc)
+                    scene.box(ux - .45f, uy - .45f, h + .12f, ux + .45f, uy + .45f, h + .75f, c(0xFFF4F1EA), c(0xFFB0B7BF))
+                    for (s in intArrayOf(-1, 1)) scene.box(ux + s * .85f - .25f, uy - .25f, h + .12f, ux + s * .85f + .25f, uy + .25f, h + .55f, c(0xFF2A2D31), c(0xFF2A2D31))
+                }
+                // planters along the edge
+                var px0 = tx0 + .2f
+                while (px0 < tx1 - .8f) {
+                    scene.box(px0, ty1 - .7f, h + .12f, px0 + .7f, ty1 - .1f, h + .6f, c(0xFF8C939B), c(0xFF6E757C))
+                    scene.blob(px0 + .35f, ty1 - .4f, h + .95f, .42f, scene.lit(scene.mix(c(0xFF4C8C3F), c(0xFFF2F5F8), scene.snow * .5f), 1f), 5)
+                    px0 += 1.6f
+                }
+                // string lights zig-zagging between posts at the corners
+                val posts = floatArrayOf(tx0 + .15f, ty0 + .15f, tx1 - .15f, ty0 + .15f, tx1 - .15f, ty1 - .15f, tx0 + .15f, ty1 - .15f)
+                for (i in 0 until 4) scene.box(posts[i * 2] - .04f, posts[i * 2 + 1] - .04f, h + .12f, posts[i * 2] + .04f, posts[i * 2 + 1] + .04f, h + 2.6f, IRON, IRON)
+                val bulb = if (night) c(0xFFFFE6A8) else c(0xFFE8E4DA)
+                for ((a, bIdx) in listOf(0 to 2, 1 to 3)) {
+                    val ax = posts[a * 2]; val ay = posts[a * 2 + 1]; val bx2 = posts[bIdx * 2]; val by2 = posts[bIdx * 2 + 1]
+                    val segs = 6
+                    scene.glow = night
+                    for (sIdx in 0..segs) {
+                        val t = sIdx / segs.toFloat()
+                        val x = ax + (bx2 - ax) * t; val y = ay + (by2 - ay) * t
+                        val z = h + 2.55f - 4f * t * (1f - t) * .55f
+                        scene.box(x - .06f, y - .06f, z - .06f, x + .06f, y + .06f, z + .06f, bulb, bulb)
+                    }
+                    scene.glow = false
+                }
+                if (night) scene.box(tx0 + .2f, ty0 + .2f, h + .125f, tx1 - .2f, ty1 - .2f, h + .13f, scene.withAlpha(c(0xFFFFE3A0), .16f), scene.withAlpha(c(0xFFFFE3A0), .16f))
             }
         }
     }
