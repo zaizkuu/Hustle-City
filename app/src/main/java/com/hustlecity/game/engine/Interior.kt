@@ -56,6 +56,9 @@ class Person(var x: Float, var y: Float, var shirt: Int, var skin: Int) {
     var heldIn = 0f
     /** True once they've paid: the goods go into a paper bag. */
     var bagged = false
+    /** How long paying at the till takes this customer (seconds; 0 when not at a till): their goods go on the counter, are
+     *  scanned, they tap a card and take the bag, timed by [wait] running down from this. */
+    var payTime = 0f
     /** Staff carrying a box to a display ([com.hustlecity.game.render.PersonPainter] carry pose 1). */
     var carry = 0
 }
@@ -900,7 +903,17 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 val slot = slots[pos]
                 if (v.goal != slot) goTo(v, slot, occ)
                 if (walk(v, dt, occ) && pos == 0) {
-                    if (v.blockedFor >= 0f) { v.wait = 1.2f + e.rnd.nextFloat() * 1.6f; v.blockedFor = -1f; return }
+                    if (v.blockedFor >= 0f) {
+                        // at the till: face it, put the goods down, pay and take the bag
+                        v.wait = 2.6f + e.rnd.nextFloat() * 1.2f; v.payTime = v.wait; v.blockedFor = -1f
+                        items.getOrNull(v.counter)?.let { c -> Catalog.item(c.itemId)?.let { def ->
+                            val (fw, fd) = itemDims(def, c.rot)
+                            val tx = (v.x).coerceIn(c.x.toFloat(), (c.x + fw).toFloat()); val ty = (v.y).coerceIn(c.y.toFloat(), (c.y + fd).toFloat())
+                            if (kotlin.math.abs(tx - v.x) + kotlin.math.abs(ty - v.y) > .01f) v.heading = kotlin.math.atan2(tx - v.x, -(ty - v.y))
+                        } }
+                        return
+                    }
+                    v.payTime = 0f
                     // paid
                     if (mode == InteriorMode.BUSINESS && e.realTime - lastCash > 2.5f) {
                         lastCash = e.realTime
@@ -1042,6 +1055,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 if (seat != null && !p.seated) {
                     if (dt <= 0f || moveToward(seat.x, seat.y, p.speed * dt, false, p)) { p.x = seat.x; p.y = seat.y; p.seated = true; p.pose = 1; p.z = seat.z; p.heading = seat.heading }
                 } else if (seat == null && post.face >= 0) {
+                    p.item = post.face
                     items.getOrNull(post.face)?.let { it2 ->
                         Catalog.item(it2.itemId)?.let { def ->
                             val (fw, fd) = itemDims(def, it2.rot)

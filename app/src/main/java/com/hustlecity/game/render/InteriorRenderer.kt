@@ -187,8 +187,8 @@ class InteriorRenderer(private val e: GameEngine) {
                     if (shelf != null && lay != null) stock.draw(def, p, dIdx[i], shelf, lay, 1f)
                     else drawItem(def, p.x.toFloat(), p.y.toFloat(), p.rot, 1f)
                 }
-                1 -> sc.visitors.getOrNull(dIdx[i])?.let { person(it, false); takes(sc, it) }
-                2 -> sc.staff.getOrNull(dIdx[i])?.let { person(it, true) }
+                1 -> sc.visitors.getOrNull(dIdx[i])?.let { person(sc, it, false); takes(sc, it); till(sc, it) }
+                2 -> sc.staff.getOrNull(dIdx[i])?.let { person(sc, it, true) }
                 3 -> {
                     val p = e.state.player
                     scene.disc(sc.px, sc.py, .02f, .45f, .45f, 12, scene.withAlpha(c(0xFF27AE60), .55f))
@@ -490,14 +490,88 @@ class InteriorRenderer(private val e: GameEngine) {
     }
 
     /** Draws a furniture model at grid position (x, y) with rotation. */
-    fun drawItem(def: FurnitureDef, x: Float, y: Float, rot: Int, alpha: Float) = parts.draw(def, x, y, rot, alpha)
+    private val models = FurnitureModels(scene)
 
-    private fun person(v: com.hustlecity.game.engine.Person, staff: Boolean) {
-        // shoppers hold what they picked (once it has reached their hands), then a paper bag after paying
-        val held = if (!staff && v.heldIn <= 0f && !v.bagged) v.held else 0
+    /** One piece of furniture: in HD the hand-built model where there is one, otherwise its boxes. */
+    fun drawItem(def: FurnitureDef, x: Float, y: Float, rot: Int, alpha: Float) {
+        if (scene.gpu != null && models.has(def.id)) models.draw(def, x, y, rot, alpha) else parts.draw(def, x, y, rot, alpha)
+    }
+
+    /** How far through paying at the till [v] is (0..1), or -1 when they're not paying. */
+    private fun payProgress(v: com.hustlecity.game.engine.Person): Float =
+        if (v.payTime > 0f && v.wait > 0f && v.counter >= 0) (1f - v.wait / v.payTime).coerceIn(0f, 1f) else -1f
+
+    private fun person(sc: InteriorScene, v: com.hustlecity.game.engine.Person, staff: Boolean) {
+        // shoppers hold what they picked (once it has reached their hands) until they put it on the counter, then a
+        // paper bag after paying
+        val pay = if (staff) -1f else payProgress(v)
+        val held = if (!staff && v.heldIn <= 0f && !v.bagged && (pay < 0f || pay < .12f)) v.held else 0
+        // reaching across the counter: the customer to put the goods down, tap the card and take the bag; the
+        // cashier to scan and hand the bag over
+        val reach = if (staff) sc.visitors.any { c -> c.counter >= 0 && c.counter == v.item && payProgress(c).let { t -> t in .22f..(.62f) || t in .8f..(.96f) } }
+            else pay in .04f..(.24f) || pay in .55f..(.78f) || pay >= .86f
         people.draw(v.x, v.y, v.z, v.heading, v.phase, v.moving, v.shirt, PersonPainter.PANTS[v.pants % PersonPainter.PANTS.size], v.skin,
             PersonPainter.HAIR[v.hair % PersonPainter.HAIR.size], pose = v.pose, apron = if (staff) c(0xFF2C3E50) else 0,
-            carry = v.carry, load = if (v.carry > 0) 1 else 0, held = held, bag = !staff && v.bagged)
+            carry = v.carry, load = if (v.carry > 0) 1 else 0, held = held, bag = !staff && v.bagged, reach = reach && v.carry == 0)
+    }
+
+    private val tillTop = FloatArray(3)
+
+    /**
+     * A customer paying at the till: what they picked goes from their hand onto the counter, slides along it as it's
+     * scanned and goes into a bag; they tap a card on the reader; the bag comes back across to them.
+     */
+    private fun till(sc: InteriorScene, v: com.hustlecity.game.engine.Person) {
+        val t = payProgress(v)
+        if (t < 0f) return
+        val p = sc.items.getOrNull(v.counter) ?: return
+        val def = Catalog.item(p.itemId) ?: return
+        val (fw, fd) = itemDims(def, p.rot)
+        // the counter top, a little way in from the edge nearest the customer
+        val nx = v.x.coerceIn(p.x.toFloat(), (p.x + fw).toFloat()); val ny = v.y.coerceIn(p.y.toFloat(), (p.y + fd).toFloat())
+        var dx = nx - v.x; var dy = ny - v.y
+        val dl = kotlin.math.sqrt(dx * dx + dy * dy)
+        if (dl < .01f) { dx = kotlin.math.sin(v.heading); dy = -kotlin.math.cos(v.heading) } else { dx /= dl; dy /= dl }
+        val top = def.parts.filter { it.z1 <= 1.2f }.maxOfOrNull { it.z1 } ?: 1f
+        tillTop[0] = nx + dx * .22f; tillTop[1] = ny + dy * .22f; tillTop[2] = top
+        // along the counter: the way the goods slide to be scanned, and the other way to the card reader
+        val ax = -dy; val ay = dx
+        val hx = people.handX; val hy = people.handY; val hz = people.handZ
+        fun lerp(a: Float, b: Float, u: Float) = a + (b - a) * u
+        // the goods: hand to counter, then along it past the scanner, then into the bag
+        if (v.held != 0 && t < .62f) {
+            val col = v.held
+            val x: Float; val y: Float; val z: Float
+            if (t < .22f) {
+                val u = ((t - .04f) / .18f).coerceIn(0f, 1f)
+                x = lerp(hx, tillTop[0], u); y = lerp(hy, tillTop[1], u); z = lerp(hz - .08f, top + .09f, u) + sin(u * Math.PI.toFloat()) * .12f
+            } else {
+                val u = ((t - .25f) / .35f).coerceIn(0f, 1f).let { it * it * (3 - 2 * it) }
+                x = tillTop[0] + ax * u * .45f; y = tillTop[1] + ay * u * .45f; z = top + .09f
+            }
+            scene.box(x - .05f, y - .05f, z - .09f, x + .05f, y + .05f, z + .09f, scene.mix(col, 0xFFFFFFFF.toInt(), .2f), col)
+            // the scanner's red line as it goes past
+            if (t in .36f..(.46f)) {
+                scene.glow = true
+                val sx = tillTop[0] + ax * .2f; val sy = tillTop[1] + ay * .2f
+                scene.box(sx - .07f, sy - .07f, top + .005f, sx + .07f, sy + .07f, top + .012f, c(0xFFFF3B30), c(0xFFFF3B30))
+                scene.glow = false
+            }
+        }
+        // the card: out to the reader and back
+        if (t in .55f..(.8f)) {
+            val u = ((t - .55f) / .25f).let { if (it < .5f) it * 2f else (1f - it) * 2f }.coerceIn(0f, 1f)
+            val rx = tillTop[0] - ax * .3f; val ry = tillTop[1] - ay * .3f
+            val x = lerp(hx, rx, u); val y = lerp(hy, ry, u); val z = lerp(hz, top + .06f, u)
+            scene.box(x - .045f, y - .045f, z - .003f, x + .045f, y + .045f, z + .003f, c(0xFF1F3A93), c(0xFF1F3A93))
+        }
+        // the bag, filled at the far end and handed back across
+        if (v.heldCount > 0 && t >= .62f) {
+            val bx0 = tillTop[0] + ax * .45f; val by0 = tillTop[1] + ay * .45f
+            val u = ((t - .82f) / .18f).coerceIn(0f, 1f)
+            val x = lerp(bx0, hx, u); val y = lerp(by0, hy, u); val z = lerp(top, hz - .36f, u)
+            scene.box(x - .12f, y - .06f, z, x + .12f, y + .06f, z + .3f, PersonPainter.BAG, PersonPainter.BAG_DARK)
+        }
     }
 
     private val takeFrom = FloatArray(3)
@@ -514,9 +588,8 @@ class InteriorRenderer(private val e: GameEngine) {
             val lay = shelf.layoutOf(t.item) ?: continue
             stock.slotWorld(def, p, lay, t.slot, takeFrom)
             val u = (t.t / ShelfStock.TAKE_TIME).coerceIn(0f, 1f)
-            // the right hand: a little ahead of and to the right of the body, at hip height
-            val fx = kotlin.math.sin(v.heading); val fy = -kotlin.math.cos(v.heading)
-            val hx = v.x + fx * .12f - fy * .27f; val hy = v.y + fy * .12f + fx * .27f; val hz = v.z + .86f
+            // into the right hand (where the person was just drawn with it)
+            val hx = people.handX; val hy = people.handY; val hz = people.handZ - .08f
             val x = takeFrom[0] + (hx - takeFrom[0]) * u
             val y = takeFrom[1] + (hy - takeFrom[1]) * u
             val z = takeFrom[2] + (hz - takeFrom[2]) * u + sin(u * Math.PI.toFloat()) * .18f

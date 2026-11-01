@@ -44,10 +44,10 @@ class StockPainter(private val scene: Scene3D, private val parts: PartSorter) {
         for (k in model.indices) {
             if (k < 64 && (lay.hideMask ushr k) and 1L == 1L) continue
             val part = model[k]
-            box(part.x0, part.y0, part.z0, part.x1, part.y1, part.z1, part.color)
+            parts.add(def, px, py, rot, part.x0, part.y0, part.z0, part.x1, part.y1, part.z1, part.color, bevelled = true)
         }
         val shell = lay.shell
-        for (k in shell.indices) { val part = shell[k]; box(part.x0, part.y0, part.z0, part.x1, part.y1, part.z1, part.color) }
+        for (k in shell.indices) { val part = shell[k]; parts.add(def, px, py, rot, part.x0, part.y0, part.z0, part.x1, part.y1, part.z1, part.color, bevelled = true) }
         val slots = shelf.slots(index)
         val ages = shelf.ages(index)
         if (slots != null && ages != null) {

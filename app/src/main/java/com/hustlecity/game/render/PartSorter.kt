@@ -16,6 +16,8 @@ class PartSorter(private val scene: Scene3D) {
     private val x1 = FloatArray(cap); private val y1 = FloatArray(cap); private val z1 = FloatArray(cap)
     private val col = IntArray(cap)
     private val top = IntArray(cap)
+    // furniture's own parts get bevelled edges in HD (not the goods on its shelves: there are too many of them)
+    private val bevel = BooleanArray(cap)
     private val before = Array(cap) { BooleanArray(cap) }
     private val indeg = IntArray(cap)
     private val done = BooleanArray(cap)
@@ -27,7 +29,7 @@ class PartSorter(private val scene: Scene3D) {
         for (i in 0 until min(def.parts.size, 64)) {
             if (skip != 0L && (skip ushr i) and 1L == 1L) continue
             val p = def.parts[i]
-            add(def, x, y, rot, p.x0, p.y0, p.z0, p.x1, p.y1, p.z1, p.color)
+            add(def, x, y, rot, p.x0, p.y0, p.z0, p.x1, p.y1, p.z1, p.color, bevelled = true)
         }
         end(alpha)
     }
@@ -39,7 +41,8 @@ class PartSorter(private val scene: Scene3D) {
      * Adds a box given in [def]'s own tile units (x across, y deep, z up), turned [rot] quarter turns like the model
      * and placed at (x, y). [topColor] colors its top face (a can's lid, a box's label).
      */
-    fun add(def: FurnitureDef, x: Float, y: Float, rot: Int, ax0: Float, ay0: Float, az0: Float, ax1: Float, ay1: Float, az1: Float, color: Int, topColor: Int = color) {
+    fun add(def: FurnitureDef, x: Float, y: Float, rot: Int, ax0: Float, ay0: Float, az0: Float, ax1: Float, ay1: Float, az1: Float, color: Int, topColor: Int = color,
+            bevelled: Boolean = false) {
         if (count >= cap) return
         val w = def.w.toFloat(); val d = def.d.toFloat()
         val ax: Float; val ay: Float; val bx: Float; val by: Float
@@ -52,7 +55,7 @@ class PartSorter(private val scene: Scene3D) {
         val i = count++
         x0[i] = x + min(ax, bx); x1[i] = x + max(ax, bx)
         y0[i] = y + min(ay, by); y1[i] = y + max(ay, by)
-        z0[i] = az0; z1[i] = az1; col[i] = color; top[i] = topColor
+        z0[i] = az0; z1[i] = az1; col[i] = color; top[i] = topColor; bevel[i] = bevelled
     }
 
     /** Draws the batch. */
@@ -62,12 +65,16 @@ class PartSorter(private val scene: Scene3D) {
     fun drawBoxes(n: Int, alpha: Float = 1f) = sortAndDraw(min(n, cap), alpha)
 
     fun set(i: Int, ax0: Float, ay0: Float, az0: Float, ax1: Float, ay1: Float, az1: Float, color: Int) {
-        x0[i] = ax0; y0[i] = ay0; z0[i] = az0; x1[i] = ax1; y1[i] = ay1; z1[i] = az1; col[i] = color; top[i] = color
+        x0[i] = ax0; y0[i] = ay0; z0[i] = az0; x1[i] = ax1; y1[i] = ay1; z1[i] = az1; col[i] = color; top[i] = color; bevel[i] = false
     }
 
     private fun sortAndDraw(n: Int, alpha: Float) {
         if (scene.gpu != null) {
-            for (i in 0 until n) scene.box(x0[i], y0[i], z0[i], x1[i], y1[i], z1[i], top[i], col[i], alpha)
+            for (i in 0 until n) {
+                val m = min(x1[i] - x0[i], min(y1[i] - y0[i], z1[i] - z0[i]))
+                if (bevel[i] && alpha >= 1f && m >= .05f) scene.roundBox(x0[i], y0[i], z0[i], x1[i], y1[i], z1[i], min(.03f, m * .2f), top[i], col[i], steps = 1)
+                else scene.box(x0[i], y0[i], z0[i], x1[i], y1[i], z1[i], top[i], col[i], alpha)
+            }
             return
         }
         val cx = scene.camLX; val cy = scene.camLY; val cz = scene.proj.camZ

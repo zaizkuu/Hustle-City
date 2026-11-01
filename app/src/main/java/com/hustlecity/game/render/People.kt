@@ -37,8 +37,8 @@ class PersonPainter(private val scene: Scene3D) {
         private val STEEL = c(0xFF9AA3AD)
         private val TRUCK_RED = c(0xFFD0392B)
         private val CART_BLUE = c(0xFF2F80ED)
-        private val BAG = c(0xFFD9B98A)
-        private val BAG_DARK = c(0xFFB38A55)
+        val BAG = c(0xFFD9B98A)
+        val BAG_DARK = c(0xFFB38A55)
         /** Taller on screen than this many pixels, a person is drawn as a model. */
         private const val MODEL_PX = 30f
         private const val TWO_PI = (Math.PI * 2).toFloat()
@@ -68,13 +68,18 @@ class PersonPainter(private val scene: Scene3D) {
      * @param load boxes on the hand truck or cart
      * @param held color of a product held in the right hand (a shopper's pick), or 0 for none
      * @param bag true to carry a paper shopping bag instead (paid for)
+     * @param reach arms out in front, empty-handed (handing something over at a counter)
      */
     fun draw(
         x: Float, y: Float, z: Float, heading: Float, phase: Float, moving: Float,
         shirt: Int, pants: Int, skin: Int, hair: Int, scale: Float = 1f, pose: Int = Pose.STAND,
         apron: Int = 0, umbrella: Int = 0, alpha: Float = 1f, carry: Int = 0, load: Int = 0, held: Int = 0, bag: Boolean = false,
+        reach: Boolean = false,
     ) {
         n = 0
+        // until the model says otherwise, the right hand hangs at the hip, a little out from the body
+        val hfx = sin(heading); val hfy = -cos(heading)
+        handX = x - hfy * .27f * scale; handY = y + hfx * .27f * scale; handZ = z + .86f * scale
         val s = scale
         // far away people get a cheap three-box version
         val camD = proj().camZOf(x, y, z + .9f * s)
@@ -83,11 +88,11 @@ class PersonPainter(private val scene: Scene3D) {
         if (scene.gpu != null && models.isNotEmpty() && camD > 0 && proj().focal * 1.75f * s / camD > MODEL_PX) {
             val holding = carry >= 2 || (carry == 1 && load > 0)
             modelled(models[pick(shirt, pants, hair, skin, models.size)], x, y, z, heading, phase, moving, pose, s,
-                if (apron != 0) apron else shirt, pants, skin, hair, alpha, holding)
-            // what they hold, push or shelter under stays as it was
+                if (apron != 0) apron else shirt, pants, skin, hair, alpha, holding || reach)
+            // what they push or shelter under goes on as before; what they hold hangs from the model's own hand
             if (pose == Pose.STAND || pose == Pose.RUN) {
                 if (holding) carried(z, z + .82f * s, s, carry, load)
-                else if (held != 0 || bag) inHand(z + .82f * s, s, sin(phase) * moving.coerceIn(0f, 1f), held, bag)
+                else if ((held != 0 || bag) && handLocal[3] > 0f) inModelHand(z, s, held, bag)
             }
             if (umbrella != 0 && pose == Pose.STAND) umbrella(z, s, umbrella)
             emit(x, y, heading, alpha)
@@ -117,7 +122,7 @@ class PersonPainter(private val scene: Scene3D) {
                     part(0f, 0f, z, z + .82f * s, .16f * s, .3f * s, pants)
                 } else legs(z + bob, s, pants, swing * .17f * s)
                 val holding = carry >= 2 || (carry == 1 && load > 0)
-                upperBody(0f, z + .82f * s + bob, s, shirt, skin, hair, apron, swing, phase, false, lod, reach = holding)
+                upperBody(0f, z + .82f * s + bob, s, shirt, skin, hair, apron, swing, phase, false, lod, reach = holding || reach)
                 if (holding) carried(z, z + .82f * s + bob, s, carry, load)
                 else if (!lod && (held != 0 || bag)) inHand(z + .82f * s + bob, s, swing, held, bag)
             }
@@ -167,6 +172,17 @@ class PersonPainter(private val scene: Scene3D) {
         if (vx.size < nv) { vx = FloatArray(nv); vy = FloatArray(nv); vz = FloatArray(nv) }
         val fx = sin(heading); val fy = -cos(heading)
         val rx = -fy; val ry = fx
+        // where the right hand is in this pose
+        val wr = wristOf(m)
+        handLocal[3] = 0f
+        if (wr[0] >= 0f) {
+            val o = wr[0].toInt() * 12; val b = bones
+            val hf = b[o] * wr[1] + b[o + 1] * wr[2] + b[o + 2] * wr[3] + b[o + 3]
+            val hr = b[o + 4] * wr[1] + b[o + 5] * wr[2] + b[o + 6] * wr[3] + b[o + 7]
+            val hu = b[o + 8] * wr[1] + b[o + 9] * wr[2] + b[o + 10] * wr[3] + b[o + 11]
+            handLocal[0] = hf; handLocal[1] = hr; handLocal[2] = hu; handLocal[3] = 1f
+            handX = x + (fx * hf + rx * hr) * s; handY = y + (fy * hf + ry * hr) * s; handZ = z + hu * s
+        }
         val p = m.pos; val b = bones
         for (v in 0 until nv) {
             val px = p[v * 3]; val py = p[v * 3 + 1]; val pz = p[v * 3 + 2]
@@ -232,6 +248,34 @@ class PersonPainter(private val scene: Scene3D) {
                 }
             }
         }
+    }
+
+    /** A product, or the paper bag it went into at the register, hanging from the model's right hand (where [modelled] left it). */
+    private fun inModelHand(z: Float, s: Float, held: Int, bag: Boolean) {
+        val f = handLocal[0] * s; val r = handLocal[1] * s; val hz = z + handLocal[2] * s
+        if (bag) {
+            part(f, r + .03f * s, hz - .36f * s, hz - .06f * s, .24f * s, .11f * s, BAG, BAG_DARK)
+            part(f, r + .03f * s, hz - .06f * s, hz + .01f * s, .14f * s, .015f * s, BAG_DARK)
+        } else part(f, r + .02f * s, hz - .18f * s, hz + .02f * s, .1f * s, .075f * s, held)
+    }
+
+    /** Where the right hand is in the world, after the last [draw] (an estimate for the simple figures). */
+    var handX = 0f; var handY = 0f; var handZ = 0f
+        private set
+    // the hand in the person's own frame (forward, right, up per meter of height); [3] > 0 once a model has set it
+    private val handLocal = FloatArray(4)
+    // per model, the right wrist's bone and a point in its hand in the bind pose
+    private val wrists = HashMap<PeopleModels.Model, FloatArray>()
+
+    private fun wristOf(m: PeopleModels.Model): FloatArray = wrists.getOrPut(m) {
+        // the hand's vertices, for each wrist: the one on the right of the body (+r) is the right hand
+        var best = floatArrayOf(-1f, 0f, 0f, 0f)
+        for (bone in intArrayOf(11, 15)) {
+            var sf = 0f; var sr = 0f; var su = 0f; var k = 0
+            for (v in 0 until m.vertices) if ((m.b0[v].toInt() and 255) == bone && m.w[v] >= .5f) { sf += m.pos[v * 3]; sr += m.pos[v * 3 + 1]; su += m.pos[v * 3 + 2]; k++ }
+            if (k > 0 && sr / k > 0f) best = floatArrayOf(bone.toFloat(), sf / k, sr / k, su / k)
+        }
+        best
     }
 
     /** A product picked off a shelf, or the paper bag it went into at the register, swinging in the right hand. */
