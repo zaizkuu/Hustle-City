@@ -6,6 +6,54 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+/**
+ * What a person is doing with their hands, acted out on top of their pose (HD models): staff at work, customers
+ * paying, eating or training. [PersonPainter.draw] takes one with a running time.
+ */
+object Act {
+    const val NONE = 0
+    /** Behind the counter, hands on it, now and then typing on the till. */
+    const val TILL = 1
+    /** Sweeping goods past the scanner. */
+    const val SCAN = 2
+    /** Packing a bag. */
+    const val BAG = 3
+    /** Handing something across a counter, or taking it. */
+    const val GIVE = 4
+    /** At a keyboard (seated or standing). */
+    const val TYPE = 5
+    /** Mopping the floor. */
+    const val MOP = 6
+    /** Behind the decks: a hand on the headphones, the other on the platter. */
+    const val DJ = 7
+    /** Cutting the hair of someone seated in front. */
+    const val HAIR = 8
+    /** Coaching with a clipboard, pointing now and then. */
+    const val COACH = 9
+    /** Playing to the audience. */
+    const val PERFORM = 10
+    /** Taking goods out of a box onto a shelf. */
+    const val STOCK = 11
+    /** Straightening the goods on a display (no box). */
+    const val TIDY = 20
+    /** Reaching up to a shelf for something. */
+    const val REACH = 12
+    /** Putting something down on a counter. */
+    const val PLACE = 13
+    /** Holding a card to the reader. */
+    const val CARD = 14
+    /** Eating and drinking, seated. */
+    const val EAT = 15
+    /** Pressing a bar up from a bench. */
+    const val PRESS = 16
+    /** Dumbbell curls. */
+    const val CURL = 17
+    /** Punching a bag. */
+    const val PUNCH = 18
+    /** Pulling a rowing handle. */
+    const val ROW = 19
+}
+
 /** Poses for [PersonPainter]. */
 object Pose {
     const val STAND = 0
@@ -74,7 +122,7 @@ class PersonPainter(private val scene: Scene3D) {
         x: Float, y: Float, z: Float, heading: Float, phase: Float, moving: Float,
         shirt: Int, pants: Int, skin: Int, hair: Int, scale: Float = 1f, pose: Int = Pose.STAND,
         apron: Int = 0, umbrella: Int = 0, alpha: Float = 1f, carry: Int = 0, load: Int = 0, held: Int = 0, bag: Boolean = false,
-        reach: Boolean = false,
+        reach: Boolean = false, act: Int = Act.NONE, actT: Float = 0f,
     ) {
         n = 0
         // until the model says otherwise, the right hand hangs at the hip, a little out from the body
@@ -88,7 +136,7 @@ class PersonPainter(private val scene: Scene3D) {
         if (scene.gpu != null && models.isNotEmpty() && camD > 0 && proj().focal * 1.75f * s / camD > MODEL_PX) {
             val holding = carry >= 2 || (carry == 1 && load > 0)
             modelled(models[pick(shirt, pants, hair, skin, models.size)], x, y, z, heading, phase, moving, pose, s,
-                if (apron != 0) apron else shirt, pants, skin, hair, alpha, holding || reach)
+                if (apron != 0) apron else shirt, pants, skin, hair, alpha, holding || reach, act, actT)
             // what they push or shelter under goes on as before; what they hold hangs from the model's own hand
             if (pose == Pose.STAND || pose == Pose.RUN) {
                 if (holding) carried(z, z + .82f * s, s, carry, load)
@@ -96,6 +144,7 @@ class PersonPainter(private val scene: Scene3D) {
             }
             if (umbrella != 0 && pose == Pose.STAND) umbrella(z, s, umbrella)
             emit(x, y, heading, alpha)
+            if (act != Act.NONE && handLocal[3] > 0f) props(act, actT, x, y, z, heading, s)
             return
         }
         when (pose) {
@@ -122,7 +171,8 @@ class PersonPainter(private val scene: Scene3D) {
                     part(0f, 0f, z, z + .82f * s, .16f * s, .3f * s, pants)
                 } else legs(z + bob, s, pants, swing * .17f * s)
                 val holding = carry >= 2 || (carry == 1 && load > 0)
-                upperBody(0f, z + .82f * s + bob, s, shirt, skin, hair, apron, swing, phase, false, lod, reach = holding || reach)
+                upperBody(0f, z + .82f * s + bob, s, shirt, skin, hair, apron, swing, phase, false, lod,
+                    reach = holding || reach || act == Act.GIVE || act == Act.PLACE || act == Act.CARD || act == Act.SCAN || act == Act.TILL || act == Act.STOCK)
                 if (holding) carried(z, z + .82f * s + bob, s, carry, load)
                 else if (!lod && (held != 0 || bag)) inHand(z + .82f * s + bob, s, swing, held, bag)
             }
@@ -152,7 +202,7 @@ class PersonPainter(private val scene: Scene3D) {
 
     /** [m] posed for what the person is doing, at (x, y, z) facing [heading], in their colours. */
     private fun modelled(m: PeopleModels.Model, x: Float, y: Float, z: Float, heading: Float, phase: Float, moving: Float, pose: Int,
-                         s: Float, top: Int, bottom: Int, skin: Int, hair: Int, alpha: Float, holding: Boolean) {
+                         s: Float, top: Int, bottom: Int, skin: Int, hair: Int, alpha: Float, holding: Boolean, act: Int = Act.NONE, actT: Float = 0f) {
         val rig = m.rig
         val cycle = (phase / TWO_PI).let { it - kotlin.math.floor(it) }
         fun dur(name: String) = rig.clips[name]?.duration ?: 1f
@@ -168,10 +218,20 @@ class PersonPainter(private val scene: Scene3D) {
                 PeopleModels.pose(rig, still, clock + (x + y) * .37f, walk, cycle * dur(walk), k, bones)
             }
         }
+        if (act != Act.NONE) acting(m, act, actT, pose)
         val nv = m.vertices
         if (vx.size < nv) { vx = FloatArray(nv); vy = FloatArray(nv); vz = FloatArray(nv) }
         val fx = sin(heading); val fy = -cos(heading)
         val rx = -fy; val ry = fx
+        // where the left hand is (for what it holds), then the right
+        val lj = jointsOf(m)
+        if (lj.left >= 0) {
+            val o = (lj.left + 3) * 12; val b = bones
+            val hf = b[o] * lj.lHand[0] + b[o + 1] * lj.lHand[1] + b[o + 2] * lj.lHand[2] + b[o + 3]
+            val hr = b[o + 4] * lj.lHand[0] + b[o + 5] * lj.lHand[1] + b[o + 6] * lj.lHand[2] + b[o + 7]
+            val hu = b[o + 8] * lj.lHand[0] + b[o + 9] * lj.lHand[1] + b[o + 10] * lj.lHand[2] + b[o + 11]
+            lHandX = x + (fx * hf + rx * hr) * s; lHandY = y + (fy * hf + ry * hr) * s; lHandZ = z + hu * s
+        }
         // where the right hand is in this pose
         val wr = wristOf(m)
         handLocal[3] = 0f
@@ -246,6 +306,332 @@ class PersonPainter(private val scene: Scene3D) {
                     val z0 = floor + .28f * s + layer * .31f * s
                     part(f * s, r * s, z0, z0 + .29f * s, .44f * s, .28f * s, if ((slot + layer) % 2 == 0) CARD else CARD_DARK)
                 }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ acting
+
+    /**
+     * A model's joints in its bind pose, worked out from where its skin blends between bones: each arm's shoulder,
+     * elbow and a point in the hand, the neck and the waist. [right] and [left] are each arm's first bone (its shoulder
+     * bone; the upper arm, forearm and wrist follow), whichever side of the body it's on.
+     */
+    private class Joints(val right: Int, val left: Int, val rShoulder: FloatArray, val rElbow: FloatArray, val lShoulder: FloatArray,
+                         val lElbow: FloatArray, val lHand: FloatArray, val neck: FloatArray, val waist: FloatArray)
+
+    private val joints = HashMap<PeopleModels.Model, Joints>()
+
+    private fun jointsOf(m: PeopleModels.Model): Joints = joints.getOrPut(m) {
+        // where bones a and b meet: the skin bound to both, weighted toward an even blend
+        fun meet(a: Int, b: Int): FloatArray {
+            var sf = 0f; var sr = 0f; var su = 0f; var sw = 0f
+            for (v in 0 until m.vertices) {
+                val b0 = m.b0[v].toInt() and 255; val b1 = m.b1[v].toInt() and 255
+                if (!((b0 == a && b1 == b) || (b0 == b && b1 == a))) continue
+                val w = minOf(m.w[v], 1f - m.w[v]) + .02f
+                sf += m.pos[v * 3] * w; sr += m.pos[v * 3 + 1] * w; su += m.pos[v * 3 + 2] * w; sw += w
+            }
+            if (sw > 0f) return floatArrayOf(sf / sw, sr / sw, su / sw)
+            // no blend: halfway between the two bones' skin
+            fun centre(bone: Int): FloatArray {
+                var f = 0f; var r = 0f; var u = 0f; var k = 0
+                for (v in 0 until m.vertices) if ((m.b0[v].toInt() and 255) == bone) { f += m.pos[v * 3]; r += m.pos[v * 3 + 1]; u += m.pos[v * 3 + 2]; k++ }
+                return if (k == 0) floatArrayOf(0f, 0f, 1.4f) else floatArrayOf(f / k, r / k, u / k)
+            }
+            val ca = centre(a); val cb = centre(b)
+            return floatArrayOf((ca[0] + cb[0]) / 2, (ca[1] + cb[1]) / 2, (ca[2] + cb[2]) / 2)
+        }
+        fun hand(wrist: Int): FloatArray {
+            var f = 0f; var r = 0f; var u = 0f; var k = 0
+            for (v in 0 until m.vertices) if ((m.b0[v].toInt() and 255) == wrist && m.w[v] >= .5f) { f += m.pos[v * 3]; r += m.pos[v * 3 + 1]; u += m.pos[v * 3 + 2]; k++ }
+            return if (k == 0) floatArrayOf(0f, 0f, .8f) else floatArrayOf(f / k, r / k, u / k)
+        }
+        // the arm whose hand is on the body's right (+r) is the right arm
+        val handA = hand(11); val handB = hand(15)
+        val right = if (handB[1] >= handA[1]) 12 else 8
+        val left = if (right == 12) 8 else 12
+        Joints(right, left, meet(right, right + 1), meet(right + 1, right + 2), meet(left, left + 1), meet(left + 1, left + 2),
+            hand(left + 3), meet(5, 6), meet(2, 3))
+    }
+
+    private val rot = FloatArray(9)
+    private val tmpRot = FloatArray(9)
+
+    /** rot = (about up by [twist]) * (about forward by [abduct]) * (about right by [swing]), angles in degrees. */
+    private fun rotation(swing: Float, abduct: Float, twist: Float) {
+        val a = Math.toRadians(swing.toDouble()); val ca = kotlin.math.cos(a).toFloat(); val sa = kotlin.math.sin(a).toFloat()
+        val c = Math.toRadians(abduct.toDouble()); val cc = kotlin.math.cos(c).toFloat(); val sc = kotlin.math.sin(c).toFloat()
+        val b = Math.toRadians(twist.toDouble()); val cb = kotlin.math.cos(b).toFloat(); val sb = kotlin.math.sin(b).toFloat()
+        // swing about right: f' = f cos - u sin, u' = f sin + u cos (a hanging arm swings forward)
+        r1[0] = ca; r1[1] = 0f; r1[2] = -sa; r1[3] = 0f; r1[4] = 1f; r1[5] = 0f; r1[6] = sa; r1[7] = 0f; r1[8] = ca
+        // abduct about forward: r' = r cos - u sin, u' = r sin + u cos (a hanging right arm rises out to the right)
+        r2[0] = 1f; r2[1] = 0f; r2[2] = 0f; r2[3] = 0f; r2[4] = cc; r2[5] = -sc; r2[6] = 0f; r2[7] = sc; r2[8] = cc
+        // twist about up: f' = f cos - r sin, r' = f sin + r cos
+        r3[0] = cb; r3[1] = -sb; r3[2] = 0f; r3[3] = sb; r3[4] = cb; r3[5] = 0f; r3[6] = 0f; r3[7] = 0f; r3[8] = 1f
+        mul(r2, r1, tmpRot); mul(r3, tmpRot, rot)
+    }
+
+    private val r1 = FloatArray(9); private val r2 = FloatArray(9); private val r3 = FloatArray(9)
+
+    private fun mul(a: FloatArray, b: FloatArray, out: FloatArray) {
+        for (i in 0 until 3) for (j in 0 until 3) out[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j]
+    }
+
+    /** Turns bones [from]..[to] (a limb and what hangs off it) by [rot] about the bind-pose joint [pivot] as bone [carrier] has it now. */
+    private fun turnLimb(from: Int, to: Int, pivot: FloatArray, carrier: Int) {
+        val b = bones; val o = carrier * 12
+        val px = b[o] * pivot[0] + b[o + 1] * pivot[1] + b[o + 2] * pivot[2] + b[o + 3]
+        val py = b[o + 4] * pivot[0] + b[o + 5] * pivot[1] + b[o + 6] * pivot[2] + b[o + 7]
+        val pz = b[o + 8] * pivot[0] + b[o + 9] * pivot[1] + b[o + 10] * pivot[2] + b[o + 11]
+        val r = rot
+        for (bone in from..to) {
+            val q = bone * 12
+            for (col in 0 until 4) {
+                val m0 = b[q + col]; val m1 = b[q + 4 + col]; val m2 = b[q + 8 + col]
+                var n0 = r[0] * m0 + r[1] * m1 + r[2] * m2
+                var n1 = r[3] * m0 + r[4] * m1 + r[5] * m2
+                var n2 = r[6] * m0 + r[7] * m1 + r[8] * m2
+                if (col == 3) {
+                    // the translation turns about the pivot
+                    n0 += px - (r[0] * px + r[1] * py + r[2] * pz)
+                    n1 += py - (r[3] * px + r[4] * py + r[5] * pz)
+                    n2 += pz - (r[6] * px + r[7] * py + r[8] * pz)
+                }
+                b[q + col] = n0; b[q + 4 + col] = n1; b[q + 8 + col] = n2
+            }
+        }
+    }
+
+    /**
+     * One arm ([right] or not): the upper arm swung forward [swing] degrees, out to its side [abduct] and turned [twist]
+     * about the shoulder, then the forearm bent forward [elbow] more at the elbow.
+     */
+    private fun arm(j: Joints, right: Boolean, swing: Float, abduct: Float, twist: Float, elbow: Float) {
+        val first = if (right) j.right else j.left
+        val sh = if (right) j.rShoulder else j.lShoulder
+        val el = if (right) j.rElbow else j.lElbow
+        if (first < 0) return
+        rotation(swing, if (right) abduct else -abduct, twist)
+        turnLimb(first + 1, first + 3, sh, first + 1)
+        if (elbow != 0f) {
+            rotation(elbow, 0f, 0f)
+            turnLimb(first + 2, first + 3, el, first + 2)
+        }
+    }
+
+    /** Leans the head forward [nod] degrees and turns it [turn]. */
+    private fun head(j: Joints, nod: Float, turn: Float) { rotation(nod, 0f, turn); turnLimb(6, 7, j.neck, 6) }
+
+    /** Turns everything above the waist [twist] degrees (sweeping a mop, packing a bag beside you). */
+    private fun waist(j: Joints, twist: Float, lean: Float = 0f) { rotation(lean, 0f, twist); turnLimb(3, 15, j.waist, 3) }
+
+    /** Acts [act] out on the bones just posed: the arms, head and waist moved for the job, [t] seconds into it. */
+    private fun acting(m: PeopleModels.Model, act: Int, t: Float, pose: Int) {
+        val j = jointsOf(m)
+        fun wave(rate: Float, ph: Float = 0f) = sin(t * rate + ph)
+        when (act) {
+            Act.TILL -> {
+                // both hands on the counter; every few seconds a burst of typing on the till
+                val typing = (t % 5f) < 2f
+                val tap = if (typing) wave(17f) * 5f else 0f
+                arm(j, true, 32f, 6f, -14f, 50f + tap)
+                arm(j, false, 26f, 6f, 10f, 48f - tap * .6f)
+                head(j, 14f, if (typing) -8f else wave(.6f) * 18f)
+            }
+            Act.SCAN -> {
+                // the right hand sweeps each item across the scanner, the left steadies the next
+                arm(j, true, 38f, 4f, wave(7f) * 26f, 42f)
+                arm(j, false, 30f, 8f, 12f, 44f)
+                head(j, 18f, wave(7f) * 8f)
+            }
+            Act.BAG -> {
+                waist(j, 22f)
+                arm(j, true, 34f + wave(5f) * 14f, 4f, 0f, 36f)
+                arm(j, false, 30f + wave(5f, 1.6f) * 12f, 4f, 0f, 40f)
+                head(j, 22f, 10f)
+            }
+            Act.GIVE -> {
+                arm(j, true, 68f, 2f, -6f, 12f)
+                arm(j, false, 22f, 4f, 0f, 30f)
+            }
+            Act.PLACE -> {
+                arm(j, true, 48f, 2f, -4f, 30f)
+                head(j, 18f, 0f)
+            }
+            Act.CARD -> {
+                arm(j, true, 52f, 0f, -10f, 26f + wave(9f) * 3f)
+                head(j, 16f, -6f)
+            }
+            Act.TYPE -> {
+                // fingers on the keys: the forearms forward, tapping by turns
+                val seated = pose == Pose.SIT
+                arm(j, true, if (seated) 10f else 30f, 4f, -10f, (if (seated) 28f else 52f) + wave(15f) * 4f)
+                arm(j, false, if (seated) 10f else 28f, 4f, 10f, (if (seated) 28f else 50f) + wave(15f, 2f) * 4f)
+                head(j, 10f, wave(.4f) * 6f)
+            }
+            Act.MOP -> {
+                // both hands down the handle, sweeping side to side from the waist
+                waist(j, wave(2.4f) * 24f, 12f)
+                arm(j, true, 40f, 6f, -10f, 22f)
+                arm(j, false, 30f, 10f, 14f, 40f)
+                head(j, 20f, 0f)
+            }
+            Act.DJ -> {
+                // one hand pressing the headphones on, the other scratching; nodding to the beat
+                arm(j, false, 20f, 62f, 0f, 118f)
+                arm(j, true, 34f, 8f, wave(10f) * 12f, 50f)
+                head(j, 10f + wave(8f) * 9f, -6f)
+            }
+            Act.HAIR -> {
+                // scissors snipping at head height over the seated client, a comb in the other hand
+                arm(j, true, 72f + wave(1.3f) * 6f, 6f, -8f, 40f + wave(14f) * 4f)
+                arm(j, false, 62f, 10f, 12f, 52f)
+                head(j, 18f, wave(.5f) * 10f)
+            }
+            Act.COACH -> {
+                // clipboard held up in the left hand; the right points out now and then
+                arm(j, false, 38f, 8f, 18f, 66f)
+                val point = (sin(t * 1.4f)).coerceAtLeast(0f)
+                arm(j, true, 20f + point * 58f, 4f, -6f, 26f - point * 18f)
+                head(j, 6f, wave(.7f) * 14f)
+            }
+            Act.PERFORM -> {
+                arm(j, true, 24f, 100f + wave(1.7f) * 30f, 0f, 20f)
+                arm(j, false, 50f + wave(1.3f, 1f) * 25f, 20f, 0f, 30f)
+                head(j, -8f + wave(1.1f) * 10f, wave(.8f) * 20f)
+            }
+            Act.STOCK, Act.TIDY -> {
+                // out of the box at their feet (or along the display) and onto the shelf, a hand at a time
+                val k = (wave(3f) + 1f) * .5f
+                waist(j, 0f, 10f * (1f - k))
+                arm(j, true, 30f + k * 50f, 4f, -6f, 30f - k * 10f)
+                arm(j, false, 30f + (1f - k) * 40f, 4f, 6f, 34f)
+                head(j, 8f - k * 14f, 0f)
+            }
+            Act.REACH -> {
+                arm(j, true, 82f, 6f, -4f, 10f)
+                head(j, -10f, 0f)
+            }
+            Act.EAT -> {
+                // a bite or a sip every few seconds: the hand up to the mouth
+                val c = t % 4.5f
+                val up = if (c < 1.4f) sin(c / 1.4f * Math.PI.toFloat()) else 0f
+                arm(j, true, 16f + up * 22f, 8f, -16f * up, 40f + up * 75f)
+                arm(j, false, 14f, 6f, 8f, 40f)
+                head(j, 12f - up * 8f, 0f)
+            }
+            Act.PRESS -> {
+                // lying-down bench press as seated: the bar pushed up and lowered
+                val k = (wave(2.2f) + 1f) * .5f
+                arm(j, true, 70f + k * 45f, 14f, 0f, 80f - k * 70f)
+                arm(j, false, 70f + k * 45f, 14f, 0f, 80f - k * 70f)
+            }
+            Act.CURL -> {
+                val k = (wave(2.6f) + 1f) * .5f
+                val l = (wave(2.6f, Math.PI.toFloat()) + 1f) * .5f
+                arm(j, true, 8f, 6f, 0f, 10f + k * 115f)
+                arm(j, false, 8f, 6f, 0f, 10f + l * 115f)
+                head(j, 6f, 0f)
+            }
+            Act.PUNCH -> {
+                // a jab with each hand by turns, the guard up in between
+                val c = (t * 2.2f) % 2f
+                val r = if (c < 1f) sin(c * Math.PI.toFloat()) else 0f
+                val l = if (c >= 1f) sin((c - 1f) * Math.PI.toFloat()) else 0f
+                arm(j, true, 60f + r * 30f, 6f, -10f, 100f - r * 95f)
+                arm(j, false, 60f + l * 30f, 6f, 10f, 100f - l * 95f)
+                waist(j, (r - l) * 14f)
+            }
+            Act.ROW -> {
+                val k = (wave(2f) + 1f) * .5f
+                waist(j, 0f, 10f - k * 22f)
+                arm(j, true, 72f - k * 40f, 6f, 0f, 10f + k * 70f)
+                arm(j, false, 72f - k * 40f, 6f, 0f, 10f + k * 70f)
+            }
+        }
+    }
+
+    /** Tests: the posed extent (min and max forward, right, up) of model [index] acting out [act] at [t] seconds. */
+    internal fun debugExtent(index: Int, act: Int, t: Float, pose: Int = Pose.STAND): FloatArray {
+        val m = PeopleModels.models[index]
+        when (pose) {
+            Pose.SIT -> PeopleModels.pose(m.rig, "Sit", 0f, "Sit", 0f, 0f, bones)
+            else -> PeopleModels.pose(m.rig, "Idle", 0f, "Idle", 0f, 0f, bones)
+        }
+        if (act != Act.NONE) acting(m, act, t, pose)
+        val out = floatArrayOf(9f, 9f, 9f, -9f, -9f, -9f)
+        val p = m.pos; val b = bones
+        for (v in 0 until m.vertices) {
+            val px = p[v * 3]; val py = p[v * 3 + 1]; val pz = p[v * 3 + 2]
+            val a = (m.b0[v].toInt() and 255) * 12; val c = (m.b1[v].toInt() and 255) * 12
+            val w = m.w[v]; val u = 1 - w
+            val q = floatArrayOf(
+                (b[a] * px + b[a + 1] * py + b[a + 2] * pz + b[a + 3]) * w + (b[c] * px + b[c + 1] * py + b[c + 2] * pz + b[c + 3]) * u,
+                (b[a + 4] * px + b[a + 5] * py + b[a + 6] * pz + b[a + 7]) * w + (b[c + 4] * px + b[c + 5] * py + b[c + 6] * pz + b[c + 7]) * u,
+                (b[a + 8] * px + b[a + 9] * py + b[a + 10] * pz + b[a + 11]) * w + (b[c + 8] * px + b[c + 9] * py + b[c + 10] * pz + b[c + 11]) * u)
+            for (k in 0 until 3) { out[k] = minOf(out[k], q[k]); out[k + 3] = maxOf(out[k + 3], q[k]) }
+        }
+        return out
+    }
+
+    /** Tests: the joints worked out for model [index]. */
+    internal fun debugJoints(index: Int): String = jointsOf(PeopleModels.models[index]).let { j ->
+        "right ${j.right} left ${j.left} rShoulder ${j.rShoulder.joinToString { "%.2f".format(it) }} rElbow ${j.rElbow.joinToString { "%.2f".format(it) }} " +
+            "lShoulder ${j.lShoulder.joinToString { "%.2f".format(it) }} neck ${j.neck.joinToString { "%.2f".format(it) }} waist ${j.waist.joinToString { "%.2f".format(it) }}"
+    }
+
+    /** The left hand, after the last [draw] (for what it holds). */
+    var lHandX = 0f; var lHandY = 0f; var lHandZ = 0f
+        private set
+
+    private val sx = FloatArray(4); private val sy = FloatArray(4); private val sz = FloatArray(4)
+
+    /** A thin pole between two points (a mop handle), [w] thick. */
+    private fun stick(x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float, w: Float, color: Int) {
+        val dx = x1 - x0; val dy = y1 - y0
+        val l = kotlin.math.sqrt(dx * dx + dy * dy).coerceAtLeast(1e-4f)
+        val px = -dy / l * w; val py = dx / l * w
+        for (k in 0 until 2) {
+            val ox = if (k == 0) px else 0f; val oy = if (k == 0) py else 0f; val oz = if (k == 0) 0f else w
+            sx[0] = x0 - ox; sy[0] = y0 - oy; sz[0] = z0 - oz
+            sx[1] = x0 + ox; sy[1] = y0 + oy; sz[1] = z0 + oz
+            sx[2] = x1 + ox; sy[2] = y1 + oy; sz[2] = z1 + oz
+            sx[3] = x1 - ox; sy[3] = y1 - oy; sz[3] = z1 - oz
+            scene.poly(4, sx, sy, sz, color)
+        }
+    }
+
+    private fun cube(x: Float, y: Float, z: Float, hx: Float, hy: Float, hz: Float, color: Int, top: Int = color) =
+        scene.box(x - hx, y - hy, z - hz, x + hx, y + hy, z + hz, top, color)
+
+    /** What the hands hold for [act]: a mop, scissors and a comb, a clipboard, a cup, dumbbells. */
+    private fun props(act: Int, t: Float, x: Float, y: Float, z: Float, heading: Float, s: Float) {
+        val fx = sin(heading); val fy = -cos(heading)
+        when (act) {
+            Act.MOP -> {
+                // the handle from the right hand down to the mop head on the floor ahead, swept with the body
+                val sw = sin(t * 2.4f) * .35f * s
+                val hx = x + fx * .62f * s - fy * sw; val hy = y + fy * .62f * s + fx * sw
+                stick(handX, handY, handZ + .05f, hx, hy, z + .06f, .016f * s, c(0xFFB07A52))
+                scene.box(hx - .17f * s, hy - .17f * s, z, hx + .17f * s, hy + .17f * s, z + .06f * s, c(0xFFE8E4D8), c(0xFFD0CBBE))
+            }
+            Act.HAIR -> {
+                cube(handX, handY, handZ + .02f, .012f, .012f, .05f, c(0xFFD9DEE4))
+                cube(lHandX, lHandY, lHandZ + .02f, .008f, .008f, .06f, c(0xFF2A2D31))
+            }
+            Act.COACH -> cube(lHandX, lHandY, lHandZ + .1f, .1f * s, .1f * s, .13f * s, c(0xFFB07A52), c(0xFFF4F1EA))
+            Act.EAT -> cube(handX, handY, handZ + .03f, .035f, .035f, .05f, c(0xFFF4F1EA), c(0xFF5D3A1A))
+            Act.CURL -> {
+                cube(handX, handY, handZ, .05f, .05f, .05f, c(0xFF2A2D31))
+                cube(lHandX, lHandY, lHandZ, .05f, .05f, .05f, c(0xFF2A2D31))
+            }
+            Act.PRESS -> stick(handX, handY, handZ, lHandX, lHandY, lHandZ, .02f, c(0xFFB8C0CA))
+            Act.ROW -> stick(handX, handY, handZ, lHandX, lHandY, lHandZ, .018f, c(0xFF2A2D31))
+            Act.STOCK -> {
+                // the open box at their feet, off to the side
+                val bx = x + fx * .3f * s + fy * .38f * s; val by = y + fy * .3f * s - fx * .38f * s
+                scene.box(bx - .2f * s, by - .16f * s, z, bx + .2f * s, by + .16f * s, z + .3f * s, CARD_DARK, CARD)
             }
         }
     }

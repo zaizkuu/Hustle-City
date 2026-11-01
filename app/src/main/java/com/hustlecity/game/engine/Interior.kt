@@ -15,6 +15,21 @@ import kotlin.math.sqrt
 
 enum class InteriorMode { BUSINESS, HOME, PLACE, RIVAL, EMPTY }
 
+/** Staff jobs at their posts, as [Person.job] says. */
+object Job {
+    const val NONE = 0
+    const val TILL = 1
+    const val CLEAN = 2
+    const val STOCK = 3
+    const val DJ = 4
+    const val DESK = 5
+    const val HAIR = 6
+    const val TRAIN = 7
+    const val STAGE = 8
+    const val PROJECT = 9
+    const val FLOOR = 10
+}
+
 class Person(var x: Float, var y: Float, var shirt: Int, var skin: Int) {
     /** Waypoints (tile indices) of the current walk, already smoothed into straight runs. */
     var path: IntArray = IntArray(0)
@@ -56,6 +71,10 @@ class Person(var x: Float, var y: Float, var shirt: Int, var skin: Int) {
     var heldIn = 0f
     /** True once they've paid: the goods go into a paper bag. */
     var bagged = false
+    /** What a staff member is doing at their post ([Job]), for the renderer to act out. */
+    var job = 0
+    /** Debugging and screenshots: the action to show instead of the one the renderer would pick (-1 for none). */
+    internal var showAct = -1
     /** How long paying at the till takes this customer (seconds; 0 when not at a till): their goods go on the counter, are
      *  scanned, they tap a card and take the bag, timed by [wait] running down from this. */
     var payTime = 0f
@@ -541,6 +560,9 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     val longestQueue get() = queues.values.maxOfOrNull { it.size } ?: 0
 
     /** What kind of place this is, for customer routines. */
+    /** The kind of business on show here (a café, a gym...), or null for a home or an empty unit. */
+    val businessType: String? get() = typeId
+
     private val typeId: String? = when (mode) {
         InteriorMode.BUSINESS -> business?.typeId
         InteriorMode.RIVAL -> e.state.rivalBusinessAt(building.id)?.typeId
@@ -975,8 +997,11 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         return SeatPos(idx(floor(wx).toInt(), floor(wy).toInt()), wx, wy, .45f, kotlin.math.atan2(vx, -vy), 1)
     }
 
+    private val jobs = HashMap<Int, Int>()
+
     private fun updateStaff(dt: Float, occ: BooleanArray) {
         val s = e.state
+        jobs.clear()
         val posts = LinkedHashMap<Int, Post>()
         val looks = HashMap<Int, Pair<Int, Int>>()
         when (mode) {
@@ -986,6 +1011,8 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 val counters = counters()
                 var regIdx = 0
                 var desk = 0
+                var chairIdx = 0
+                val chairs = itemsWith("hair_chair")
                 val desks = itemsWith("desk").map { it.index }
                 val working = s.employees.filter { it.businessId == b.id && it.worksAt(s.hour, s.weekday) }
                 for ((n, emp) in working.withIndex()) {
@@ -999,6 +1026,9 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                             if (cur != null && cur >= 0 && t > 0f) Post(cur)
                             else (e.economy.dirt.dirtiest(b, 6).randomOrNull(e.rnd) ?: cleanerRest(occFull) ?: freeTile(occFull, e.rnd.nextInt(w * d))).let { staffTimer[emp.id] = 4f; Post(it) }
                         }
+                        // a stylist stands behind their own chair, at the client's back
+                        StaffRole.HAIRSTYLIST -> chairs.getOrNull(chairIdx++)?.let { (ci, ch) -> frontTiles(ch, occFull).firstOrNull()?.let { Post(it, ci) } }
+                            ?: browseTargets().getOrNull(n)?.let { it2 -> items.indexOf(it2).let { ii -> frontTiles(it2, occFull).lastOrNull()?.let { Post(it, ii) } } }
                         StaffRole.DJ -> behind(itemsWith("dj_booth").firstOrNull()?.index)
                         StaffRole.ACTOR -> itemsWith("stage").firstOrNull()?.let { st -> frontTiles(st.value, occFull).getOrNull(n % 4)?.let { Post(it, -1) } }
                         StaffRole.PROJECTIONIST -> behind(itemsWith("screen").firstOrNull()?.index)
@@ -1009,6 +1039,20 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                     // someone bringing a box of stock goes to the box, then to the display
                     val p = runs[emp.id]?.let { r -> if (r.stage <= 1) Post(r.from) else Post(r.to, r.display) } ?: base
                     posts[emp.id] = p
+                    jobs[emp.id] = when {
+                        runs[emp.id]?.stage == 3 -> Job.STOCK
+                        runs.containsKey(emp.id) -> Job.NONE
+                        emp.role == StaffRole.CUSTOMER_SERVICE && post?.face != null && post.face in counters -> Job.TILL
+                        emp.role == StaffRole.CLEANER -> if ((b.dirt.getOrNull(p.tile) ?: 0f) > 2f) Job.CLEAN else Job.NONE
+                        emp.role == StaffRole.DJ && post != null -> Job.DJ
+                        emp.role == StaffRole.ACTOR && post != null -> Job.STAGE
+                        emp.role == StaffRole.PROJECTIONIST && post != null -> Job.PROJECT
+                        b.type.office && post?.seat != null -> Job.DESK
+                        emp.role == StaffRole.HAIRSTYLIST -> Job.HAIR
+                        emp.role == StaffRole.GYM_TRAINER -> Job.TRAIN
+                        post != null -> Job.FLOOR
+                        else -> Job.NONE
+                    }
                     looks[emp.id] = SHIRT_COLORS[emp.id % SHIRT_COLORS.size] to SKIN_TONES[emp.id % SKIN_TONES.size]
                     if (emp.role == StaffRole.CLEANER && dt > 0f) {
                         val person = staffById[emp.id]
@@ -1023,7 +1067,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             InteriorMode.RIVAL, InteriorMode.PLACE -> {
                 val occFull = occupancy()
                 counters().firstOrNull()?.let { ci ->
-                    items.getOrNull(ci)?.let { reg -> frontTiles(reg, occFull, true).firstOrNull()?.let { t -> posts[-1] = Post(t, ci); looks[-1] = c(0xFF2C3E50) to SKIN_TONES[building.id % SKIN_TONES.size] } }
+                    items.getOrNull(ci)?.let { reg -> frontTiles(reg, occFull, true).firstOrNull()?.let { t -> posts[-1] = Post(t, ci); jobs[-1] = Job.TILL; looks[-1] = c(0xFF2C3E50) to SKIN_TONES[building.id % SKIN_TONES.size] } }
                 }
             }
             else -> {}
@@ -1046,6 +1090,8 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 p.pose = 0; p.z = 0f; p.seated = false
                 goTo(p, post.tile, occ)
             }
+            // at work once they're at their post
+            p.job = if (p.pathIdx >= p.path.size) jobs[key] ?: Job.NONE else Job.NONE
             if (dt > 0f && p.pathIdx < p.path.size) {
                 val t = p.path[p.pathIdx]
                 if (moveToward(t % w + .5f, t / w + .5f, p.speed * dt, false, p)) p.pathIdx++

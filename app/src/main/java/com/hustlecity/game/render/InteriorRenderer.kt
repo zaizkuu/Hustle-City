@@ -11,6 +11,8 @@ import com.hustlecity.game.engine.SHIRT_COLORS
 import com.hustlecity.game.engine.SKIN_TONES
 import com.hustlecity.game.engine.ShelfStock
 import com.hustlecity.game.engine.itemDims
+import com.hustlecity.game.engine.Job
+import com.hustlecity.game.data.ItemFn
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -35,6 +37,8 @@ class InteriorRenderer(private val e: GameEngine) {
     private val px = FloatArray(10); private val py = FloatArray(10); private val pz = FloatArray(10)
 
     companion object {
+        /** Businesses whose seated customers are eating or drinking. */
+        private val EATERIES = setOf("coffee", "fastfood", "nightclub")
         val BG = c(0xFF16181D)
         val WALL_TOP = c(0xFF1E2024)
         const val WALL_H = 3f
@@ -506,13 +510,69 @@ class InteriorRenderer(private val e: GameEngine) {
         // paper bag after paying
         val pay = if (staff) -1f else payProgress(v)
         val held = if (!staff && v.heldIn <= 0f && !v.bagged && (pay < 0f || pay < .12f)) v.held else 0
-        // reaching across the counter: the customer to put the goods down, tap the card and take the bag; the
-        // cashier to scan and hand the bag over
-        val reach = if (staff) sc.visitors.any { c -> c.counter >= 0 && c.counter == v.item && payProgress(c).let { t -> t in .22f..(.62f) || t in .8f..(.96f) } }
-            else pay in .04f..(.24f) || pay in .55f..(.78f) || pay >= .86f
+        val act = if (v.showAct >= 0) v.showAct else if (staff) staffAct(sc, v) else customerAct(sc, v, pay)
+        // each person's own clock, so a row of them don't move in step
+        val t = e.realTime + (v.shirt * 7 + v.skin * 13 + v.hair * 3 and 63) * .37f
+        // a stocker unpacking has put the box down by the shelf
+        val carry = if (act == Act.STOCK) 0 else v.carry
         people.draw(v.x, v.y, v.z, v.heading, v.phase, v.moving, v.shirt, PersonPainter.PANTS[v.pants % PersonPainter.PANTS.size], v.skin,
             PersonPainter.HAIR[v.hair % PersonPainter.HAIR.size], pose = v.pose, apron = if (staff) c(0xFF2C3E50) else 0,
-            carry = v.carry, load = if (v.carry > 0) 1 else 0, held = held, bag = !staff && v.bagged, reach = reach && v.carry == 0)
+            carry = carry, load = if (carry > 0) 1 else 0, held = held, bag = !staff && v.bagged, act = act, actT = t)
+    }
+
+    /** What a staff member at their post is doing with their hands. */
+    private fun staffAct(sc: InteriorScene, v: com.hustlecity.game.engine.Person): Int {
+        if (v.moving > .2f) return Act.NONE
+        return when (v.job) {
+            Job.TILL -> {
+                // in time with the customer at this till: scan their goods, bag them, hand the bag over
+                var a = Act.TILL
+                for (c in sc.visitors) {
+                    if (c.counter < 0 || c.counter != v.item) continue
+                    val t = payProgress(c)
+                    a = when { t < 0f -> continue; t < .22f -> Act.TILL; t < .62f -> Act.SCAN; t < .82f -> Act.BAG; t < .98f -> Act.GIVE; else -> Act.TILL }
+                    break
+                }
+                a
+            }
+            Job.CLEAN -> Act.MOP
+            Job.STOCK -> Act.STOCK
+            Job.DJ -> Act.DJ
+            Job.DESK -> Act.TYPE
+            Job.PROJECT -> Act.TYPE
+            Job.STAGE -> Act.PERFORM
+            Job.TRAIN -> Act.COACH
+            // cutting when someone's in the chair in front of them
+            Job.HAIR -> if (sc.visitors.any { it.seated && kotlin.math.hypot(it.x - v.x, it.y - v.y) < 1.7f }) Act.HAIR else Act.NONE
+            // straightening the displays now and then
+            Job.FLOOR -> if ((e.realTime + v.shirt) % 9f < 3.5f) Act.TIDY else Act.NONE
+            else -> Act.NONE
+        }
+    }
+
+    /** What a customer is doing with their hands: taking something off a shelf, paying, eating, working out. */
+    private fun customerAct(sc: InteriorScene, v: com.hustlecity.game.engine.Person, pay: Float): Int {
+        if (pay >= 0f) return when {
+            pay in .04f..(.24f) -> if (v.held != 0) Act.PLACE else Act.NONE
+            pay in .55f..(.78f) -> Act.CARD
+            pay >= .86f -> Act.GIVE
+            else -> Act.NONE
+        }
+        if (v.moving > .2f) return Act.NONE
+        sc.shelf?.let { sh -> for (k in sh.takes.indices) if (sh.takes[k].person === v) return Act.REACH }
+        val item = sc.items.getOrNull(v.item)?.let { Catalog.item(it.itemId) }
+        if (v.seated) return when {
+            item?.id == "workout_bench" -> Act.PRESS
+            item?.id == "rowing_machine" -> Act.ROW
+            item?.fn == ItemFn.SEATING && sc.businessType in EATERIES -> Act.EAT
+            else -> Act.NONE
+        }
+        if (v.wait > 0f) return when (item?.id) {
+            "weight_rack" -> Act.CURL
+            "boxing_bag" -> Act.PUNCH
+            else -> Act.NONE
+        }
+        return Act.NONE
     }
 
     private val tillTop = FloatArray(3)
