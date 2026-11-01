@@ -1390,7 +1390,7 @@ class CinematicTest {
         listOf(StaffRole.HAIRSTYLIST, StaffRole.HAIRSTYLIST, StaffRole.CUSTOMER_SERVICE), rate) { room, w, d ->
         listOf(PlacedItem("checkout_counter", 1, room + 1, 0), PlacedItem("cash_register", 1, room + 1, 0),
             PlacedItem("hair_chair", 3, room + 5, 0), PlacedItem("hair_chair", 5, room + 5, 0), PlacedItem("hair_chair", 7, room + 5, 0),
-            PlacedItem("hair_wash", 9, room + 5, 0), PlacedItem("sofa", 5, room + 1, 2), PlacedItem("waiting_chairs", 7, room + 1, 2),
+            PlacedItem("hair_wash", 9, room + 5, 0), PlacedItem("sofa", 5, room + 1, 0), PlacedItem("waiting_chairs", 7, room + 1, 0),
             PlacedItem("plant_large", w - 1, d - 1, 0), PlacedItem("plant_large", 0, d - 1, 0))
     }
 
@@ -1565,8 +1565,10 @@ class CinematicTest {
     fun l21() {
         if (!on("l21")) { assumeTrue(false); return }
         val e = engine("nyc", 11f)
-        salon(e, 420.0)
-        closeUp(e, "l21_waiting", 2.6f, dist = 5.4f, pitch = 30f, turn = .4f + PI.toFloat(), warm = 50f) { s -> s.visitors.firstOrNull { it.stage == InteriorScene.WAIT_STAGE && it.seated } }
+        val sc = salon(e, 420.0)
+        val room = e.state.businessAt(sc.building.id)!!.backRoom.coerceAtLeast(0)
+        // the sofa and chairs along the back face into the salon: the camera stands out in the room, looking back at them
+        inside(e, "l21_waiting", 2.6f, { u -> floatArrayOf(7f + .4f * u, room + 1.8f, 5.6f - .5f * u, .4f - .15f * u, 30f) }, warm = 50f)
     }
 
     /** On the till: scan, bag, pay. */
@@ -1680,9 +1682,8 @@ class CinematicTest {
         val biz = e.state.businessAt(sc.building.id)!!
         // a spill by the checkout: six tiles, enough that the mop stays on them the whole shot
         biz.dirt = MutableList(sc.w * sc.d) { k -> if (k / sc.w in sc.d - 4..sc.d - 3 && k % sc.w in sc.w / 2 - 2..sc.w / 2) 30f else 0f }
-        closeUp(e, "l28_mop", 2.6f, turn = .8f, warm = 8f) { s ->
-            s.staff.firstOrNull { it.job == Job.CLEAN } ?: s.staff.firstOrNull { e.state.employees.any { m -> m.role == StaffRole.CLEANER } && it.job != Job.TILL }
-        }
+        // from the front of the shop, looking down over the spill as the cleaner works across it
+        inside(e, "l28_mop", 2.6f, { u -> floatArrayOf(sc.w / 2f - .5f + .4f * u, sc.d - 3.2f, 6.2f - .6f * u, .3f - .15f * u, 40f) }, warm = 8f)
     }
 
     /** Restocking the shelves from the back. */
@@ -1707,8 +1708,7 @@ class CinematicTest {
     fun l30() {
         if (!on("l30")) { assumeTrue(false); return }
         val e = engine("seoul", 12.8f)
-        thin(e, 5f)
-        cartShot(e, "l30_seoul_lunch", 2.6f, 700f, 480f, nth = 2, dist = 11f, pitch = 21f)
+        cartShot(e, "l30_seoul_lunch", 2.6f, 700f, 480f, nth = 0, dist = 7f, pitch = 16f)
     }
 
     /** On stage. */
