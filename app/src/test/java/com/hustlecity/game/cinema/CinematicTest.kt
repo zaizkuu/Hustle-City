@@ -1920,12 +1920,12 @@ class CinematicTest {
         }
     }
 
-    /** The finale: up and away over Shinjuku at night. */
+    /** The finale: up and away over Shinjuku at night, high over the towers from the start. */
     @Test
     fun l56() {
         if (!on("l56")) { assumeTrue(false); return }
         val e = engine("tokyo", 21.3f)
-        fly(e, "l56_finale", 5f, listOf(Key(330f, 470f, 345f, -1.2f, 15f), Key(318f, 470f, 395f, -1.1f, 19f), Key(305f, 470f, 455f, -1.0f, 24f)),
+        fly(e, "l56_finale", 5f, listOf(Key(330f, 470f, 300f, -1.2f, 32f), Key(320f, 470f, 380f, -1.1f, 27f), Key(305f, 470f, 470f, -1.0f, 23f)),
             easing = .5f, haze = .4f) { _, _ -> clearWeather(e) }
     }
 }

@@ -157,7 +157,7 @@ CAPTIONS = [(40, 44, 'GRAB A BITE.'), (48, 52, 'CUT HAIR.'), (52, 54, 'KEEP THEM
             (72, 74, 'EAT ON THE STREET.'), (74, 76, 'PUT ON A SHOW.'), (76, 80, 'BUILD YOUR EMPIRE.'),
             (100, 104, 'RUN THE NIGHT.'), (108, 112, 'OWN THE STREETS.'), (116, 118, 'WORK THE LATE SHIFT.')]
 # centred lines: (from, to, text)
-STATEMENTS = [(80.5, 87.6, 'WHEN THE SUN GOES DOWN'), (145, 151.6, 'FIVE CITIES.  ONE HUSTLE.')]
+STATEMENTS = [(80.5, 87.6, 'WHEN THE SUN GOES DOWN'), (145, 151.6, 'WHAT WILL YOU BUILD?')]
 TITLE = (BREAK1, CHORUS)
 
 # flashes of white on the big entrances, a beat of zoom on every bar of the chorus and the night
