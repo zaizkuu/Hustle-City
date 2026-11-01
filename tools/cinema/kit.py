@@ -89,13 +89,14 @@ _cache = {}
 
 
 def src(shot, i):
-    """Rendered frame [i] of a shot, or the nearest one rendered (a cut may render only the frames it uses)."""
+    """Rendered frame [i] of a shot (PNG, or JPG to save disk), or the nearest one rendered (a cut may render only the
+    frames it uses)."""
     d = os.path.join(_dirs['frames'], shot)
-    if shot not in _cache: _cache[shot] = sorted(int(n[:-4]) for n in os.listdir(d) if n.endswith('.png'))
-    nums = _cache[shot]
-    k = bisect.bisect_left(nums, i)
-    if k == len(nums) or (k > 0 and i - nums[k - 1] < nums[k] - i): k -= 1
-    return Image.open(os.path.join(d, f'{nums[k]:04d}.png'))
+    if shot not in _cache: _cache[shot] = sorted((int(n[:-4]), n) for n in os.listdir(d) if n.endswith(('.png', '.jpg')))
+    frames = _cache[shot]
+    k = bisect.bisect_left(frames, (i, ''))
+    if k == len(frames) or (k > 0 and i - frames[k - 1][0] < frames[k][0] - i): k -= 1
+    return Image.open(os.path.join(d, frames[k][1]))
 
 
 _ov = {}

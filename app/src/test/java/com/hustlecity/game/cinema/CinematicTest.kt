@@ -8,7 +8,12 @@ import com.hustlecity.game.engine.BizCalc
 import com.hustlecity.game.engine.GameEngine
 import com.hustlecity.game.engine.InteriorMode
 import com.hustlecity.game.engine.InteriorScene
+import com.hustlecity.game.engine.Job
+import com.hustlecity.game.engine.Person
+import com.hustlecity.game.engine.StreetFood
+import com.hustlecity.game.engine.buyStreetFood
 import com.hustlecity.game.engine.startBusiness
+import com.hustlecity.game.engine.toggleWork
 import com.hustlecity.game.model.Employee
 import com.hustlecity.game.model.OwnedVehicle
 import com.hustlecity.game.model.PlacedItem
@@ -26,12 +31,6 @@ import com.hustlecity.game.world.Building
 import com.hustlecity.game.world.RoadClass
 import com.hustlecity.game.world.RoadHit
 import com.hustlecity.game.world.Traffic
-import org.junit.Assume.assumeTrue
-import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
-import org.robolectric.annotation.GraphicsMode
 import java.io.File
 import kotlin.math.PI
 import kotlin.math.abs
@@ -39,6 +38,12 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
+import org.junit.Assume.assumeTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 /** A camera keyframe: target, distance, yaw and pitch (degrees above the ground). */
 class Key(val x: Float, val y: Float, val dist: Float, val yaw: Float, val pitch: Float)
@@ -260,14 +265,16 @@ class CinematicTest {
     }
 
     /** An interior shot: the room's own life running, the camera at [target] (tiles), [dist], yaw and pitch over time. */
-    private fun inside(e: GameEngine, name: String, seconds: Float, cam: (Float) -> FloatArray, warm: Float = 12f) {
+    private fun inside(e: GameEngine, name: String, seconds: Float, cam: (Float) -> FloatArray, warm: Float = 12f, each: (Int) -> Unit = {}) {
         val sc = e.interior!!
         val out = Out(name)
         val r = InteriorRenderer(e)
         val frames = (seconds * fps).toInt()
-        repeat((warm * fps).toInt()) { sc.update(1f / fps, true) }
+        val w0 = (warm * fps).toInt()
+        repeat(w0) { k -> each(k - w0); sc.update(1f / fps, true) }
         for (f in 0 until frames) {
             val u = ease(f / (frames - 1f).coerceAtLeast(1f), .6f)
+            each(f)
             sc.update(1f / fps, true)
             val c = cam(u)
             r.cinemaTarget = floatArrayOf(c[0], c[1], c[2])
@@ -1264,5 +1271,661 @@ class CinematicTest {
             // low at first, Alex on the left third against the skyline; then up and away over the river
             Key(spot[0] + wx * lerp(7f, 135f, k), spot[1] + wy * lerp(7f, 135f, k), lerp(12f, 145f, k), west + lerp(.25f, .03f, k), lerp(6f, 10f, k))
         }
+    }
+
+    // ------------------------------------------------------------------ the life trailer (l01 .. l56, tools/cinema/life.py)
+
+    /** Where the camera of [k] stands: x, y and height. */
+    private fun camAt(k: Key): FloatArray {
+        val p = Math.toRadians(k.pitch.toDouble()).toFloat()
+        val hd = k.dist * cos(p)
+        return floatArrayOf(k.x + sin(k.yaw) * hd, k.y + cos(k.yaw) * hd, k.dist * sin(p))
+    }
+
+    /** True when the camera of [k] stands [margin] meters or more clear of every building it is below the top of. */
+    private fun clear(e: GameEngine, k: Key, margin: Float = 1.6f): Boolean {
+        val c = camAt(k)
+        var ok = true
+        e.city.forBuildingsIn(c[0] - margin - 1f, c[1] - margin - 1f, c[0] + margin + 1f, c[1] + margin + 1f) { b ->
+            if (b.height > 0f && c[2] < b.height + 1.5f)
+                for (dx in floatArrayOf(-margin, 0f, margin)) for (dy in floatArrayOf(-margin, 0f, margin)) if (b.contains(c[0] + dx, c[1] + dy)) ok = false
+        }
+        return ok
+    }
+
+    /** Fewer people on the streets, for shots down among them: the trailer's usual crowds stand in rows at eye level. */
+    private fun thin(e: GameEngine, k: Float = 3f) { e.settings.crowds = k; e.traffic.ensure(e.settings.carCount, e.settings.pedCount) }
+
+    /** True when nothing tall (a tree, a lamp, a pole, a shelter) stands between the camera of [k] and its target. */
+    private fun sightClear(e: GameEngine, k: Key): Boolean {
+        val c = camAt(k)
+        val dx = k.x - c[0]; val dy = k.y - c[1]
+        val l2 = (dx * dx + dy * dy).coerceAtLeast(1e-4f)
+        fun off(px: Float, py: Float, upTo: Float): Float {
+            val t = (((px - c[0]) * dx + (py - c[1]) * dy) / l2).coerceIn(0f, upTo)
+            return hypot(c[0] + dx * t - px, c[1] + dy * t - py)
+        }
+        if (e.city.trees.any { abs(it.x - c[0]) < 40f && abs(it.y - c[1]) < 40f && off(it.x, it.y, .85f) < it.r + .7f }) return false
+        val pr = e.props
+        for (i in 0 until pr.count) {
+            val kd = pr.kind[i]
+            if (kd != StreetProps.LAMP && kd != StreetProps.UTIL_POLE && kd != StreetProps.BUS_STOP && kd != StreetProps.NEWS &&
+                kd != StreetProps.MAILBOX && kd != StreetProps.VENDING && kd != StreetProps.PLANTER) continue
+            if (abs(pr.x[i] - c[0]) > 30f || abs(pr.y[i] - c[1]) > 30f) continue
+            if (off(pr.x[i], pr.y[i], .8f) < .9f) return false
+        }
+        return true
+    }
+
+    /** The street food carts nearest (x, y), nearest first, as indices into the engine's props. */
+    private fun cartsNear(e: GameEngine, x: Float, y: Float): List<Int> {
+        val pr = e.props
+        return (0 until pr.count).filter { pr.kind[it] == StreetProps.VENDOR }.sortedBy { hypot(pr.x[it] - x, pr.y[it] - y) }.take(12)
+    }
+
+    private fun cartNear(e: GameEngine, x: Float, y: Float, skip: Int = 0) = cartsNear(e, x, y)[skip]
+
+    /** The camera keys of a three-quarter view of cart [i] from along the pavement, in from its side by [a] radians. */
+    private fun cartKeys(e: GameEngine, i: Int, side: Float, a: Float, dist: Float, pitch: Float): List<Key> {
+        val pr = e.props
+        val dx = pr.dirX[i]; val dy = pr.dirY[i]
+        val ux = -dy * side; val uy = dx * side
+        val cx = pr.x[i] - dx * .3f; val cy = pr.y[i] - dy * .3f
+        // looking back up the street and in toward the road: the camera stands out along the pavement
+        val yaw = look(-ux * cos(a) + dx * sin(a), -uy * cos(a) + dy * sin(a))
+        return listOf(Key(cx + ux * .5f, cy + uy * .5f, dist, yaw + .1f * side, pitch), Key(cx - ux * .3f, cy - uy * .3f, dist * .88f, yaw - .06f * side, pitch - 1.5f))
+    }
+
+    /**
+     * A street food cart close up, the [nth] of the carts near (x, y) that the camera gets a clear view of: from along the
+     * pavement and in from its side as far as the buildings allow, so the cook's face shows over the counter and the
+     * people buying stand side-on, the camera creeping past.
+     */
+    private fun cartShot(e: GameEngine, name: String, seconds: Float, x: Float, y: Float, nth: Int = 0, dist: Float = 8f, pitch: Float = 19f,
+                         warm: Float = 8f, crowd: Float = 45f, haze: Float = .22f, weather: Boolean = false,
+                         each: (Int, Float) -> Unit = { _, _ -> clearWeather(e) }) {
+        thin(e)
+        val views = ArrayList<Pair<Int, List<Key>>>()
+        for (i in cartsNear(e, x, y)) {
+            var best: List<Key>? = null; var bestA = -1f
+            for (side in floatArrayOf(1f, -1f)) for (a in floatArrayOf(.8f, .65f, .5f, .35f, .2f)) {
+                if (a <= bestA) continue
+                val k = cartKeys(e, i, side, a, dist, pitch)
+                if (k.all { clear(e, it) && sightClear(e, it) }) { best = k; bestA = a }
+            }
+            if (best != null && bestA >= .35f) views += i to best
+        }
+        val (i, keys) = views.getOrNull(nth) ?: error("$name: no clear view of a cart")
+        println("$name: cart at ${e.props.x[i].toInt()},${e.props.y[i].toInt()}")
+        fly(e, name, seconds, keys, easing = .2f, warm = warm, haze = haze, crowd = crowd, weather = weather, each = each)
+    }
+
+    /**
+     * Indoors, close on someone [who] picks (picked again if they leave), from in front of them and [turn] radians round;
+     * the camera eases after them and creeps in. With [player], close on you instead.
+     */
+    private fun closeUp(e: GameEngine, name: String, seconds: Float, dist: Float = 5.6f, pitch: Float = 34f, turn: Float = .55f, warm: Float = 30f,
+                        player: Boolean = false, lift: Float = .9f, each: (Int) -> Unit = {}, who: (InteriorScene) -> Person? = { null }) {
+        val sc = e.interior!!
+        var p: Person? = null
+        var tx = Float.NaN; var ty = 0f; var yaw = 0f
+        inside(e, name, seconds, { u ->
+            if (!player && (p == null || (p !in sc.staff && p !in sc.visitors))) p = who(sc)
+            val q = p
+            val x = if (player) sc.px else q?.x ?: sc.w / 2f
+            val y = if (player) sc.py else q?.y ?: sc.d / 2f
+            val h = if (player) sc.playerHeading else q?.heading ?: 0f
+            if (tx.isNaN()) { tx = x; ty = y; yaw = PI.toFloat() - h + turn } else { tx += (x - tx) * .06f; ty += (y - ty) * .06f }
+            // a little toward the camera from their feet, so their head and hands sit in the middle of the frame
+            floatArrayOf(tx - sin(yaw) * lift, ty - cos(yaw) * lift, dist * (1f - .1f * u), yaw - .14f * u, pitch)
+        }, warm = warm, each = each)
+    }
+
+    private fun hire(e: GameEngine, sc: InteriorScene, role: StaffRole) {
+        e.state.employees += Employee(e.state.newId(), "Jo", role, .75, 18.0, 18.0, 27, businessId = e.state.businessAt(sc.building.id)!!.id, shiftStart = 0, shiftEnd = 23, days = 127)
+    }
+
+    /** A salon: three chairs and a wash station along the back, a waiting sofa and chairs by the window. */
+    private fun salon(e: GameEngine, rate: Double = 260.0) = openBusiness(e, "hairdresser", "Golden Cuts", 11..15, 10..13,
+        listOf(StaffRole.HAIRSTYLIST, StaffRole.HAIRSTYLIST, StaffRole.CUSTOMER_SERVICE), rate) { room, w, d ->
+        listOf(PlacedItem("checkout_counter", 1, room + 1, 0), PlacedItem("cash_register", 1, room + 1, 0),
+            PlacedItem("hair_chair", 3, room + 5, 0), PlacedItem("hair_chair", 5, room + 5, 0), PlacedItem("hair_chair", 7, room + 5, 0),
+            PlacedItem("hair_wash", 9, room + 5, 0), PlacedItem("sofa", 5, room + 1, 2), PlacedItem("waiting_chairs", 7, room + 1, 2),
+            PlacedItem("plant_large", w - 1, d - 1, 0), PlacedItem("plant_large", 0, d - 1, 0))
+    }
+
+    /** A gym with a row of bags, a dumbbell rack and a line of rowers. */
+    private fun boxingGym(e: GameEngine) = openBusiness(e, "gym", "Iron Works", 12..16, 9..11, listOf(StaffRole.GYM_TRAINER, StaffRole.GYM_TRAINER), 260.0) { room, w, d ->
+        listOf(PlacedItem("boxing_bag", 1, room + 1, 0), PlacedItem("boxing_bag", 3, room + 1, 0), PlacedItem("boxing_bag", 5, room + 1, 0),
+            PlacedItem("weight_rack", 7, room + 1, 0), PlacedItem("treadmill", 10, room + 1, 0),
+            PlacedItem("rowing_machine", 1, room + 4, 0), PlacedItem("rowing_machine", 3, room + 4, 0), PlacedItem("rowing_machine", 5, room + 4, 0),
+            PlacedItem("workout_bench", 7, room + 4, 0), PlacedItem("exercise_bike", 9, room + 4, 0),
+            PlacedItem("gym_locker", w - 3, room, 0), PlacedItem("fitness_board", w - 4, room, 0), PlacedItem("drinks_fridge", w - 2, d - 2, 0))
+    }
+
+    /** A burger joint: grill, fryer and pizza oven behind the counter, order kiosks and tables out front. */
+    private fun burgers(e: GameEngine) = openBusiness(e, "fastfood", "Big Bite", 12..16, 9..11, listOf(StaffRole.CUSTOMER_SERVICE, StaffRole.CUSTOMER_SERVICE), 260.0) { room, w, d ->
+        listOf(PlacedItem("grill", 1, room, 0), PlacedItem("fryer", 3, room, 0), PlacedItem("pizza_oven", 4, room, 0), PlacedItem("cash_register", 7, room + 1, 0),
+            PlacedItem("order_kiosk", 10, room + 1, 0), PlacedItem("order_kiosk", 11, room + 1, 0), PlacedItem("drinks_fridge", w - 1, room, 0),
+            PlacedItem("table_set", 1, room + 4, 0), PlacedItem("table_set", 4, room + 4, 0), PlacedItem("table_set", 7, room + 4, 0),
+            PlacedItem("table_set", 10, room + 4, 0), PlacedItem("plant_large", w - 1, d - 1, 0))
+    }
+
+    private fun inItem(sc: InteriorScene, v: Person, id: String): Boolean {
+        val it = sc.items.getOrNull(v.item) ?: return false
+        return it.itemId == id && hypot(v.x - (it.x + .5f), v.y - (it.y + .5f)) < 2.2f
+    }
+
+    // the morning
+
+    /** Dawn over Manila Bay. */
+    @Test
+    fun l01() {
+        if (!on("l01")) { assumeTrue(false); return }
+        val e = engine("manila", 6.35f)
+        fly(e, "l01_dawn", 3.6f, listOf(Key(330f, 700f, 300f, -1.38f, 9f), Key(342f, 692f, 250f, -1.27f, 11f)), easing = .2f, haze = .4f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The first cart of the day, the cook at the grill. */
+    @Test
+    fun l02() {
+        if (!on("l02")) { assumeTrue(false); return }
+        val e = engine(com.hustlecity.game.world.Maps.CLASSIC, 7.1f)
+        cartShot(e, "l02_cart_dawn", 3f, 640f, 560f, nth = 0)
+    }
+
+    /** Shibuya's scramble at the morning rush. */
+    @Test
+    fun l03() {
+        if (!on("l03")) { assumeTrue(false); return }
+        val e = engine("tokyo", 8.4f)
+        val s = landmark(e, "Shibuya")
+        val node = e.city.scrambleNode(s)!!
+        val warm = 26f
+        e.traffic.lightClock = ((34.5f - node.phase - (warm - 2f)) % Traffic.SCRAMBLE_CYCLE + Traffic.SCRAMBLE_CYCLE) % Traffic.SCRAMBLE_CYCLE
+        fly(e, "l03_scramble_am", 3f, listOf(Key(s.x, s.y, 50f, 2.4f, 40f), Key(s.x, s.y, 44f, 2.6f, 36f)), easing = .2f, warm = warm, haze = .2f, crowd = 45f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Alex steps out of home into the morning and heads off down the block. */
+    @Test
+    fun l04() {
+        if (!on("l04")) { assumeTrue(false); return }
+        val e = engine(com.hustlecity.game.world.Maps.CLASSIC, 7.9f)
+        thin(e)
+        val home = e.city.building(e.state.player.home)!!
+        val p = e.state.player
+        p.x = home.doorX + home.frontX * 1.2f; p.y = home.doorY + home.frontY * 1.2f
+        val ax = -home.frontY; val ay = home.frontX
+        track(e, "l04_wake", 3.4f, warm = 3f, crowd = 40f, each = { f, _ ->
+            clearWeather(e)
+            if (f >= 0) walkToward(e, ax * .45f, ay * .45f) else { e.input.jx = 0f; e.input.jy = 0f }
+        }) { u ->
+            val cx = p.x + ax * 3.5f + home.frontX * 2.2f; val cy = p.y + ay * 3.5f + home.frontY * 2.2f
+            Key(cx, cy, lerp(9f, 8f, u), look(-ax, -ay) + lerp(.85f, .5f, u), lerp(12f, 10f, u))
+        }
+    }
+
+    // the cities, each from the air and then on the street
+
+    @Test
+    fun l05() {
+        if (!on("l05")) { assumeTrue(false); return }
+        val e = engine("nyc", 9.6f)
+        fly(e, "l05_nyc_air", 2.4f, listOf(Key(880f, 520f, 330f, look(-150f, 260f) + .25f, 14f), Key(860f, 560f, 300f, look(-150f, 260f) + .12f, 16f)), easing = .2f) { _, _ -> clearWeather(e) }
+    }
+
+    @Test
+    fun l06() {
+        if (!on("l06")) { assumeTrue(false); return }
+        val e = engine("nyc", 10.2f)
+        val c = ny(390f, 700f)
+        cartShot(e, "l06_nyc_cart", 2.4f, c[0], c[1], nth = 0)
+    }
+
+    @Test
+    fun l07() {
+        if (!on("l07")) { assumeTrue(false); return }
+        val e = engine("manila", 10.8f)
+        val ax = .17f; val ay = .985f
+        fly(e, "l07_manila_jeep", 2.4f, listOf(Key(236f, 268f, 21f, look(ax, ay) + .1f, 10f), Key(237f, 275f, 20f, look(ax, ay) - .05f, 10f)), easing = .2f, warm = 4f,
+            crowd = 60f) { f, _ ->
+            clearWeather(e)
+            if (f == 0) stage(e, 236f, 268f, ax, ay, parade)
+        }
+    }
+
+    @Test
+    fun l08() {
+        if (!on("l08")) { assumeTrue(false); return }
+        val e = engine("manila", 11.4f)
+        cartShot(e, "l08_manila_cart", 2.4f, 292f, 388f, nth = 0)
+    }
+
+    @Test
+    fun l09() {
+        if (!on("l09")) { assumeTrue(false); return }
+        val e = engine("tokyo", 12.4f)
+        val t = landmark(e, "Tokyo Tower")
+        fly(e, "l09_tokyo_air", 2.4f, listOf(Key(t.x - 20f, t.y - 30f, 290f, look(119f, 176f) - .2f, 10f), Key(t.x - 12f, t.y - 22f, 270f, look(119f, 176f) - .05f, 12f)),
+            easing = .2f) { _, _ -> clearWeather(e) }
+    }
+
+    @Test
+    fun l10() {
+        if (!on("l10")) { assumeTrue(false); return }
+        val e = engine("tokyo", 13.0f)
+        val s = landmark(e, "Shibuya")
+        cartShot(e, "l10_tokyo_yatai", 2.4f, s.x, s.y, nth = 0)
+    }
+
+    @Test
+    fun l11() {
+        if (!on("l11")) { assumeTrue(false); return }
+        val e = engine("seoul", 14.2f)
+        val g = landmark(e, "Gwanghwamun")
+        fly(e, "l11_seoul_air", 2.4f, listOf(Key(g.x - 10f, g.y + 10f, 125f, .35f, 14f), Key(g.x, g.y + 4f, 112f, .15f, 16f)), easing = .2f) { _, _ -> clearWeather(e) }
+    }
+
+    @Test
+    fun l12() {
+        if (!on("l12")) { assumeTrue(false); return }
+        val e = engine("seoul", 14.6f)
+        cartShot(e, "l12_seoul_pocha", 2.4f, 700f, 480f, nth = 0)
+    }
+
+    @Test
+    fun l13() {
+        if (!on("l13")) { assumeTrue(false); return }
+        val e = engine(com.hustlecity.game.world.Maps.CLASSIC, 15.2f)
+        fly(e, "l13_classic_air", 2.4f, listOf(Key(640f, 760f, 300f, -.15f, 15f), Key(648f, 715f, 275f, .05f, 17f)), easing = .2f) { _, _ -> clearWeather(e) }
+    }
+
+    @Test
+    fun l14() {
+        if (!on("l14")) { assumeTrue(false); return }
+        val e = engine(com.hustlecity.game.world.Maps.CLASSIC, 15.6f)
+        cartShot(e, "l14_classic_cart", 2.4f, 420f, 300f, nth = 0)
+    }
+
+    // the work
+
+    /** The stylist at the chair, cutting. */
+    @Test
+    fun l20() {
+        if (!on("l20")) { assumeTrue(false); return }
+        val e = engine("nyc", 11f)
+        salon(e)
+        closeUp(e, "l20_salon", 2.6f, dist = 5.2f, pitch = 32f, turn = .7f, warm = 40f) { s ->
+            s.staff.filter { it.job == Job.HAIR }.minByOrNull { st -> s.visitors.filter { it.seated }.minOfOrNull { hypot(it.x - st.x, it.y - st.y) } ?: 99f }
+        }
+    }
+
+    /** The waiting sofa: clients on their phones until a chair comes free. */
+    @Test
+    fun l21() {
+        if (!on("l21")) { assumeTrue(false); return }
+        val e = engine("nyc", 11f)
+        salon(e, 420.0)
+        closeUp(e, "l21_waiting", 2.6f, dist = 5.4f, pitch = 30f, turn = .4f + PI.toFloat(), warm = 50f) { s -> s.visitors.firstOrNull { it.stage == InteriorScene.WAIT_STAGE && it.seated } }
+    }
+
+    /** On the till: scan, bag, pay. */
+    @Test
+    fun l22() {
+        if (!on("l22")) { assumeTrue(false); return }
+        val e = engine("nyc", 13.5f)
+        supermarket(e)
+        closeUp(e, "l22_till", 2.6f, turn = -.6f, warm = 30f) { s -> s.staff.firstOrNull { it.job == Job.TILL } }
+    }
+
+    /** The self-checkouts: scan your own, tap your card. */
+    @Test
+    fun l23() {
+        if (!on("l23")) { assumeTrue(false); return }
+        val e = engine("nyc", 13.5f)
+        supermarket(e)
+        val sc = e.interior!!
+        val biz = e.state.businessAt(sc.building.id)!!
+        biz.furniture += listOf(PlacedItem("self_checkout", sc.w - 2, sc.d - 4, 0), PlacedItem("self_checkout", sc.w - 3, sc.d - 4, 0))
+        e.interior = InteriorScene(e, sc.building, InteriorMode.BUSINESS)
+        closeUp(e, "l23_selfcheck", 2.6f, turn = .6f, warm = 40f) { s -> s.visitors.firstOrNull { it.counter >= 0 && s.isSelfService(it.counter) && it.payTime > 0f } }
+    }
+
+    /** The bags. */
+    @Test
+    fun l24() {
+        if (!on("l24")) { assumeTrue(false); return }
+        val e = engine("nyc", 18.4f)
+        boxingGym(e)
+        closeUp(e, "l24_boxing", 2.6f, dist = 5.4f, pitch = 28f, turn = 1.1f, warm = 40f) { s -> s.visitors.firstOrNull { inItem(s, it, "boxing_bag") } }
+    }
+
+    /** The trainer at the rowers. */
+    @Test
+    fun l25() {
+        if (!on("l25")) { assumeTrue(false); return }
+        val e = engine("nyc", 18.4f)
+        boxingGym(e)
+        closeUp(e, "l25_coach", 2.6f, dist = 6f, turn = 1.4f, warm = 40f) { s -> s.staff.firstOrNull { it.job == Job.TRAIN } }
+    }
+
+    /** Alex buys a hot dog off a cart and eats it walking on. */
+    @Test
+    fun l26() {
+        if (!on("l26")) { assumeTrue(false); return }
+        val e = engine("nyc", 12.4f)
+        thin(e)
+        val c = ny(390f, 700f)
+        val pr = e.props
+        // the camera stands up the pavement ahead of him, a little out toward the street, looking back at him
+        fun cam(i: Int, side: Float, fx: Float, fy: Float, u: Float): Key {
+            val dx = pr.dirX[i]; val dy = pr.dirY[i]; val ux = -dy * side; val uy = dx * side
+            return Key(fx, fy, lerp(6.4f, 6.8f, u), look(-ux * .9f + dx * .45f, -uy * .9f + dy * .45f) - .1f * side, 16f)
+        }
+        fun spot(i: Int, side: Float) = floatArrayOf(pr.x[i] - pr.dirX[i] * StreetProps.SERVE_AT - pr.dirY[i] * side * .9f, pr.y[i] - pr.dirY[i] * StreetProps.SERVE_AT + pr.dirX[i] * side * .9f)
+        val (i, side) = cartsNear(e, c[0], c[1]).flatMap { i -> listOf(i to 1f, i to -1f) }.first { (i, side) ->
+            val sp = spot(i, side)
+            // clear where he pays and where he will have walked to
+            (0..1).all { k ->
+                val w = k * 3.5f
+                val px = sp[0] - pr.dirY[i] * side * w; val py = sp[1] + pr.dirX[i] * side * w
+                cam(i, side, px, py, k.toFloat()).let { clear(e, it) && sightClear(e, it) }
+            }
+        }
+        val dx = pr.dirX[i]; val dy = pr.dirY[i]
+        val ux = -dy * side; val uy = dx * side
+        val p = e.state.player
+        val sp = spot(i, side)
+        val sx = sp[0]; val sy = sp[1]
+        p.x = sx; p.y = sy
+        p.heading = atan2(dx, -dy)
+        p.money = p.money.coerceAtLeast(500.0)
+        var bought = false
+        var fx = sx; var fy = sy
+        println("l26_pay: cart at ${pr.x[i].toInt()},${pr.y[i].toInt()}")
+        track(e, "l26_pay", 3.8f, warm = 6f, crowd = 45f, each = { f, _ ->
+            clearWeather(e)
+            if (f < 24) { e.input.jx = 0f; e.input.jy = 0f; p.x = sx; p.y = sy; p.heading = atan2(dx, -dy) }
+            if (f == 4 && !bought) { bought = true; e.buyStreetFood(StreetFood.menu("nyc")[0]); e.ui.toasts.clear() }
+            if (f >= 30) walkToward(e, ux * .38f, uy * .38f)
+        }) { u ->
+            fx += (p.x - fx) * .1f; fy += (p.y - fy) * .1f
+            cam(i, side, fx, fy, u)
+        }
+    }
+
+    /** Lunch at the café: every table taken. */
+    @Test
+    fun l27() {
+        if (!on("l27")) { assumeTrue(false); return }
+        val e = engine("seoul", 12.5f)
+        openBusiness(e, "coffee", "Morning Ritual", 11..14, 8..10, listOf(StaffRole.CUSTOMER_SERVICE, StaffRole.CUSTOMER_SERVICE), 260.0) { room, wd, d ->
+            listOf(PlacedItem("coffee_machine", 1, room, 0), PlacedItem("coffee_machine", 3, room, 0), PlacedItem("pastry_case", 5, room, 0),
+                PlacedItem("pastry_case", 6, room, 0), PlacedItem("cash_register", 8, room, 0),
+                PlacedItem("table_set", 1, room + 3, 0), PlacedItem("table_set", 4, room + 3, 0), PlacedItem("table_set", 7, room + 3, 0),
+                PlacedItem("table_set", 1, room + 6, 0), PlacedItem("table_set", 4, room + 6, 0),
+                PlacedItem("plant_large", wd - 1, d - 1, 0), PlacedItem("plant_large", 0, d - 1, 0), PlacedItem("floor_lamp", wd - 2, room + 3, 0))
+        }
+        val sc = e.interior!!
+        inside(e, "l27_cafe", 2.6f, { u -> floatArrayOf(sc.w * .42f, sc.d * (.62f - .04f * u), 7.5f - 1f * u, .5f - .25f * u, 34f) }, warm = 50f)
+    }
+
+    /** The cleaner mopping the aisle. */
+    @Test
+    fun l28() {
+        if (!on("l28")) { assumeTrue(false); return }
+        val e = engine("nyc", 13.5f)
+        supermarket(e)
+        val sc = e.interior!!
+        val biz = e.state.businessAt(sc.building.id)!!
+        // a spill by the checkout: six tiles, enough that the mop stays on them the whole shot
+        biz.dirt = MutableList(sc.w * sc.d) { k -> if (k / sc.w in sc.d - 4..sc.d - 3 && k % sc.w in sc.w / 2 - 2..sc.w / 2) 30f else 0f }
+        closeUp(e, "l28_mop", 2.6f, turn = .8f, warm = 8f) { s ->
+            s.staff.firstOrNull { it.job == Job.CLEAN } ?: s.staff.firstOrNull { e.state.employees.any { m -> m.role == StaffRole.CLEANER } && it.job != Job.TILL }
+        }
+    }
+
+    /** Restocking the shelves from the back. */
+    @Test
+    fun l29() {
+        if (!on("l29")) { assumeTrue(false); return }
+        val e = engine("nyc", 13.5f)
+        supermarket(e)
+        val biz = e.state.businessAt(e.interior!!.building.id)!!
+        val kinds = biz.stock.keys.toList()
+        for (k in kinds) { biz.stock[k] = 3; biz.backStock[k] = 200 }
+        closeUp(e, "l29_stock", 2.6f, turn = .6f, warm = 14f, each = { f ->
+            if ((f + 1000) % 36 == 0) {
+                val k = kinds[((f + 1000) / 36) % kinds.size]
+                biz.stock[k] = (biz.stock[k] ?: 0) + 18; biz.backStock[k] = (biz.backStock[k] ?: 0) - 18
+            }
+        }) { s -> s.staff.firstOrNull { it.job == Job.STOCK } ?: s.staff.firstOrNull { it.carry != 0 } }
+    }
+
+    /** Seoul's lunchtime crowd: friends talking, a call, a phone out. */
+    @Test
+    fun l30() {
+        if (!on("l30")) { assumeTrue(false); return }
+        val e = engine("seoul", 12.8f)
+        thin(e, 5f)
+        cartShot(e, "l30_seoul_lunch", 2.6f, 700f, 480f, nth = 2, dist = 11f, pitch = 21f)
+    }
+
+    /** On stage. */
+    @Test
+    fun l31() {
+        if (!on("l31")) { assumeTrue(false); return }
+        val e = engine("nyc", 20f)
+        openBusiness(e, "theater", "The Gilded", 12..16, 12..15, listOf(StaffRole.ACTOR, StaffRole.ACTOR, StaffRole.CUSTOMER_SERVICE), 220.0) { room, w, d ->
+            listOf(PlacedItem("stage", w / 2 - 2, room, 0), PlacedItem("stage_lights", w / 2 - 4, room, 0), PlacedItem("stage_lights", w / 2 + 3, room, 0),
+                PlacedItem("cinema_seats", w / 2 - 4, room + 4, 0), PlacedItem("cinema_seats", w / 2 + 1, room + 4, 0),
+                PlacedItem("cinema_seats", w / 2 - 4, room + 6, 0), PlacedItem("cinema_seats", w / 2 + 1, room + 6, 0), PlacedItem("cash_register", 0, d - 2, 0))
+        }
+        closeUp(e, "l31_stage", 2.6f, dist = 5.6f, pitch = 28f, turn = .35f + PI.toFloat(), warm = 40f) { s -> s.staff.firstOrNull { it.job == Job.STAGE } }
+    }
+
+    /** Order at the kiosk. */
+    @Test
+    fun l32() {
+        if (!on("l32")) { assumeTrue(false); return }
+        val e = engine("tokyo", 12.6f)
+        burgers(e)
+        closeUp(e, "l32_kiosk", 2.6f, turn = .7f, warm = 40f) { s -> s.visitors.firstOrNull { inItem(s, it, "order_kiosk") } }
+    }
+
+    /** Alex on the till at the burger place. */
+    @Test
+    fun l33() {
+        if (!on("l33")) { assumeTrue(false); return }
+        val e = engine("tokyo", 12.6f)
+        val sc = burgers(e)
+        e.toggleWork(e.state.businessAt(sc.building.id)!!)
+        closeUp(e, "l33_player_till", 2.6f, turn = -.6f, warm = 30f, player = true)
+    }
+
+    // sundown
+
+    /** The skyline from over the Hudson as the sun goes and the city lights up. */
+    @Test
+    fun l40() {
+        if (!on("l40")) { assumeTrue(false); return }
+        val e = engine("nyc", 18.2f)
+        val m0 = e.state.minute
+        fly(e, "l40_timelapse", 5f, listOf(nyKey(260f, 760f, 520f, east - .2f, 12f), nyKey(260f, 730f, 505f, east - .08f, 13f)), easing = .1f, haze = .42f) { _, u ->
+            clearWeather(e)
+            e.state.minute = m0 + (u * 165).toLong()
+        }
+    }
+
+    // the night
+
+    @Test
+    fun l41() {
+        if (!on("l41")) { assumeTrue(false); return }
+        val e = engine("tokyo", 21.0f)
+        val s = landmark(e, "Shibuya")
+        cartShot(e, "l41_yatai_night", 2.6f, s.x, s.y, nth = 1, haze = .2f)
+    }
+
+    @Test
+    fun l42() {
+        if (!on("l42")) { assumeTrue(false); return }
+        val e = engine("seoul", 21.4f)
+        cartShot(e, "l42_pocha_night", 2.6f, 700f, 480f, nth = 1, haze = .2f)
+    }
+
+    @Test
+    fun l43() {
+        if (!on("l43")) { assumeTrue(false); return }
+        val e = engine("nyc", 21.0f)
+        val c = ny(390f, 700f)
+        cartShot(e, "l43_nyc_cart_night", 2.6f, c[0], c[1], nth = 1, haze = .2f)
+    }
+
+    @Test
+    fun l44() {
+        if (!on("l44")) { assumeTrue(false); return }
+        val e = engine("manila", 20.4f)
+        val a = landmark(e, "Binondo Arch")
+        fly(e, "l44_manila_night", 2.6f, listOf(Key(a.x + 3f, a.y + 4f, 30f, .25f, 8f), Key(a.x, a.y, 37f, -.08f, 10f)), easing = .2f, crowd = 60f, haze = .25f) { _, _ -> clearWeather(e) }
+    }
+
+    /** The DJ. */
+    @Test
+    fun l45() {
+        if (!on("l45")) { assumeTrue(false); return }
+        val e = engine("nyc", 23.6f)
+        club(e)
+        closeUp(e, "l45_dj", 2.6f, dist = 6.5f, pitch = 26f, turn = .35f + PI.toFloat(), warm = 40f) { s -> s.staff.firstOrNull { it.job == Job.DJ } }
+    }
+
+    /** The floor. */
+    @Test
+    fun l46() {
+        if (!on("l46")) { assumeTrue(false); return }
+        val e = engine("nyc", 23.6f)
+        val sc = club(e)
+        inside(e, "l46_dance", 2.6f, { u -> floatArrayOf(sc.w * .42f, sc.d * (.42f + .05f * u), 9f - 1.5f * u, .45f - .3f * u, 30f) }, warm = 40f)
+    }
+
+    private fun club(e: GameEngine) = openBusiness(e, "nightclub", "Club Neon", 12..16, 9..11, listOf(StaffRole.DJ, StaffRole.CUSTOMER_SERVICE, StaffRole.CUSTOMER_SERVICE), 320.0) { room, w, d ->
+        listOf(PlacedItem("dj_booth", 4, room, 0), PlacedItem("dance_floor", 3, room + 2, 0), PlacedItem("dance_floor", 6, room + 2, 0),
+            PlacedItem("cocktail_bar", w - 4, room, 0), PlacedItem("stage_lights", 2, room, 0), PlacedItem("stage_lights", 7, room, 0),
+            PlacedItem("lounge_sofa", 0, d - 2, 0), PlacedItem("lounge_sofa", w - 3, d - 2, 0))
+    }
+
+    /** A wet night in Shinjuku from behind the wheel. */
+    @Test
+    fun l47() {
+        if (!on("l47")) { assumeTrue(false); return }
+        val e = engine("tokyo", 21.5f, Sky.RAIN)
+        val v = startCar(e, "volta", 330f, 470f, color = 0xFFC0392B.toInt())
+        fun wet() { e.skyVis.rain = .85f; e.skyVis.cloud = .9f; e.skyVis.wet = 1f }
+        chase(e, "l47_rain", 2.6f, v, 11f, relYaw = { u -> .5f - .3f * u }, dist = { u -> 13f - 1.5f * u }, pitch = { 13f }, weather = true, haze = .35f) { _, _ -> wet() }
+    }
+
+    /** The late shift: Alex on the till at the corner shop. */
+    @Test
+    fun l48() {
+        if (!on("l48")) { assumeTrue(false); return }
+        val e = engine("seoul", 23f)
+        val sc = openBusiness(e, "liquor", "Night Owl", 10..14, 8..10, listOf(StaffRole.CUSTOMER_SERVICE), 220.0) { room, w, d ->
+            listOf(PlacedItem("drinks_fridge", 1, room, 0), PlacedItem("drinks_fridge", 2, room, 0), PlacedItem("drinks_fridge", 3, room, 0),
+                PlacedItem("shelf", 1, room + 3, 0), PlacedItem("shelf", 4, room + 3, 0), PlacedItem("checkout_counter", w - 5, d - 3, 0),
+                PlacedItem("plant_large", 0, d - 1, 0))
+        }
+        e.toggleWork(e.state.businessAt(sc.building.id)!!)
+        closeUp(e, "l48_night_till", 2.6f, turn = -.6f, warm = 30f, player = true)
+    }
+
+    @Test
+    fun l49() {
+        if (!on("l49")) { assumeTrue(false); return }
+        val e = engine("nyc", 20.4f)
+        fly(e, "l49_times", 2.6f, listOf(Key(621f, 946f, 28f, .1f, 10f), Key(621f, 932f, 26f, .03f, 9f)), easing = .2f, warm = 5f, haze = .22f, crowd = 70f) { _, _ -> clearWeather(e) }
+    }
+
+    @Test
+    fun l50() {
+        if (!on("l50")) { assumeTrue(false); return }
+        val e = engine("tokyo", 20.6f)
+        val s = landmark(e, "Shibuya")
+        val node = e.city.scrambleNode(s)!!
+        val warm = 26f
+        e.traffic.lightClock = ((34.5f - node.phase - (warm - 3f)) % Traffic.SCRAMBLE_CYCLE + Traffic.SCRAMBLE_CYCLE) % Traffic.SCRAMBLE_CYCLE
+        fly(e, "l50_scramble_night", 2.6f, listOf(Key(s.x, s.y, 56f, 1.95f, 34f), Key(s.x, s.y, 49f, 2.22f, 30f)), easing = .2f, warm = warm, haze = .25f, crowd = 45f) { _, _ -> clearWeather(e) }
+    }
+
+    @Test
+    fun l51() {
+        if (!on("l51")) { assumeTrue(false); return }
+        val e = engine(com.hustlecity.game.world.Maps.CLASSIC, 21.2f)
+        fly(e, "l51_classic_night", 2.6f, listOf(Key(640f, 760f, 260f, -.15f, 16f), Key(650f, 720f, 240f, .08f, 18f)), easing = .2f, haze = .3f) { _, _ -> clearWeather(e) }
+    }
+
+    @Test
+    fun l52() {
+        if (!on("l52")) { assumeTrue(false); return }
+        val e = engine("manila", 21.0f)
+        fly(e, "l52_makati", 2.6f, listOf(Key(1080f, 1120f, 235f, 2.3f, 15f), Key(1080f, 1120f, 205f, 2.44f, 13f)), easing = .2f, haze = .35f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Alex walking under the lanterns with a boat of takoyaki. */
+    @Test
+    fun l53() {
+        if (!on("l53")) { assumeTrue(false); return }
+        val e = engine("tokyo", 21.3f)
+        val pr = StreetProps(e.city)
+        val ln = (0 until pr.count).filter { pr.kind[it] == StreetProps.LANTERNS }.minByOrNull { hypot(pr.x[it] - 300f, pr.y[it] - 980f) }!!
+        val hit = RoadHit()
+        e.city.roads.nearest(pr.x[ln], pr.y[ln], 12f, hit)
+        val lane = e.city.roads.edges[hit.edge]
+        val ax = pr.dirY[ln]; val ay = -pr.dirX[ln]
+        val p = e.state.player
+        p.x = lane.ax + lane.ux * hit.s - ax * 6f; p.y = lane.ay + lane.uy * hit.s - ay * 6f
+        p.heading = atan2(ax, -ay)
+        var fx = p.x; var fy = p.y
+        thin(e)
+        track(e, "l53_hero_night", 3.6f, warm = 4f, crowd = 40f, haze = .2f, each = { f, _ ->
+            clearWeather(e)
+            e.ui.eatingUntil = e.realTime + 30f; e.ui.eatingItem = com.hustlecity.game.render.Snack.BOAT; e.ui.payingUntil = e.realTime - 3f
+            if (f >= 0) walkToward(e, ax * .33f, ay * .33f) else { e.input.jx = 0f; e.input.jy = 0f }
+        }) { u ->
+            fx += (p.x - fx) * .12f; fy += (p.y - fy) * .12f
+            Key(fx + ax * .8f, fy + ay * .8f, lerp(5.6f, 5f, u), look(-ax, -ay) + .3f, 12f)
+        }
+    }
+
+    @Test
+    fun l54() {
+        if (!on("l54")) { assumeTrue(false); return }
+        val e = engine("seoul", 21.0f)
+        val t = landmark(e, "N Seoul")
+        fly(e, "l54_seoul_tower", 2.6f, listOf(Key(t.x, t.y, 520f, -.3f, 8.2f), Key(t.x, t.y, 485f, -.17f, 8.8f)), easing = .2f, haze = .3f) { _, _ -> clearWeather(e) }
+    }
+
+    /** Alex on the Brooklyn shore at night, looking round at Manhattan lit up, the camera rising past. */
+    @Test
+    fun l55() {
+        if (!on("l55")) { assumeTrue(false); return }
+        val e = engine("nyc", 21.3f)
+        val p = e.state.player
+        val spot = ny(936f, 980f)
+        p.x = spot[0]; p.y = spot[1]
+        p.heading = atan2(-.8747f, .4847f)
+        val wx = -.8747f; val wy = -.4847f
+        track(e, "l55_shore", 6f, warm = 5.5f, crowd = 20f, haze = .4f, each = { _, _ -> clearWeather(e); p.x = spot[0]; p.y = spot[1]; e.input.jx = 0f; e.input.jy = 0f }) { u ->
+            val k = ease(u, .6f)
+            Key(spot[0] + wx * lerp(6f, 60f, k), spot[1] + wy * lerp(6f, 60f, k), lerp(11f, 70f, k), west + lerp(.3f, .06f, k), lerp(6f, 9f, k))
+        }
+    }
+
+    /** The finale: up and away over Shinjuku at night. */
+    @Test
+    fun l56() {
+        if (!on("l56")) { assumeTrue(false); return }
+        val e = engine("tokyo", 21.3f)
+        fly(e, "l56_finale", 5f, listOf(Key(330f, 470f, 345f, -1.2f, 15f), Key(318f, 470f, 395f, -1.1f, 19f), Key(305f, 470f, 455f, -1.0f, 24f)),
+            easing = .5f, haze = .4f) { _, _ -> clearWeather(e) }
     }
 }
