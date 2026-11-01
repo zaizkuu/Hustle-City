@@ -160,6 +160,7 @@ fun KeyHints(e: GameEngine, modifier: Modifier = Modifier) {
         } else if (e.interior != null) {
             KeyRow(listOf("W", "A", "S", "D"), "Walk")
             KeyRow(listOf("E"), if (e.interior?.nearEntrance() == true) "Go outside" else "Go outside (at the door)")
+            e.workingHere()?.let { biz -> KeyRow(listOf("F"), "Skip to end of shift (%02d:00)".format(biz.closeHour)) }
         } else {
             val door = e.nearDoor
             val car = e.nearVehicle

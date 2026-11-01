@@ -104,10 +104,14 @@ class GameEngine(context: Context?) {
     /**
      * Hardware keyboard: arrow keys (and W A S D when no menu is open) walk, or steer, accelerate and brake while
      * driving. With no menu open, Space is the handbrake, E goes in the door you're at or gets in or out of the car, F
-     * gets in the car (when you're at a door too), and P parks. Returns true when the key was used.
+     * gets in the car (when you're at a door too), and P parks. Inside, the same keys walk round the room, E goes out
+     * the door and, while you work your store's floor, F fast-forwards to the end of your shift. Returns true when the
+     * key was used.
      */
     fun onKey(keyCode: Int, down: Boolean): Boolean {
-        if (!hasGame || ui.screen != Screen.GAME || state.player.inBuilding >= 0) return false
+        if (!hasGame || ui.screen != Screen.GAME || skip != null) return false
+        val inside = state.player.inBuilding >= 0
+        if (inside && (interior == null || ui.designer)) return false
         val wasd = ui.panel == null && ui.app == null
         val k = when (keyCode) {
             android.view.KeyEvent.KEYCODE_DPAD_LEFT -> 0
@@ -120,7 +124,7 @@ class GameEngine(context: Context?) {
             android.view.KeyEvent.KEYCODE_S -> if (wasd) 3 else return false
             android.view.KeyEvent.KEYCODE_SPACE -> if (wasd && state.player.driving >= 0) 4 else return false
             android.view.KeyEvent.KEYCODE_E -> if (wasd) KEY_USE else return false
-            android.view.KeyEvent.KEYCODE_F -> if (wasd && state.player.driving < 0) KEY_CAR else return false
+            android.view.KeyEvent.KEYCODE_F -> if (wasd && inside) KEY_SHIFT else if (wasd && state.player.driving < 0) KEY_CAR else return false
             android.view.KeyEvent.KEYCODE_P -> if (wasd && state.player.driving >= 0) KEY_PARK else return false
             else -> return false
         }
@@ -131,6 +135,7 @@ class GameEngine(context: Context?) {
             when (k) {
                 KEY_PARK -> if (parkVehicle()) ui.phoneOpen = true
                 KEY_CAR -> nearVehicle?.let { enterVehicle(it); ui.phoneOpen = false }
+                KEY_SHIFT -> workingHere()?.let { workUntilClosing(it) }
                 else -> useKey()
             }
             bump()
@@ -150,6 +155,14 @@ class GameEngine(context: Context?) {
         }
         return true
     }
+    /** The store whose floor you're working right now (you're inside it, and it's open), or null. */
+    fun workingHere(): com.hustlecity.game.model.Business? {
+        val p = state.player
+        val biz = state.businesses.firstOrNull { it.id == p.workingAt } ?: return null
+        if (p.inBuilding != biz.buildingId || biz.tempClosed || !BizCalc.isWithinHours(biz, state.hour)) return null
+        return biz
+    }
+
     /** E: gets out of the car, or goes in the door you're at, or gets in the car you're next to. */
     private fun useKey() {
         if (state.player.driving >= 0) { if (getOutOfCar()) ui.phoneOpen = true; return }
@@ -1364,5 +1377,6 @@ class GameEngine(context: Context?) {
         private const val KEY_USE = 5
         private const val KEY_PARK = 6
         private const val KEY_CAR = 7
+        private const val KEY_SHIFT = 8
     }
 }

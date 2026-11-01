@@ -87,6 +87,7 @@ fun GameScreen(e: GameEngine) {
                     Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(top = 56.dp, start = leftGap, end = rightGap),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    if (inside) com.hustlecity.game.ui.hud.WorkingBar(e)
                     TipCard(e)
                     Toasts(e)
                 }

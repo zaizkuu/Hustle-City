@@ -12,6 +12,7 @@ import com.hustlecity.game.engine.Panel
 import com.hustlecity.game.engine.Screen
 import com.hustlecity.game.engine.pickUp
 import com.hustlecity.game.engine.startBusiness
+import com.hustlecity.game.engine.toggleWork
 import com.hustlecity.game.engine.takeCart
 import com.hustlecity.game.model.PlacedItem
 import com.hustlecity.game.model.Rental
@@ -334,6 +335,22 @@ class UiSnapshotTest {
         biz.music = com.hustlecity.game.model.StoreMusic.MINE
         e.ui.panel = Panel.StoreMusic(biz.id)
         shoot(e, "ui_store_music.png")
+    }
+
+    @Test
+    fun workingTheFloor() {
+        val e = game()
+        e.settings.carControls = 2
+        e.state.minute = (e.state.minute / 1440) * 1440 + 11 * 60
+        val bid = withBusiness(e)
+        val biz = e.state.businessAt(bid)!!
+        e.state.player.inBuilding = bid
+        e.interior = InteriorScene(e, e.city.building(bid)!!, InteriorMode.BUSINESS)
+        e.ui.phoneOpen = false
+        e.ui.tip = null
+        e.toggleWork(biz)
+        e.ui.toasts.clear()
+        shoot(e, "ui_working.png")
     }
 
     @Test

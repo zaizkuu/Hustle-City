@@ -654,7 +654,8 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                     }
                     val working = e.state.player.workingAt == biz.id
                     HButton(if (working) "Stop working" else "Start working", full, small = true, color = if (working) HC.Red else HC.Green) { e.toggleWork(biz) }
-                    HButton("Work until %02d:00".format(biz.closeHour), full, small = true, color = HC.Teal) { e.workUntilClosing(biz) }
+                    HButton(if (working) "Skip to end of shift (%02d:00)".format(biz.closeHour) else "Work until %02d:00 (skip ahead)".format(biz.closeHour), full, small = true,
+                        color = HC.Teal, icon = Icons.Filled.FastForward) { e.workUntilClosing(biz) }
                     HButton("Clean (${biz.cleanliness.roundToInt()}%)", full, small = true, color = HC.GlassLight) { e.cleanStore(biz) }
                     HButton("Music: " + musicLabel(e, biz), full, small = true, color = HC.Purple, icon = Icons.Filled.MusicNote) { e.ui.panel = Panel.StoreMusic(biz.id) }
                     // the back room: boxes waiting on the storage shelves
@@ -882,6 +883,31 @@ fun distanceTo(e: GameEngine, x: Float, y: Float): Float {
 }
 
 // ------------------------------------------------------------------ tips & endings
+
+/**
+ * While you work your store's floor: when the shift ends, and a button (F on a keyboard) to fast-forward to it, the
+ * sales and the wages of the hours skipped counted as if you'd worked them.
+ */
+@Composable
+fun WorkingBar(e: GameEngine) {
+    e.ui.frameTime
+    val p = e.state.player
+    val biz = e.state.businesses.firstOrNull { it.id == p.workingAt } ?: return
+    if (e.skip != null || p.inBuilding != biz.buildingId) return
+    val open = e.workingHere() != null
+    Row(
+        Modifier.padding(bottom = 6.dp).widthIn(max = 460.dp).shadow(6.dp, RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp))
+            .background(Color(0xF21B5E3B)).padding(start = 12.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            if (open) "Working · shift ends %02d:00".format(biz.closeHour) else "Working · ${biz.name} is closed now",
+            color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f, fill = false),
+        )
+        if (open) HButton((if (e.settings.carControls == 2) "F · " else "") + "Skip to %02d:00".format(biz.closeHour), Modifier.padding(start = 10.dp),
+            small = true, color = HC.Teal, icon = Icons.Filled.FastForward) { e.workUntilClosing(biz) }
+    }
+}
 
 @Composable
 fun TipCard(e: GameEngine) {
