@@ -571,6 +571,14 @@ class InteriorRenderer(private val e: GameEngine) {
 
     /** What a customer is doing with their hands: taking something off a shelf, paying, eating, working out. */
     private fun customerAct(sc: InteriorScene, v: com.hustlecity.game.engine.Person, pay: Float): Int {
+        // at a self-checkout they scan their own goods, then tap the card and take the bag
+        if (pay >= 0f && sc.isSelfService(v.counter)) return when {
+            pay in .04f..(.22f) -> if (v.held != 0) Act.PLACE else Act.TYPE
+            pay < .55f -> Act.SCAN
+            pay < .8f -> Act.CARD
+            pay >= .86f -> Act.REACH
+            else -> Act.NONE
+        }
         if (pay >= 0f) return when {
             pay in .04f..(.24f) -> if (v.held != 0) Act.PLACE else Act.NONE
             pay in .55f..(.78f) -> Act.CARD
@@ -581,6 +589,8 @@ class InteriorRenderer(private val e: GameEngine) {
         sc.shelf?.let { sh -> for (k in sh.takes.indices) if (sh.takes[k].person === v) return Act.REACH }
         val item = sc.items.getOrNull(v.item)?.let { Catalog.item(it.itemId) }
         if (v.seated) return when {
+            // in the waiting area: on the phone till they're called
+            v.stage == InteriorScene.WAIT_STAGE -> Act.PHONE
             // waiting their turn in the salon chair: on the phone till the stylist comes
             sc.needsServer(v.item) && !sc.isServed(v.item) -> Act.PHONE
             item?.id == "workout_bench" -> Act.PRESS

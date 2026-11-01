@@ -19,6 +19,7 @@ class FurnitureModels(private val scene: Scene3D) {
             "sofa", "lounge_sofa", "table_set", "barstool", "bench", "plant_large", "plant_small", "floor_lamp", "bed", "trash_can", "rug",
             "cash_register", "checkout_counter", "office_desk", "desk", "meeting_table", "boxing_bag", "weight_rack", "speaker_small",
             "speaker_medium", "speaker_large", "water_cooler", "mannequin", "tv", "home_fridge", "hair_chair",
+            "self_checkout", "order_kiosk", "waiting_chairs", "coffee_table",
         )
         private val WOOD = c(0xFF8B5A3C)
         private val WOOD_L = c(0xFFB07A52)
@@ -80,6 +81,10 @@ class FurnitureModels(private val scene: Scene3D) {
                 "tv" -> tv()
                 "home_fridge" -> homeFridge()
                 "hair_chair" -> hairChair()
+                "self_checkout" -> selfCheckout()
+                "order_kiosk" -> orderKiosk()
+                "waiting_chairs" -> waitingChairs()
+                "coffee_table" -> coffeeTable()
             }
         } finally {
             scene.clearFrame()
@@ -419,6 +424,95 @@ class FurnitureModels(private val scene: Scene3D) {
         scene.glow = true; bx(1.22f, .84f, 1.1f, 1.3f, .88f, 1.104f, c(0xFF6FCF97)); scene.glow = false
         rb(1.3f, .22f, 1.06f, 1.55f, .45f, 1.18f, .025f, WHITE)
         bx(1.36f, .44f, 1.15f, 1.49f, .46f, 1.16f, LINEN)
+    }
+
+    /** A self-checkout: a cabinet with the scanner glass on top, its screen facing the customer (+y), the card reader and a lane light. */
+    private fun selfCheckout() {
+        scene.material = Mat.PAINT
+        rb(.12f, .15f, 0f, .88f, .78f, .84f, .03f, WHITE)
+        bx(.12f, .74f, 0f, .88f, .79f, .1f, DARK)
+        // a bag shelf down the side with a carrier bag on its hook rail
+        rb(.14f, .52f, .45f, .86f, .78f, .48f, .01f, c(0xFFB8C0CA))
+        scene.material = Mat.STONE
+        rb(.1f, .15f, .84f, .9f, .92f, .9f, .02f, c(0xFF9AA3AD))
+        // the scanner glass, its red line lit
+        bx(.3f, .5f, .9f, .7f, .78f, .905f, c(0xFF1E2126))
+        scene.glow = true; bx(.32f, .63f, .905f, .68f, .65f, .907f, c(0xFFFF3B30)); scene.glow = false
+        // the screen on its post at the back, tilted up toward the customer
+        scene.material = Mat.METAL
+        rb(.46f, .16f, .9f, .54f, .24f, 1.1f, .01f, DARK)
+        rb(.26f, .18f, 1.06f, .74f, .28f, 1.48f, .015f, BLACK)
+        scene.glow = true
+        panel(.29f, .29f, 1.1f, .71f, .29f, 1.45f, SCREEN)
+        // its big green PAY button and a list of what's been scanned
+        panel(.48f, .293f, 1.13f, .68f, .293f, 1.22f, c(0xFF6FCF97))
+        for (k in 0 until 3) panel(.32f, .293f, 1.38f - k * .06f, .6f - k * .05f, .293f, 1.41f - k * .06f, WHITE)
+        scene.glow = false
+        // the card reader on the right
+        rb(.74f, .62f, .9f, .86f, .78f, .97f, .01f, BLACK)
+        scene.glow = true; bx(.77f, .7f, .97f, .83f, .75f, .972f, c(0xFF6FCF97)); scene.glow = false
+        // the lane light: green while it's free
+        cyl(.18f, .22f, .02f, .9f, 1.75f, CHROME, sides = 6)
+        scene.glow = true; cyl(.18f, .22f, .05f, 1.75f, 1.86f, c(0xFF6FCF97), sides = 8); scene.glow = false
+    }
+
+    /** A self-order kiosk: a slim white column with a tall portrait touchscreen facing +y, its menu tiles lit. */
+    private fun orderKiosk() {
+        scene.material = Mat.METAL
+        rb(.24f, .28f, 0f, .76f, .72f, .04f, .02f, DARK)
+        rb(.42f, .42f, .04f, .58f, .56f, .95f, .02f, WHITE)
+        scene.material = Mat.PAINT
+        rb(.2f, .34f, .9f, .8f, .55f, 1.98f, .03f, WHITE)
+        bx(.2f, .34f, 1.9f, .8f, .555f, 1.98f, c(0xFFEB5757))
+        scene.glow = true
+        panel(.24f, .556f, 1.04f, .76f, .556f, 1.86f, c(0xFFF4F1EA))
+        // the menu: rows of pictures, and the order button
+        val tiles = intArrayOf(c(0xFFE0A85A), c(0xFFEB5757), c(0xFF6FCF97), c(0xFFF2C94C), c(0xFF56CCF2), c(0xFFE0A85A))
+        for (k in 0 until 6) {
+            val tx = .28f + (k % 2) * .24f; val tz = 1.62f - (k / 2) * .2f
+            panel(tx, .558f, tz, tx + .2f, .558f, tz + .16f, tiles[k])
+        }
+        panel(.3f, .558f, 1.08f, .7f, .558f, 1.16f, c(0xFF27AE60))
+        scene.glow = false
+        // the card reader under the screen
+        rb(.42f, .5f, .92f, .58f, .62f, .99f, .01f, BLACK)
+    }
+
+    /** Three waiting room chairs on one beam, facing +y, with armrests between them. */
+    private fun waitingChairs() {
+        scene.material = Mat.METAL
+        bx(.05f, .46f, .27f, 2.95f, .56f, .32f, DARK)
+        for (lx in floatArrayOf(.18f, 2.82f)) {
+            rb(lx - .04f, .48f, 0f, lx + .04f, .54f, .3f, .01f, CHROME)
+            rb(lx - .05f, .2f, 0f, lx + .05f, .82f, .03f, .01f, CHROME)
+        }
+        for (i in 0 until 3) {
+            val x0 = i + .07f; val x1 = i + .93f
+            scene.material = Mat.FABRIC
+            rb(x0, .28f, .38f, x1, .8f, .47f, .03f, c(0xFF37474F))
+            rb(x0, .14f, .47f, x1, .25f, .95f, .03f, c(0xFF37474F))
+            scene.material = Mat.METAL
+            rb(x0 + .05f, .22f, .32f, x0 + .12f, .3f, .4f, .01f, DARK)
+            rb(x1 - .12f, .22f, .32f, x1 - .05f, .3f, .4f, .01f, DARK)
+        }
+        // armrests at the ends and between the seats
+        for (k in 0..3) {
+            val ax = k.toFloat().coerceIn(.04f, 2.96f)
+            rb(ax - .03f, .3f, .47f, ax + .03f, .74f, .62f, .015f, CHROME)
+        }
+    }
+
+    /** A low wooden coffee table with a shelf, a few magazines and a cup on it. */
+    private fun coffeeTable() {
+        scene.material = Mat.WOOD
+        rb(.12f, .18f, .36f, .88f, .82f, .42f, .03f, WOOD, WOOD_D)
+        for (lx in floatArrayOf(.18f, .82f)) for (ly in floatArrayOf(.24f, .76f)) rb(lx - .03f, ly - .03f, 0f, lx + .03f, ly + .03f, .36f, .01f, WOOD_D)
+        rb(.16f, .22f, .1f, .84f, .78f, .13f, .01f, WOOD_L)
+        scene.material = Mat.PLAIN
+        bx(.22f, .28f, .42f, .5f, .62f, .43f, c(0xFFEB5757), WHITE)
+        bx(.3f, .4f, .43f, .6f, .74f, .44f, c(0xFF2F80ED), WHITE)
+        bx(.24f, .3f, .13f, .5f, .6f, .16f, c(0xFFF2C94C), WHITE)
+        cyl(.72f, .32f, .045f, .42f, .52f, WHITE, c(0xFF5D4037), sides = 8)
     }
 
     private fun checkout(body: Int) {

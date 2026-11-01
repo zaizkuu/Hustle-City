@@ -73,8 +73,12 @@ class Person(var x: Float, var y: Float, var shirt: Int, var skin: Int) {
     var bagged = false
     /** What a staff member is doing at their post ([Job]), for the renderer to act out. */
     var job = 0
-    /** Seconds a customer has been waiting to be served (in a salon chair, or at the front of a till's line). */
+    /** Seconds a customer has been waiting to be served (in a salon chair, at the front of a till's line, or in the waiting area). */
     var waitedFor = 0f
+    /** In the waiting area: the stage to go back to once called ([InteriorScene.WAIT_STAGE]); -1 otherwise. */
+    var resume = -1
+    /** Called up from the waiting area: their turn, so they don't sit back down behind the others. */
+    var called = false
     /** Debugging and screenshots: the action to show instead of the one the renderer would pick (-1 for none). */
     internal var showAct = -1
     /** How long paying at the till takes this customer (seconds; 0 when not at a till): their goods go on the counter, are
@@ -528,6 +532,42 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     /** The station each server (a staff key, or [PLAYER_KEY]) was last given. */
     private val stationOf = HashMap<Int, Int>()
 
+    /** True for a self-checkout or an order kiosk: customers pay there by themselves. */
+    fun isSelfService(item: Int) = items.getOrNull(item)?.let { Catalog.item(it.itemId)?.tags?.contains("self_service") } == true
+
+    /** Clients at a salon station or on their way to one (each keeps a stylist busy), besides [except]. */
+    private fun stationClients(except: Person? = null) =
+        visitors.count { it !== except && it.stage == 0 && it.item in stationItems && it.seat != null && (it.seated || it.goal >= 0) }
+
+    /** A free seat in the waiting area (a sofa, a bench, waiting room chairs), for [v]. */
+    private fun waitingSeatFree(v: Person): Boolean {
+        val taken = claimed(v)
+        return items.indices.any { i ->
+            val p = items[i]
+            Catalog.item(p.itemId)?.tags?.contains("waiting") == true && !inBackRoom(p.x, p.y) && seatsOf(i).any { it.tile !in taken }
+        }
+    }
+
+    /** Sends [v] to sit in the waiting area until their turn, then to stage [resume]; false when there's no seat free. */
+    private fun toWaitingArea(v: Person, resume: Int): Boolean {
+        if (!waitingSeatFree(v)) return false
+        v.stage = WAIT_STAGE; v.resume = resume; v.goal = -1; v.claim = -1; v.waitedFor = 0f
+        return true
+    }
+
+    /** Lets the longest-waiting customer in the waiting area go: to a stylist that's free, or a line with room. */
+    private fun callFromWaitingArea() {
+        val waiting = visitors.filter { it.stage == WAIT_STAGE }
+        if (waiting.isEmpty()) return
+        fun release(v: Person) { v.stage = v.resume; v.resume = -1; v.goal = -1; v.claim = -1; v.called = true; v.retries = 0 }
+        waiting.filter { it.resume == 0 }.maxByOrNull { it.waitedFor }?.let { v ->
+            if (stationServers - stationClients() > 0 && stationItems.any { st -> seatsOf(st).any { it.tile !in claimed(v) } }) release(v)
+        }
+        waiting.filter { it.resume == 1 }.maxByOrNull { it.waitedFor }?.let { v ->
+            if (counters().any { ci -> queueSlots.containsKey(ci) && (queues[ci]?.size ?: 0) < (queueSlots[ci]?.size ?: 0) }) release(v)
+        }
+    }
+
     /** True while a customer at [item] is being served there (a stylist with them). */
     fun isServed(item: Int) = item in servedStations
     /** True when [item] is a station whose customers wait for a server. */
@@ -578,7 +618,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     /** Where the player stands when working the floor. */
     fun workSpot(): Pair<Float, Float>? {
         val occ = occupancy()
-        val reg = registers().firstOrNull()
+        val reg = registers().firstOrNull { !isSelfService(items.indexOf(it)) }
         if (reg != null) {
             val t = frontTiles(reg, occ, behind = true).firstOrNull() ?: frontTiles(reg, occ).firstOrNull()
             if (t != null) { workFacing = reg; return (t % w + .5f) to (t / w + .5f) }
@@ -635,6 +675,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         playerMoving *= .7f
         for (v in visitors) v.moving *= .7f
         for (v in staff) v.moving *= .7f
+        if (step > 0f) callFromWaitingArea()
         for (v in visitors) stepVisitor(v, step, occ)
         for (v in visitors) if (v.done) leaveQueue(v)
         visitors.removeAll { it.done }
@@ -766,7 +807,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
 
     /** A free seat among every item with this tag. */
     private fun seatFor(tag: String, occ: BooleanArray, v: Person): Int {
-        val cands = items.indices.filter { Catalog.item(items[it].itemId)?.tags?.contains(tag) == true }.shuffled(e.rnd)
+        val cands = items.indices.filter { Catalog.item(items[it].itemId)?.tags?.contains(tag) == true && !inBackRoom(items[it].x, items[it].y) }.shuffled(e.rnd)
         for (i in cands) { val t = spotAt(i, occ, v); if (t >= 0) return t }
         return -1
     }
@@ -1006,10 +1047,24 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                     return
                 }
                 if (v.goal < 0) {
-                    // pick a free spot at the next display; if all are taken, skip it
-                    val spot = spotAt(v.stops[v.stopIdx], occ, v)
-                    if (spot < 0) { v.stopIdx++; return }
+                    val next = v.stops[v.stopIdx]
+                    val station = next in stationItems && stationServers > 0
+                    // a salon chair: with every stylist busy, or others already waiting, sit in the waiting area till called
+                    if (station && !v.called && (stationServers - stationClients(v) <= 0 || visitors.any { it !== v && it.stage == WAIT_STAGE && it.resume == 0 })
+                        && toWaitingArea(v, 0)) return
+                    // pick a free spot at the next display (at a salon, any free chair of the kind); if all are taken, skip it
+                    var spot = spotAt(next, occ, v)
+                    if (spot < 0 && next in stationItems) {
+                        val tags = Catalog.item(items[next].itemId)?.tags ?: emptySet()
+                        for (o in stationItems) if (o != next && Catalog.item(items[o].itemId)?.tags == tags) {
+                            spot = spotAt(o, occ, v)
+                            if (spot >= 0) { v.stops[v.stopIdx] = o; break }
+                        }
+                        if (spot < 0 && toWaitingArea(v, 0)) return
+                    }
+                    if (spot < 0) { v.stopIdx++; v.called = false; return }
                     v.claim = spot
+                    v.called = false
                     goTo(v, spot, occ)
                 }
                 if (walk(v, dt, occ) && settle(v, dt)) {
@@ -1034,10 +1089,14 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 // with cashiers about, the lines at tills they're at (any till while they're still on their way)
                 val best = (if (tillsManned) open.filter { it in staffedTills }.ifEmpty { open } else open).minByOrNull { queues[it]?.size ?: 0 }
                 if (best == null) { v.stage = 3; v.goal = -1; return }
-                if ((queues[best]?.size ?: 0) >= (queueSlots[best]?.size ?: 0)) {
-                    if (v.retries++ < 4) { v.wait = 2f; return }
-                    v.stage = 3; v.goal = -1; return
+                if ((queues[best]?.size ?: 0) >= (queueSlots[best]?.size ?: 0) ||
+                    (!v.called && visitors.any { it !== v && it.stage == WAIT_STAGE && it.resume == 1 })) {
+                    // every line is full (or others are waiting their turn): take a seat in the waiting area till called
+                    if (!v.called && toWaitingArea(v, 1)) return
+                    if ((queues[best]?.size ?: 0) < (queueSlots[best]?.size ?: 0)) { /* no seat: join the line after all */ }
+                    else { if (v.retries++ < 4) { v.wait = 2f; return }; v.stage = 3; v.goal = -1; return }
                 }
+                v.called = false
                 v.counter = best
                 queues.getOrPut(best) { ArrayList() } += v
                 v.waitedFor = 0f
@@ -1064,7 +1123,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                     }
                     if (v.blockedFor >= 0f) {
                         // at the till: face it, put the goods down, pay and take the bag
-                        v.wait = 2.6f + e.rnd.nextFloat() * 1.2f; v.payTime = v.wait; v.blockedFor = -1f
+                        v.wait = (if (isSelfService(v.counter)) 4.2f else 2.6f) + e.rnd.nextFloat() * 1.2f; v.payTime = v.wait; v.blockedFor = -1f
                         items.getOrNull(v.counter)?.let { c -> Catalog.item(c.itemId)?.let { def ->
                             val (fw, fd) = itemDims(def, c.rot)
                             val tx = (v.x).coerceIn(c.x.toFloat(), (c.x + fw).toFloat()); val ty = (v.y).coerceIn(c.y.toFloat(), (c.y + fd).toFloat())
@@ -1100,6 +1159,17 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                     v.stage = 3
                     v.goal = -1
                 }
+            }
+            WAIT_STAGE -> { // sitting in the waiting area until called up (callFromWaitingArea)
+                if (v.goal < 0) {
+                    val seat = seatFor("waiting", occ, v)
+                    if (seat < 0) { v.stage = v.resume; v.resume = -1; v.called = true; v.goal = -1; return } // no seat after all: carry on
+                    v.claim = seat
+                    goTo(v, seat, occ)
+                }
+                if (walk(v, dt, occ)) settle(v, dt)
+                v.waitedFor += dt
+                if (v.waitedFor > WAIT_PATIENCE) { v.stage = 3; v.goal = -1; v.counter = -2; v.resume = -1 }
             }
             3 -> { // leave
                 v.claim = -1
@@ -1147,7 +1217,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             InteriorMode.BUSINESS -> {
                 val b = business!!
                 val occFull = occupancy()
-                val counters = counters()
+                val counters = counters().filter { !isSelfService(it) }
                 var regIdx = 0
                 var desk = 0
                 val desks = itemsWith("desk").map { it.index }
@@ -1291,6 +1361,8 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         }
         if (playerStation >= 0) servedStations += playerStation
         if (playerTill >= 0) staffedTills += playerTill
+        // customers serve themselves at a self-checkout or a kiosk
+        for (ci in counters()) if (isSelfService(ci)) staffedTills += ci
     }
 
     /** A staff member bringing a box: to the box ([from]: a storage shelf or the door), pick it up, to the display, unpack. */
@@ -1511,6 +1583,9 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
         /** Seconds a seated client waits for a stylist, and a customer at an empty till, before giving up. */
         const val SERVICE_PATIENCE = 60f
         const val TILL_PATIENCE = 20f
+        /** The stage of a customer sitting in the waiting area, and how long they'll sit there before giving up. */
+        const val WAIT_STAGE = 5
+        const val WAIT_PATIENCE = 120f
         private val DX = intArrayOf(1, -1, 0, 0)
         private val DY = intArrayOf(0, 0, 1, -1)
 

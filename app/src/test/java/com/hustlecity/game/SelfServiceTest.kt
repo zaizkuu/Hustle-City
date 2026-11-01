@@ -1,0 +1,89 @@
+package com.hustlecity.game
+
+import com.hustlecity.game.data.Catalog
+import com.hustlecity.game.data.StaffRole
+import com.hustlecity.game.engine.BizCalc
+import com.hustlecity.game.engine.GameEngine
+import com.hustlecity.game.engine.InteriorMode
+import com.hustlecity.game.engine.InteriorScene
+import com.hustlecity.game.engine.startBusiness
+import com.hustlecity.game.model.Employee
+import com.hustlecity.game.model.PlacedItem
+import com.hustlecity.game.model.Rental
+import com.hustlecity.game.world.BKind
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+/**
+ * Self-checkouts and order kiosks: customers pay at them with no cashier there, and they add to what the store can
+ * serve without needing more staff. When every line is full, customers sit in the waiting area until there's room.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+class SelfServiceTest {
+    private fun store(type: String, furniture: List<PlacedItem>, cashiers: Int, floor: Int = 0): Pair<GameEngine, InteriorScene> {
+        val e = GameEngine(null)
+        e.newGame("T", 0, 0, 1)
+        e.state.minute = (e.state.minute / 1440) * 1440 + 12 * 60
+        val b = e.city.buildings.first { e.isVacant(it.id) && it.kind == BKind.RETAIL && it.placeId == null && it.gridW in 8..12 && it.gridD in 10..20 }
+        e.state.rentals += Rental(b.id, b.baseRent, 1)
+        val biz = e.startBusiness(b.id, type, "Test")!!
+        biz.tempClosed = false
+        val room = biz.backRoom.coerceAtLeast(0)
+        biz.furniture += furniture.map { PlacedItem(it.itemId, it.x, room + it.y, it.rot) }
+        for ((pid, _) in biz.type.products) biz.stock[pid] = 500
+        repeat(cashiers) { e.state.employees += Employee(e.state.newId(), "C", StaffRole.CUSTOMER_SERVICE, .8, 15.0, 15.0, 25, businessId = biz.id, shiftStart = 0, shiftEnd = 23, days = 127) }
+        repeat(floor) { e.state.employees += Employee(e.state.newId(), "F", StaffRole.CLEANER, .8, 15.0, 15.0, 25, businessId = biz.id, shiftStart = 0, shiftEnd = 23, days = 127) }
+        e.state.player.inBuilding = b.id
+        val sc = InteriorScene(e, b, InteriorMode.BUSINESS)
+        e.interior = sc
+        e.economy.servedRate[biz.id] = 250.0
+        return e to sc
+    }
+
+    @Test
+    fun selfCheckoutsAddCapacityWithoutStaff() {
+        val (e, _) = store("supermarket", listOf(PlacedItem("cash_register", 1, 2, 0), PlacedItem("self_checkout", 4, 2, 0), PlacedItem("self_checkout", 6, 2, 0)), 1)
+        val biz = e.state.businesses.first()
+        // one cashier: the staffed till's 40 plus both self-checkouts' 25 each
+        assertEquals(90.0, BizCalc.registerCapacity(biz, 1), .01)
+        assertEquals(50.0, BizCalc.registerCapacity(biz, 0), .01)
+        for (id in listOf("self_checkout", "order_kiosk", "waiting_chairs", "coffee_table")) {
+            assertTrue("$id is in the catalog", Catalog.item(id) != null)
+            assertTrue("$id is sold somewhere", Catalog.places.any { id in it.stock })
+        }
+    }
+
+    @Test
+    fun customersPayAtASelfCheckoutWithNoCashier() {
+        // a shop with shelves, a self-checkout and nobody on the tills (a cleaner keeps it open)
+        val (_, sc) = store("supermarket", listOf(PlacedItem("self_checkout", 4, 2, 0), PlacedItem("shelf", 1, 6, 0), PlacedItem("shelf", 5, 6, 0)), 0, floor = 1)
+        val till = sc.items.indexOfFirst { it.itemId == "self_checkout" }
+        var paid = 0
+        repeat(30 * 240) {
+            val paying = sc.visitors.filter { it.counter == till && it.payTime > 0f && it.wait > 0f }.toSet()
+            sc.update(1 / 30f, true)
+            paid += paying.count { it.wait <= 0f || it.counter != till }
+        }
+        println("self-checkout: $paid customers paid")
+        assertTrue("customers paid at the self-checkout ($paid)", paid >= 5)
+    }
+
+    @Test
+    fun fullLinesWaitInTheWaitingArea() {
+        // one staffed till, a very busy café and waiting room chairs
+        val (_, sc) = store("coffee", listOf(PlacedItem("cash_register", 1, 2, 0), PlacedItem("coffee_machine", 4, 0, 0), PlacedItem("waiting_chairs", 5, 7, 0)), 1)
+        sc.e.economy.servedRate[sc.e.state.businesses.first().id] = 1500.0
+        var seated = 0
+        repeat(30 * 180) {
+            sc.update(1 / 30f, true)
+            seated = maxOf(seated, sc.visitors.count { it.stage == InteriorScene.WAIT_STAGE && it.seated })
+        }
+        println("full lines: up to $seated waiting on the chairs")
+        assertTrue("with the lines full, customers sat in the waiting area ($seated)", seated >= 1)
+    }
+}

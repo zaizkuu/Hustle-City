@@ -137,9 +137,16 @@ object BizCalc {
     }
 
     /** Customers per hour the [n] busiest registers can check out (counters are faster than registers). */
-    fun registerCapacity(b: Business, n: Int): Double =
-        b.furniture.mapNotNull { p -> Catalog.item(p.itemId)?.takeIf { it.fn == ItemFn.CASH_REGISTER }?.let { if (it.capacity > 0) it.capacity else 40 } }
-            .sortedDescending().take(n).sum().toDouble()
+    /**
+     * Customers per hour the tills can take with [n] people on the floor: each staffed till needs one of them, while
+     * self-checkouts and order kiosks work on their own.
+     */
+    fun registerCapacity(b: Business, n: Int): Double {
+        val tills = b.furniture.mapNotNull { p -> Catalog.item(p.itemId)?.takeIf { it.fn == ItemFn.CASH_REGISTER } }
+        val self = tills.filter { "self_service" in it.tags }.sumOf { it.capacity }
+        val staffed = tills.filter { "self_service" !in it.tags }.map { if (it.capacity > 0) it.capacity else 40 }.sortedDescending().take(n).sum()
+        return (self + staffed).toDouble()
+    }
 
     /** Share of shoplifting attempts that security stops. */
     fun security(b: Business) = (count(b, "security_cam") * .3 + count(b, "security_gate") * .55).coerceAtMost(.95)
