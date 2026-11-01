@@ -61,6 +61,10 @@ class UiState {
     var frameTime by mutableStateOf(0L)
     /** The player is eating until this moment ([GameEngine.realTime]): their character acts it out. */
     var eatingUntil = 0f
+    /** What they're eating ([com.hustlecity.game.render.Snack]). */
+    var eatingItem = 0
+    /** Paying at a street food cart until this moment: the money held out across it. */
+    var payingUntil = 0f
     /** One-time tip (title, text). */
     var tip by mutableStateOf<Pair<String, String>?>(null)
 }

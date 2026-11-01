@@ -26,7 +26,7 @@ class StreetBehaviourTest {
         t.doors = FloatArray(shops.size * 5).also { d -> for ((k, b) in shops.withIndex()) { d[k * 5] = b.doorX; d[k * 5 + 1] = b.doorY; d[k * 5 + 2] = .05f; d[k * 5 + 3] = -b.frontX; d[k * 5 + 4] = -b.frontY } }
         t.doorCount = shops.size
         t.update(0f, focus.x, focus.y, 200f, -9999f, -9999f, initial = true)
-        val seen = IntArray(4)
+        val seen = IntArray(7)
         var bags = 0; var joggers = 0
         repeat(30 * 240) {
             t.update(1f / 30f, focus.x, focus.y, 200f, -9999f, -9999f)
@@ -44,8 +44,50 @@ class StreetBehaviourTest {
         assertTrue("shoppers carry bags", bags > 0)
         assertTrue("people jog", joggers > 0)
         // most of the time, most people are just walking
-        val busy = seen[1] + seen[2] + seen[3]
+        val busy = seen[1] + seen[2] + seen[3] + seen[4]
         assertTrue("not everyone loiters ($busy of ${seen.sum()})", busy * 4 < seen.sum())
+    }
+
+    /** Passers-by stop at the street food carts, pay, and walk on eating; walking past, they go round the cart, not through it. */
+    @Test
+    fun peopleBuyFromFoodCarts() {
+        for (mapId in listOf(Maps.MANILA, Maps.NYC)) {
+            val city = City(1337L, mapId)
+            val props = com.hustlecity.game.render.StreetProps(city)
+            val carts = (0 until props.count).filter { props.kind[it] == com.hustlecity.game.render.StreetProps.VENDOR }
+            assertTrue("$mapId has food carts", carts.size > 10)
+            // the busiest corner for carts: the cart with most others within 120 m
+            val c0 = carts.maxByOrNull { i -> carts.count { j -> abs(props.x[j] - props.x[i]) < 120f && abs(props.y[j] - props.y[i]) < 120f } }!!
+            val fx = props.x[c0]; val fy = props.y[c0]
+            val near = carts.filter { abs(props.x[it] - fx) < 160f && abs(props.y[it] - fy) < 160f }
+            val t = Traffic(Random(5))
+            t.attach(city)
+            t.ensure(0, 220)
+            t.stands = FloatArray(near.size * 4).also { d -> for ((k, i) in near.withIndex()) { d[k * 4] = props.x[i]; d[k * 4 + 1] = props.y[i]; d[k * 4 + 2] = props.dirX[i]; d[k * 4 + 3] = props.dirY[i] } }
+            t.standCount = near.size
+            t.update(0f, fx, fy, 200f, -9999f, -9999f, initial = true)
+            var buying = 0; var eating = 0; var through = 0; var passing = 0
+            repeat(30 * 300) {
+                t.update(1f / 30f, fx, fy, 200f, -9999f, -9999f)
+                for (a in t.peds) {
+                    if (a.hidden || !a.placed) continue
+                    if (a.state == 7) buying++
+                    if (a.activity == PedActivity.EAT) eating++
+                    if (a.state != 0) continue
+                    // walking: never inside a cart (along it within its length, across it within its depth)
+                    for (i in near) {
+                        val qx = a.x - props.x[i]; val qy = a.y - props.y[i]
+                        val la = qx * -props.dirY[i] + qy * props.dirX[i]; val ld = qx * props.dirX[i] + qy * props.dirY[i]
+                        if (abs(la) < 1.2f && abs(ld) < 1.4f) passing++
+                        if (abs(la) < .75f && ld > -.35f && ld < .35f) through++
+                    }
+                }
+            }
+            println("$mapId: ${near.size} carts, frames buying $buying, eating $eating, passing $passing, through a cart $through")
+            assertTrue("$mapId: someone bought from a cart", buying > 0)
+            assertTrue("$mapId: and walked off eating it", eating > 0)
+            assertTrue("$mapId: walkers go round the carts ($through of $passing frames)", through * 50 <= passing)
+        }
     }
 
     @Test

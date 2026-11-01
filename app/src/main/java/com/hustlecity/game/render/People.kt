@@ -6,6 +6,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+private const val PI_F = 3.14159265f
+
 /**
  * What a person is doing with their hands, acted out on top of their pose (HD models): staff at work, customers
  * paying, eating or training. [PersonPainter.draw] takes one with a running time.
@@ -52,6 +54,37 @@ object Act {
     const val PUNCH = 18
     /** Pulling a rowing handle. */
     const val ROW = 19
+    /** At a street food cart's griddle: turning what's cooking with a spatula, now and then handing it over. */
+    const val COOK = 21
+    /** Reading their phone, both thumbs on it. */
+    const val PHONE = 22
+    /** On a call, the phone held to their cheek. */
+    const val CALL = 23
+    /** Talking with someone, a hand going as they speak. */
+    const val TALK = 24
+    /** Looking in a shop window: chin in hand, now and then pointing something out. */
+    const val POINT = 25
+    /** Looking about: both ways before crossing, round the street while they wait. */
+    const val LOOK = 26
+    /** Eating standing up or on the move: a snack in hand, a bite now and then ([PersonPainter.draw]'s item says what). */
+    const val SNACK = 27
+    /** Paying at a stall: the money held out across it. */
+    const val PAY = 28
+    /** One past the last act. */
+    const val COUNT = 29
+}
+
+/** What a [Act.SNACK] has in hand. */
+object Snack {
+    /** Fishballs, yakitori, fish cake: something on a skewer. */
+    const val SKEWER = 0
+    const val HOT_DOG = 1
+    /** A drink with a straw (taho, soda). */
+    const val CUP = 2
+    /** A paper boat or bag: takoyaki, fries, tteokbokki, kwek-kwek. */
+    const val BOAT = 3
+    /** Something round in a paper wrap: a pretzel, a hotteok, a burger. */
+    const val WRAP = 4
 }
 
 /** Poses for [PersonPainter]. */
@@ -122,7 +155,7 @@ class PersonPainter(private val scene: Scene3D) {
         x: Float, y: Float, z: Float, heading: Float, phase: Float, moving: Float,
         shirt: Int, pants: Int, skin: Int, hair: Int, scale: Float = 1f, pose: Int = Pose.STAND,
         apron: Int = 0, umbrella: Int = 0, alpha: Float = 1f, carry: Int = 0, load: Int = 0, held: Int = 0, bag: Boolean = false,
-        reach: Boolean = false, act: Int = Act.NONE, actT: Float = 0f,
+        reach: Boolean = false, act: Int = Act.NONE, actT: Float = 0f, item: Int = Snack.SKEWER,
     ) {
         n = 0
         // until the model says otherwise, the right hand hangs at the hip, a little out from the body
@@ -144,7 +177,7 @@ class PersonPainter(private val scene: Scene3D) {
             }
             if (umbrella != 0 && pose == Pose.STAND) umbrella(z, s, umbrella)
             emit(x, y, heading, alpha)
-            if (act != Act.NONE && handLocal[3] > 0f) props(act, actT, x, y, z, heading, s)
+            if (act != Act.NONE && handLocal[3] > 0f) props(act, actT, x, y, z, heading, s, item)
             return
         }
         when (pose) {
@@ -197,12 +230,61 @@ class PersonPainter(private val scene: Scene3D) {
     }
 
     private val bones = FloatArray(32 * 12)
+    /** The standing pose, for arms that stay put while the legs walk. */
+    private val idle = FloatArray(32 * 12)
+    private val inv = FloatArray(12); private val rel = FloatArray(12)
+
+    /**
+     * Puts arm [first]'s upper arm, forearm and hand (the three bones after its shoulder bone) as they are in [idle],
+     * relative to the shoulder bone as it is in [bones].
+     */
+    private fun rebase(first: Int) {
+        if (first < 0) return
+        val s = first * 12
+        // the idle shoulder's inverse (rigid: the rotation transposed, the translation turned back)
+        for (r in 0 until 3) for (c in 0 until 3) inv[r * 4 + c] = idle[s + c * 4 + r]
+        for (r in 0 until 3) inv[r * 4 + 3] = -(inv[r * 4] * idle[s + 3] + inv[r * 4 + 1] * idle[s + 7] + inv[r * 4 + 2] * idle[s + 11])
+        // the walking shoulder times that: what takes the idle arm onto the walking body
+        compose(bones, s, inv, 0, rel)
+        for (b in first + 1..first + 3) {
+            compose(rel, 0, idle, b * 12, inv)
+            System.arraycopy(inv, 0, bones, b * 12, 12)
+        }
+        // inv was used as scratch: it's rebuilt on the next call
+    }
+
+    /** out = a (at [ao]) times b (at [bo]), 3x4 rigid transforms stored row by row. */
+    private fun compose(a: FloatArray, ao: Int, b: FloatArray, bo: Int, out: FloatArray) {
+        for (r in 0 until 3) {
+            val a0 = a[ao + r * 4]; val a1 = a[ao + r * 4 + 1]; val a2 = a[ao + r * 4 + 2]
+            for (c in 0 until 4) out[r * 4 + c] = a0 * b[bo + c] + a1 * b[bo + 4 + c] + a2 * b[bo + 8 + c] + (if (c == 3) a[ao + r * 4 + 3] else 0f)
+        }
+    }
     private var vx = FloatArray(0); private var vy = FloatArray(0); private var vz = FloatArray(0)
     private val tx = FloatArray(3); private val ty = FloatArray(3); private val tz = FloatArray(3)
 
     /** [m] posed for what the person is doing, at (x, y, z) facing [heading], in their colours. */
     private fun modelled(m: PeopleModels.Model, x: Float, y: Float, z: Float, heading: Float, phase: Float, moving: Float, pose: Int,
                          s: Float, top: Int, bottom: Int, skin: Int, hair: Int, alpha: Float, holding: Boolean, act: Int = Act.NONE, actT: Float = 0f) {
+        posed(m, x + y, phase, moving, pose, holding, act, actT)
+        skinned(m, x, y, z, heading, s, top, bottom, skin, hair, alpha)
+    }
+
+    /** Tests: model [index] [act]ing [t] seconds in while walking at [moving] (0..1), [cycle] (0..1) through a stride: hand minus neck. */
+    internal fun debugWalkingHand(index: Int, act: Int, t: Float, moving: Float, cycle: Float): FloatArray {
+        val m = PeopleModels.models[index]
+        posed(m, 0f, cycle * TWO_PI, moving, Pose.STAND, false, act, t)
+        val j = jointsOf(m); val b = bones
+        val wr = wristOf(m); val o = wr[0].toInt() * 12
+        val n = j.neck; val q = 6 * 12
+        return FloatArray(3) { r ->
+            (b[o + r * 4] * wr[1] + b[o + r * 4 + 1] * wr[2] + b[o + r * 4 + 2] * wr[3] + b[o + r * 4 + 3]) -
+                (b[q + r * 4] * n[0] + b[q + r * 4 + 1] * n[1] + b[q + r * 4 + 2] * n[2] + b[q + r * 4 + 3])
+        }
+    }
+
+    /** Poses [m]'s bones for [pose] at [moving] speed, [phase] through the stride, acting [act]; [seed] staggers the idle sway. */
+    private fun posed(m: PeopleModels.Model, seed: Float, phase: Float, moving: Float, pose: Int, holding: Boolean, act: Int, actT: Float) {
         val rig = m.rig
         val cycle = (phase / TWO_PI).let { it - kotlin.math.floor(it) }
         fun dur(name: String) = rig.clips[name]?.duration ?: 1f
@@ -215,10 +297,22 @@ class PersonPainter(private val scene: Scene3D) {
                 val k = moving.coerceIn(0f, 1f).let { it * it * (3 - 2 * it) }
                 val still = if (holding) "CarryIdle" else "Idle"
                 val walk = if (holding) "Carry" else "Walk"
-                PeopleModels.pose(rig, still, clock + (x + y) * .37f, walk, cycle * dur(walk), k, bones)
+                PeopleModels.pose(rig, still, clock + seed * .37f, walk, cycle * dur(walk), k, bones)
+                // an arm busy with a phone, a snack or money keeps its standing pose, carried along by the walking
+                // shoulders, rather than swinging with the stride
+                if (k > 0f && (act == Act.PHONE || act == Act.CALL || act == Act.SNACK || act == Act.PAY)) {
+                    PeopleModels.pose(rig, still, clock + seed * .37f, still, 0f, 0f, idle)
+                    val j = jointsOf(m)
+                    rebase(j.right)
+                    if (act == Act.PHONE) rebase(j.left)
+                }
             }
         }
         if (act != Act.NONE) acting(m, act, actT, pose)
+    }
+
+    /** Skins [m]'s mesh to the bones just posed, at (x, y, z) facing [heading], in their colours; notes where the hands are. */
+    private fun skinned(m: PeopleModels.Model, x: Float, y: Float, z: Float, heading: Float, s: Float, top: Int, bottom: Int, skin: Int, hair: Int, alpha: Float) {
         val nv = m.vertices
         if (vx.size < nv) { vx = FloatArray(nv); vy = FloatArray(nv); vz = FloatArray(nv) }
         val fx = sin(heading); val fy = -cos(heading)
@@ -549,6 +643,61 @@ class PersonPainter(private val scene: Scene3D) {
                 arm(j, true, 72f - k * 40f, 6f, 0f, 10f + k * 70f)
                 arm(j, false, 72f - k * 40f, 6f, 0f, 10f + k * 70f)
             }
+            Act.COOK -> {
+                // turning things on the griddle, and every few seconds lifting one off to hand across the cart
+                val c = t % 7f
+                val serve = if (c > 5.2f) sin((c - 5.2f) / 1.8f * PI_F) else 0f
+                arm(j, true, 24f + wave(4.4f) * 6f + serve * 26f, 24f, -42f + wave(4.4f) * 12f, 12f + serve * 20f)
+                arm(j, false, 20f, 18f, 36f, 30f)
+                head(j, 24f - serve * 18f, wave(.45f) * 10f)
+            }
+            Act.PHONE -> {
+                // the phone held in front of the chest, thumbs going, head bowed over it
+                val tap = wave(11f) * 2.5f
+                arm(j, true, 9f, 0f, -40f, 76f + tap)
+                arm(j, false, 9f, 0f, 40f, 76f - tap)
+                head(j, 28f, 0f)
+            }
+            Act.CALL -> {
+                // the phone at the cheek; the free hand moves now and then as they talk
+                arm(j, true, 32f, 20f, -34f, 128f)
+                val g = sin(t * 1.3f).coerceAtLeast(0f)
+                arm(j, false, 8f + g * 18f, 6f, 6f, 18f + g * 55f)
+                head(j, 6f, -10f + wave(.7f) * 6f)
+            }
+            Act.TALK -> {
+                // a hand going as they talk, the other at their side; nods and the odd glance away
+                val g = sin(t * 1.7f) + sin(t * 2.9f + 1f) * .6f
+                arm(j, true, 18f + g.coerceAtLeast(0f) * 22f, 10f, -12f, 48f + g * 22f)
+                arm(j, false, 6f, 4f, 6f, 16f + (-g).coerceAtLeast(0f) * 30f)
+                head(j, 4f + sin(t * 2.3f) * 5f, sin(t * .6f) * 12f)
+            }
+            Act.POINT -> {
+                // chin in hand, looking along the window; now and then pointing at something in it
+                val c = t % 6f
+                val p = if (c > 2f && c < 4.2f) sin((c - 2f) / 2.2f * PI_F) else 0f
+                arm(j, true, 18f + p * 58f, 6f, -4f, 24f - p * 18f)
+                arm(j, false, 28f * (1f - p), 4f, 26f * (1f - p), 118f * (1f - p))
+                head(j, 6f - p * 6f, sin(t * .5f) * 16f)
+            }
+            Act.LOOK -> {
+                // a look one way, then the other, the shoulders following the head a little
+                val turn = sin(t * 1.15f) * 58f
+                head(j, -2f, turn)
+                waist(j, turn * .22f)
+            }
+            Act.SNACK -> {
+                // the snack held in front; a bite every few seconds, up to the mouth
+                val c = t % 3.4f
+                val up = if (c < 1.1f) sin(c / 1.1f * PI_F) else 0f
+                arm(j, true, up * 15f, 0f, -24f - 16f * up, 52f + up * 84f)
+                head(j, 8f - up * 6f, 0f)
+            }
+            Act.PAY -> {
+                arm(j, true, 20f, 28f, -48f, 45f)
+                arm(j, false, 14f, 4f, 0f, 30f)
+                head(j, 10f, 0f)
+            }
         }
     }
 
@@ -573,6 +722,26 @@ class PersonPainter(private val scene: Scene3D) {
             for (k in 0 until 3) { out[k] = minOf(out[k], q[k]); out[k + 3] = maxOf(out[k + 3], q[k]) }
         }
         return out
+    }
+
+    /**
+     * Tests: model [index] standing, its right arm posed with [arm]'s angles: where the right hand ends up (forward,
+     * right, up) and where the neck is.
+     */
+    internal fun debugArm(index: Int, swing: Float, abduct: Float, twist: Float, elbow: Float): FloatArray {
+        val m = PeopleModels.models[index]
+        PeopleModels.pose(m.rig, "Idle", 0f, "Idle", 0f, 0f, bones)
+        val j = jointsOf(m)
+        arm(j, true, swing, abduct, twist, elbow)
+        val wr = wristOf(m); val o = wr[0].toInt() * 12; val b = bones
+        val hf = b[o] * wr[1] + b[o + 1] * wr[2] + b[o + 2] * wr[3] + b[o + 3]
+        val hr = b[o + 4] * wr[1] + b[o + 5] * wr[2] + b[o + 6] * wr[3] + b[o + 7]
+        val hu = b[o + 8] * wr[1] + b[o + 9] * wr[2] + b[o + 10] * wr[3] + b[o + 11]
+        val n = j.neck; val q = 6 * 12
+        val nf = b[q] * n[0] + b[q + 1] * n[1] + b[q + 2] * n[2] + b[q + 3]
+        val nr = b[q + 4] * n[0] + b[q + 5] * n[1] + b[q + 6] * n[2] + b[q + 7]
+        val nu = b[q + 8] * n[0] + b[q + 9] * n[1] + b[q + 10] * n[2] + b[q + 11]
+        return floatArrayOf(hf, hr, hu, nf, nr, nu)
     }
 
     /** Tests: the joints worked out for model [index]. */
@@ -605,10 +774,21 @@ class PersonPainter(private val scene: Scene3D) {
     private fun cube(x: Float, y: Float, z: Float, hx: Float, hy: Float, hz: Float, color: Int, top: Int = color) =
         scene.box(x - hx, y - hy, z - hz, x + hx, y + hy, z + hz, top, color)
 
-    /** What the hands hold for [act]: a mop, scissors and a comb, a clipboard, a cup, dumbbells. */
-    private fun props(act: Int, t: Float, x: Float, y: Float, z: Float, heading: Float, s: Float) {
+    /** What the hands hold for [act]: a mop, scissors and a comb, a clipboard, a cup, dumbbells, a phone, a snack. */
+    private fun props(act: Int, t: Float, x: Float, y: Float, z: Float, heading: Float, s: Float, item: Int) {
         val fx = sin(heading); val fy = -cos(heading)
         when (act) {
+            Act.COOK -> {
+                // the spatula: a handle out of the hand and a blade flat on the griddle
+                val bx = handX + fx * .2f * s; val by = handY + fy * .2f * s
+                stick(handX, handY, handZ, bx, by, handZ - .07f * s, .012f * s, c(0xFF2A2D31))
+                cube(bx + fx * .04f * s, by + fy * .04f * s, handZ - .075f * s, .045f * s, .045f * s, .006f * s, c(0xFFC5CBD1))
+            }
+            Act.PHONE -> cube((handX + lHandX) * .5f, (handY + lHandY) * .5f, (handZ + lHandZ) * .5f + .03f * s, .035f * s, .035f * s, .008f * s,
+                c(0xFF1C1E22), c(0xFF9FD3FF))
+            Act.CALL -> cube(handX, handY, handZ + .04f * s, .012f * s, .012f * s, .06f * s, c(0xFF1C1E22))
+            Act.PAY -> cube(handX + fx * .04f * s, handY + fy * .04f * s, handZ + .01f * s, .05f * s, .05f * s, .004f * s, c(0xFF4E8F4A), c(0xFF7CC576))
+            Act.SNACK -> snack(item, handX, handY, handZ, fx, fy, s)
             Act.MOP -> {
                 // the handle from the right hand down to the mop head on the floor ahead, swept with the body
                 val sw = sin(t * 2.4f) * .35f * s
@@ -632,6 +812,34 @@ class PersonPainter(private val scene: Scene3D) {
                 // the open box at their feet, off to the side
                 val bx = x + fx * .3f * s + fy * .38f * s; val by = y + fy * .3f * s - fx * .38f * s
                 scene.box(bx - .2f * s, by - .16f * s, z, bx + .2f * s, by + .16f * s, z + .3f * s, CARD_DARK, CARD)
+            }
+        }
+    }
+
+    /** A snack of kind [item] ([Snack]) in the hand at (hx, hy, hz), its top end toward the face. */
+    private fun snack(item: Int, hx: Float, hy: Float, hz: Float, fx: Float, fy: Float, s: Float) {
+        when (item) {
+            Snack.SKEWER -> {
+                // three balls up a stick
+                stick(hx, hy, hz, hx + fx * .04f * s, hy + fy * .04f * s, hz + .24f * s, .004f * s, c(0xFFE8D9B0))
+                for (k in 0 until 3) scene.blob(hx + fx * (.012f + k * .011f) * s, hy + fy * (.012f + k * .011f) * s, hz + (.1f + k * .045f) * s,
+                    .022f * s, c(0xFFC98A45), 5)
+            }
+            Snack.HOT_DOG -> {
+                val ex = fx * .07f * s; val ey = fy * .07f * s
+                stick(hx - ex, hy - ey, hz + .03f * s, hx + ex, hy + ey, hz + .05f * s, .022f * s, c(0xFFE0B070))
+                stick(hx - ex * 1.2f, hy - ey * 1.2f, hz + .055f * s, hx + ex * 1.2f, hy + ey * 1.2f, hz + .075f * s, .01f * s, c(0xFFB5523A))
+            }
+            Snack.CUP -> {
+                scene.cylinder(hx, hy, .035f * s, hz - .02f * s, hz + .11f * s, 7, c(0xFFF4F1EA), c(0xFFE8D9B0))
+                stick(hx, hy, hz + .11f * s, hx + fx * .01f * s, hy + fy * .01f * s, hz + .17f * s, .004f * s, c(0xFFD32F2F))
+            }
+            Snack.BOAT -> {
+                cube(hx + fx * .03f * s, hy + fy * .03f * s, hz + .03f * s, .05f * s, .05f * s, .02f * s, c(0xFFF4F1EA), c(0xFFC98A45))
+            }
+            else -> {
+                scene.blob(hx + fx * .02f * s, hy + fy * .02f * s, hz + .06f * s, .05f * s, c(0xFFC98A45), 6)
+                cube(hx, hy, hz + .03f * s, .045f * s, .045f * s, .03f * s, c(0xFFF4F1EA))
             }
         }
     }

@@ -166,6 +166,7 @@ fun KeyHints(e: GameEngine, modifier: Modifier = Modifier) {
             val car = e.nearVehicle
             KeyRow(listOf("W", "A", "S", "D"), "Walk")
             KeyRow(listOf("E"), when {
+                e.vendorFirst() -> "Buy ${com.hustlecity.game.engine.StreetFood.menu(e.city.mapId).first().label}"
                 door != null -> "Enter ${doorLabel(e, door)}"
                 car != null -> "Get in ${car.def.name}"
                 else -> "Go in doors, get in cars"

@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.Fastfood
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowLeft
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowRight
@@ -94,6 +95,7 @@ import com.hustlecity.game.audio.Audio
 import com.hustlecity.game.data.Catalog
 import com.hustlecity.game.engine.eatOwnStock
 import com.hustlecity.game.engine.findFood
+import com.hustlecity.game.engine.buyStreetFood
 import com.hustlecity.game.engine.rentOf
 import com.hustlecity.game.engine.AppId
 import com.hustlecity.game.engine.BizCalc
@@ -475,7 +477,16 @@ fun ActionButtons(e: GameEngine, modifier: Modifier = Modifier) {
     if (p.driving >= 0) return
     // with keyboard controls, E and F go in and get in (the key hints say which), so those buttons stay hidden
     val keys = e.settings.keyboard
-    Row(modifier.padding(bottom = 22.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(modifier.padding(bottom = 22.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
+        // at a street food cart: its menu
+        if (e.nearVendor >= 0) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(com.hustlecity.game.engine.StreetFood.cartName(e.city.mapId).uppercase(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = .6.sp, modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(HC.GlassDark).padding(horizontal = 7.dp, vertical = 2.dp))
+            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                for (sn in com.hustlecity.game.engine.StreetFood.menu(e.city.mapId))
+                    HButton("${sn.name} \$${sn.price.roundToInt()}", color = HC.Orange, small = true, icon = Icons.Filled.Fastfood) { e.buyStreetFood(sn) }
+            }
+        }
         e.nearDoor?.let { b ->
             if (!keys) HButton("Enter ${doorLabel(e, b)}", color = HC.Green) { e.enterBuilding(b) }
         }

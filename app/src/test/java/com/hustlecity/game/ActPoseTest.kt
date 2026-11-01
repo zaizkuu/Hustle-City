@@ -27,7 +27,7 @@ class ActPoseTest {
         assertTrue("no character models", PeopleModels.models.isNotEmpty())
         for (i in PeopleModels.models.indices) {
             val still = painter.debugExtent(i, Act.NONE, 0f)
-            for (a in 1..20) {
+            for (a in 1 until Act.COUNT) {
                 val pose = if (a in seated) Pose.SIT else Pose.STAND
                 for (k in 0 until 50) {
                     val x = painter.debugExtent(i, a, k * .2f, pose)
@@ -37,6 +37,23 @@ class ActPoseTest {
                     assertTrue("${PeopleModels.models[i].name} act $a reaches below the floor", x[2] > still[2] - (if (pose == Pose.SIT) .6f else .08f))
                     assertTrue("${PeopleModels.models[i].name} act $a reaches too high", x[5] < 2.2f)
                 }
+            }
+        }
+    }
+
+    /**
+     * Walking with a phone, a call, a snack or money in hand, the arm holds it where it would standing still (relative to
+     * the head), all through the stride, instead of swinging it about.
+     */
+    @Test
+    fun heldThingsStayPutWhileWalking() {
+        val painter = PersonPainter(Scene3D(Projector(), RenderBatch()))
+        for (i in PeopleModels.models.indices) for (act in intArrayOf(Act.PHONE, Act.CALL, Act.SNACK, Act.PAY)) {
+            val still = painter.debugWalkingHand(i, act, 2f, 0f, 0f)
+            for (k in 0 until 10) {
+                val h = painter.debugWalkingHand(i, act, 2f, 1f, k / 10f)
+                val d = kotlin.math.sqrt((h[0] - still[0]) * (h[0] - still[0]) + (h[1] - still[1]) * (h[1] - still[1]) + (h[2] - still[2]) * (h[2] - still[2]))
+                assertTrue("${PeopleModels.models[i].name} act $act at ${k / 10f} of the stride: hand %.2f m off".format(d), d < .12f)
             }
         }
     }

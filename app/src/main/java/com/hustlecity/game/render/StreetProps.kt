@@ -24,8 +24,17 @@ class StreetProps(val city: City) {
         const val PLANTER = 10
         /** Manila: a concrete utility pole with a street light, its wires slung to the next pole and into the houses. */
         const val UTIL_POLE = 11
-        /** Manila: a street food cart under a big umbrella (the vendor is drawn by the renderer). */
+        /**
+         * A street food cart (the vendor is drawn by the renderer): Manila's under a big umbrella, New York's hot dog
+         * carts, Tokyo's yatai and Seoul's pojangmacha tents. The prop faces the road; the cook stands
+         * [COOK_AT] toward the road from it and customers [SERVE_AT] back toward the buildings.
+         */
         const val VENDOR = 12
+        /** How far past the kerb the middle of a cart stands, and where its cook and its customers stand. */
+        const val CART_OFF = .65f
+        const val COOK_AT = .9f
+        const val SERVE_AT = 1.05f
+        const val CART_MANILA = 0; const val CART_HOTDOG = 1; const val CART_YATAI = 2; const val CART_POCHA = 3
         /** Tokyo and Seoul: drink vending machines against a wall, lit at night. */
         const val VENDING = 13
         /** Tokyo's yokocho alleys: a string of red paper lanterns across the lane. */
@@ -131,7 +140,9 @@ class StreetProps(val city: City) {
     private fun clearSpot(px: Float, py: Float, ux: Float, uy: Float, nx: Float, ny: Float, k: Int): Boolean {
         val g = city.roads
         val half = footprint(k)
-        for (sx in floatArrayOf(-half, 0f, half)) for (sy in floatArrayOf(0f, if (k == BUS_STOP || k == VENDING) .7f else .3f)) {
+        // a food cart needs room behind it, for its customers
+        val deep = when (k) { BUS_STOP, VENDING -> .7f; VENDOR -> SERVE_AT + .5f; else -> .3f }
+        for (sx in floatArrayOf(-half, 0f, half)) for (sy in floatArrayOf(0f, deep)) {
             val qx = px + ux * sx + nx * sy; val qy = py + uy * sx + ny * sy
             if (g.nearAsphalt(qx, qy, .25f)) return false
             if (k != LAMP && k != UTIL_POLE && k != HYDRANT && building(qx, qy)) return false
@@ -267,12 +278,16 @@ class StreetProps(val city: City) {
                 val curb = e.cls.halfWidth + .6f
                 val s0 = e.clearA + 4f; val s1 = e.len - e.clearB - 4f
                 if (s1 - s0 < 6f) continue
+                // the food cart on this side of the block, if there is one: nothing else is put down in its way
+                var cart = -1
                 fun at(s: Float, off: Float, k: Int): Int {
                     val px = e.ax + e.ux * s + nx * off; val py = e.ay + e.uy * s + ny * off
                     if (city.shore.anyWater(px, py) || city.parks.any { Geo.inside(px, py, it.poly) } || city.reserved(px, py)) return -1
                     if (!clearSpot(px, py, e.ux, e.uy, nx, ny, k)) return -1
+                    if (cart >= 0 && dist(px, py, x[cart], y[cart]) < footprint(k) + 2.6f) return -1
                     return add(px, py, k, -nx, -ny)
                 }
+                val sideStart = count
                 val hood = city.neighborhoodAt(e.ax + e.ux * (s0 + s1) * .5f + nx * 12f, e.ay + e.uy * (s0 + s1) * .5f + ny * 12f)
                 val busy = hood.traffic > .3f
                 val wall = e.cls.halfWidth + e.cls.sidewalk - .45f
@@ -299,11 +314,23 @@ class StreetProps(val city: City) {
                         s += if (e.cls == RoadClass.LANE) 30f else 25f
                     }
                 }
-                // food carts on Manila's busy pavements
-                if (manila && (busy || e.cls.rank >= 1) && rand() < (if (busy) .7f else .3f)) {
+                // street food carts on the busy pavements: everywhere in Manila, a hot dog cart on a New York corner, a
+                // yatai in Tokyo, a pojangmacha in Seoul. The cook stands on the kerb side, customers come up from the
+                // pavement; poles and lamps already put down keep their room
+                val cartRate = when {
+                    manila -> if (busy) .7f else .3f
+                    seoul -> if (busy) .4f else .14f
+                    tokyo -> if (busy) .26f else .1f
+                    city.mapId == com.hustlecity.game.world.Maps.NYC -> if (busy) .38f else .12f
+                    else -> if (busy) .3f else .1f
+                }
+                if ((busy || e.cls.rank >= 1) && s1 - s0 > 18f && rand() < cartRate) {
                     val s = s0 + 8f + rand() * (s1 - s0 - 16f).coerceAtLeast(1f)
-                    val px = e.ax + e.ux * s + nx * (curb + 1.1f); val py = e.ay + e.uy * s + ny * (curb + 1.1f)
-                    if (!nearTree(px, py, 3.6f)) at(s, curb + 1.1f, VENDOR)
+                    val off = curb + CART_OFF
+                    val px = e.ax + e.ux * s + nx * off; val py = e.ay + e.uy * s + ny * off
+                    var clear = !nearTree(px, py, 3.2f)
+                    for (k in sideStart until count) if (clear && dist(px, py, x[k], y[k]) < 2.6f) clear = false
+                    if (clear) cart = at(s, off, VENDOR)
                 }
                 // Manila's barangays: a basketball hoop by the lane, banderitas strung across the street from house to house
                 val barangay = manila && e.cls.rank <= 1 && hood.id in BARANGAYS
@@ -506,7 +533,7 @@ class StreetProps(val city: City) {
             }
             FOUNTAIN -> fountain(scene, px, py, near, time)
             UTIL_POLE -> utilityPole(scene, i, near, night)
-            VENDOR -> foodCart(scene, i, near)
+            VENDOR -> foodCart(scene, i, near, night, time)
             VENDING -> vending(scene, i, near, night)
             LANTERNS -> lanterns(scene, i, near, night)
             BUNTING -> bunting(scene, i, near)
@@ -516,7 +543,7 @@ class StreetProps(val city: City) {
 
     // ------------------------------------------------------------------ Manila and Tokyo
 
-    private val wx = FloatArray(4); private val wy = FloatArray(4); private val wz = FloatArray(4)
+    private val wx = FloatArray(6); private val wy = FloatArray(6); private val wz = FloatArray(6)
 
     /**
      * A sagging wire from (x0, y0, z0) to (x1, y1, z1) in the prop's frame: a flat ribbon with a thin upright one,
@@ -612,7 +639,35 @@ class StreetProps(val city: City) {
         }
     }
 
-    private fun foodCart(scene: Scene3D, i: Int, near: Boolean) {
+    /** Which kind of cart a city's street food comes from. */
+    val cartStyle: Int = when (city.mapId) {
+        com.hustlecity.game.world.Maps.MANILA -> CART_MANILA
+        com.hustlecity.game.world.Maps.TOKYO -> CART_YATAI
+        com.hustlecity.game.world.Maps.SEOUL -> CART_POCHA
+        else -> CART_HOTDOG
+    }
+
+    // local frame: +x along the street, +y toward the road (the cook's side), -y the pavement (the customers')
+    private fun foodCart(scene: Scene3D, i: Int, near: Boolean, night: Boolean, time: Float) = when (cartStyle) {
+        CART_HOTDOG -> hotDogCart(scene, i, near)
+        CART_YATAI -> yatai(scene, i, near, night)
+        CART_POCHA -> pocha(scene, i, near, night)
+        else -> manilaCart(scene, i, near)
+    }
+
+    /** An umbrella of [panels] alternating [a] and [b] panels round a pole, [r] across, its rim at [z]. */
+    private fun umbrellaTop(scene: Scene3D, cx: Float, cy: Float, z: Float, r: Float, a: Int, b: Int, panels: Int = 8) {
+        scene.box(cx - .03f, cy - .03f, 1.1f, cx + .03f, cy + .03f, z + .25f, IRON, IRON)
+        for (k in 0 until panels) {
+            val a0 = k * 6.2832f / panels; val a1 = (k + 1) * 6.2832f / panels
+            wx[0] = cx; wy[0] = cy; wz[0] = z + .5f
+            wx[1] = cx + kotlin.math.cos(a0) * r; wy[1] = cy + sin(a0) * r; wz[1] = z
+            wx[2] = cx + kotlin.math.cos(a1) * r; wy[2] = cy + sin(a1) * r; wz[2] = z
+            scene.poly(3, wx, wy, wz, scene.lit(scene.snowy(if (k % 2 == 0) a else b, .8f), 1f))
+        }
+    }
+
+    private fun manilaCart(scene: Scene3D, i: Int, near: Boolean) {
         val kind = i % 3
         val body = when (kind) { 0 -> c(0xFFC9CED3); 1 -> c(0xFF2E7D4F); else -> c(0xFFB5652D) }
         val trim = when (kind) { 0 -> c(0xFFD32F2F); 1 -> c(0xFFF2C230); else -> c(0xFF6B3E1F) }
@@ -624,30 +679,170 @@ class StreetProps(val city: City) {
             scene.cylinder(sx, .46f, .32f, .05f, .12f, 8, c(0xFF2A2D31))
         }
         if (kind == 0) {
+            // fishballs bubbling in the wok, a jar of sauce and the skewers
             scene.cylinder(-.3f, 0f, .32f, 1.1f, 1.22f, 8, c(0xFF2A2D31), c(0xFF8A5A2C))
-            if (near) for (k in 0..4) scene.blob(.25f + (k % 3) * .16f, -.1f + (k / 3) * .18f, 1.18f, .06f, c(0xFFE09A3E), 5)
+            if (near) {
+                for (k in 0..4) scene.blob(-.3f + (k % 3 - 1) * .12f, -.06f + (k / 3) * .14f, 1.24f, .045f, c(0xFFE0B070), 5)
+                scene.cylinder(.35f, -.15f, .08f, 1.1f, 1.3f, 6, scene.withAlpha(c(0xFF8A3A1C), .8f))
+                scene.box(.5f, .05f, 1.1f, .58f, .2f, 1.34f, c(0xFFE8D9B0), c(0xFFE8D9B0))
+            }
         } else {
             val glass = scene.withAlpha(c(0xFFDDEBF2), .45f)
             scene.box(-.6f, -.3f, 1.1f, .6f, .3f, 1.5f, glass, glass)
             if (near) for (k in 0..5) scene.box(-.5f + k * .18f, -.15f, 1.12f, -.38f + k * .18f, .15f, 1.24f,
                 if (kind == 1) c(0xFFF4D03F) else c(0xFFE67E22), c(0xFFC0392B))
         }
-        // the umbrella: alternating panels round a pole
-        scene.box(-.03f, -.03f, 1.1f, .03f, .03f, 2.5f, IRON, IRON)
-        val a = when (kind) { 0 -> c(0xFFE74C3C); 1 -> c(0xFF2F80ED); else -> c(0xFFF2C230) }
-        val b = c(0xFFF5F5F0)
-        val r = 1.35f; val panels = 8
-        for (k in 0 until panels) {
-            val a0 = k * 6.2832f / panels; val a1 = (k + 1) * 6.2832f / panels
-            wx[0] = 0f; wy[0] = 0f; wz[0] = 2.75f
-            wx[1] = kotlin.math.cos(a0) * r; wy[1] = sin(a0) * r; wz[1] = 2.25f
-            wx[2] = kotlin.math.cos(a1) * r; wy[2] = sin(a1) * r; wz[2] = 2.25f
-            scene.poly(3, wx, wy, wz, scene.lit(scene.snowy(if (k % 2 == 0) a else b, .8f), 1f))
+        umbrellaTop(scene, 0f, -.2f, 2.35f, 1.0f, when (kind) { 0 -> c(0xFFE74C3C); 1 -> c(0xFF2F80ED); else -> c(0xFFF2C230) }, c(0xFFF5F5F0))
+        if (near) {
+            // a stool for customers off to the side, and a crate of supplies by the cook
+            scene.cylinder(1.15f, -.55f, .18f, 0f, .45f, 6, c(0xFFD32F2F))
+            scene.box(-1.3f, -.1f, 0f, -.9f, .4f, .35f, c(0xFF2F80ED), c(0xFF2266C4))
+        }
+    }
+
+    /** New York: a steel hot dog cart, a steam table with lids, a menu board facing the pavement and a striped umbrella. */
+    private fun hotDogCart(scene: Scene3D, i: Int, near: Boolean) {
+        val steel = c(0xFFC5CBD1); val steelDark = c(0xFF8E959C)
+        scene.roundBox(-.78f, -.38f, .38f, .78f, .38f, 1.0f, .04f, scene.snowy(steel), steelDark)
+        // the steam table: two lidded wells and the griddle between
+        scene.box(-.74f, -.34f, 1.0f, .74f, .34f, 1.03f, steelDark, steelDark)
+        if (near) {
+            for (sx in floatArrayOf(-.42f, .1f)) scene.roundBox(sx - .2f, -.22f, 1.03f, sx + .2f, .22f, 1.11f, .04f, steel, steel)
+            scene.box(.36f, -.25f, 1.03f, .7f, .25f, 1.05f, c(0xFF2A2D31), c(0xFF2A2D31))
+            // a few dogs on the griddle, ketchup and mustard in squeeze bottles
+            for (k in 0..2) scene.box(.42f, -.16f + k * .12f, 1.05f, .64f, -.11f + k * .12f, 1.08f, c(0xFFB5523A), c(0xFF8E3A26))
+            scene.cylinder(.62f, .28f, .035f, 1.03f, 1.22f, 6, c(0xFFD32F2F))
+            scene.cylinder(.52f, .28f, .035f, 1.03f, 1.22f, 6, c(0xFFF2C230))
+            // the cooler of sodas underneath and the propane tank
+            scene.box(-.7f, -.32f, .08f, -.1f, .32f, .36f, c(0xFF2F80ED), c(0xFF2266C4))
+            scene.cylinder(.35f, .1f, .14f, .05f, .38f, 8, c(0xFFE8E4DA))
+        }
+        // the menu board on the pavement side: yellow with rows of red and blue
+        scene.box(-.7f, -.4f, .5f, .7f, -.385f, .95f, c(0xFFF2C230), c(0xFFF2C230))
+        if (near) for (row in 0..2) scene.box(-.62f, -.405f, .58f + row * .12f, -.62f + (.6f + (row * 37 + i) % 5 * .12f), -.395f, .66f + row * .12f,
+            if (row == 0) c(0xFFD32F2F) else c(0xFF1E5BC6), if (row == 0) c(0xFFD32F2F) else c(0xFF1E5BC6))
+        // two big wheels at one end, a leg at the other
+        for (sy in floatArrayOf(-.42f, .42f)) {
+            wheel(scene, -.5f, sy, .32f)
+        }
+        scene.box(.6f, -.04f, 0f, .66f, .04f, .4f, IRON, IRON)
+        umbrellaTop(scene, 0f, -.2f, 2.4f, 1.0f, if (i % 2 == 0) c(0xFF1E5BC6) else c(0xFFE53935), c(0xFFF2C230))
+    }
+
+    /** A spoked wheel standing across the cart's side at x, its axle along y. */
+    private fun wheel(scene: Scene3D, x: Float, y: Float, r: Float) {
+        val tire = c(0xFF26282C)
+        val n = 10
+        for (k in 0 until n) {
+            val a0 = k * 6.2832f / n; val a1 = (k + 1) * 6.2832f / n
+            wx[0] = x + kotlin.math.cos(a0) * r; wy[0] = y; wz[0] = r + sin(a0) * r
+            wx[1] = x + kotlin.math.cos(a1) * r; wy[1] = y; wz[1] = r + sin(a1) * r
+            wx[2] = x + kotlin.math.cos(a1) * r * .8f; wy[2] = y; wz[2] = r + sin(a1) * r * .8f
+            wx[3] = x + kotlin.math.cos(a0) * r * .8f; wy[3] = y; wz[3] = r + sin(a0) * r * .8f
+            scene.poly(4, wx, wy, wz, tire)
+        }
+        scene.box(x - .02f, y - .02f, .05f, x + .02f, y + .02f, r * 2f - .05f, IRON, IRON)
+        scene.box(x - r + .05f, y - .02f, r - .02f, x + r - .05f, y + .02f, r + .02f, IRON, IRON)
+    }
+
+    /** Tokyo: a wooden yatai with a little roof, indigo noren over the counter and a red lantern, lit at night. */
+    private fun yatai(scene: Scene3D, i: Int, near: Boolean, night: Boolean) {
+        val wood = c(0xFF7A5232); val woodDark = c(0xFF4E321E); val roof = c(0xFF3A3530)
+        scene.box(-.9f, -.42f, .4f, .9f, .42f, 1.0f, scene.snowy(wood), woodDark)
+        // the counter shelf the customers eat at
+        scene.box(-.95f, -.68f, .98f, .95f, -.42f, 1.03f, c(0xFF9C6B43), woodDark)
+        // corner posts and the roof
+        for (sx in floatArrayOf(-.86f, .86f)) for (sy in floatArrayOf(-.38f, .38f))
+            scene.box(sx - .035f, sy - .035f, 1.0f, sx + .035f, sy + .035f, 2.15f, woodDark, woodDark)
+        for (side in -1..1 step 2) {
+            val y0 = side * .82f
+            wx[0] = -1.05f; wy[0] = 0f; wz[0] = 2.42f
+            wx[1] = 1.05f; wy[1] = 0f; wz[1] = 2.42f
+            wx[2] = 1.05f; wy[2] = y0; wz[2] = 2.12f
+            wx[3] = -1.05f; wy[3] = y0; wz[3] = 2.12f
+            scene.poly(4, wx, wy, wz, scene.lit(scene.snowy(roof, .9f), if (side < 0) 1.05f else .92f))
+        }
+        // the noren: panels of indigo cloth hanging over the counter, a white crest on the middle ones
+        val indigo = c(0xFF233A6B)
+        for (k in 0 until 4) {
+            val x0 = -.86f + k * .43f + .015f; val x1 = x0 + .4f
+            scene.quad(x0, -.85f, 2.12f, x1, -.85f, 2.12f, x1, -.85f, 1.66f, x0, -.85f, 1.66f, indigo)
+            if (near && (k == 1 || k == 2)) scene.quad(x0 + .13f, -.855f, 1.96f, x1 - .13f, -.855f, 1.96f, x1 - .13f, -.855f, 1.8f, x0 + .13f, -.855f, 1.8f, c(0xFFF1E6CC))
+        }
+        // the lantern at the corner, glowing at night
+        val lantern = if (night) c(0xFFFF6A3D) else scene.lit(c(0xFFD8322B), 1f)
+        if (night) scene.glow = true
+        scene.blob(1.0f, -.75f, 1.75f, .17f, lantern, 8, squash = 1.25f)
+        scene.glow = false
+        if (night) {
+            // a warm light over the counter
+            scene.glow = true
+            scene.quad(-.8f, -.38f, 2.08f, .8f, -.38f, 2.08f, .8f, .38f, 2.08f, -.8f, .38f, 2.08f, c(0xFFFFE2A8))
+            scene.glow = false
         }
         if (near) {
-            // a stool for customers and a crate of supplies
-            scene.cylinder(.2f, .95f, .18f, 0f, .45f, 6, c(0xFFD32F2F))
-            scene.box(-1.3f, -.3f, 0f, -.9f, .2f, .35f, c(0xFF2F80ED), c(0xFF2266C4))
+            // a pot of oden steaming on the counter, the takoyaki griddle, and stools for two
+            scene.cylinder(-.45f, 0f, .2f, 1.0f, 1.2f, 8, c(0xFF8E959C), c(0xFF8A5A2C))
+            scene.box(.15f, -.22f, 1.0f, .65f, .22f, 1.06f, c(0xFF2A2D31), c(0xFF2A2D31))
+            for (k in 0 until 6) scene.blob(.24f + (k % 3) * .16f, -.09f + (k / 3) * .18f, 1.08f, .05f, c(0xFFC98A45), 5)
+            for (sx in floatArrayOf(-.45f, .45f)) scene.cylinder(sx, -.95f, .16f, 0f, .6f, 7, woodDark, c(0xFFB5652D))
+            // the wheels under the ends
+            wheel(scene, -.55f, .44f, .3f)
+            wheel(scene, .55f, .44f, .3f)
+        }
+    }
+
+    /** Seoul: a pojangmacha, an orange tarp tent over a steel counter of tteokbokki and fish cake skewers, glowing at night. */
+    private fun pocha(scene: Scene3D, i: Int, near: Boolean, night: Boolean) {
+        val tarp = if (i % 3 == 2) c(0xFFD0342C) else c(0xFFE8731E)
+        val steel = c(0xFFB8C0CA)
+        // the counter and its trays
+        scene.box(-.9f, -.4f, .0f, .9f, .4f, .92f, scene.snowy(c(0xFF8E959C)), c(0xFF6E757C))
+        scene.box(-.92f, -.42f, .92f, .92f, .42f, .96f, steel, steel)
+        if (near) {
+            // a wide pan of red rice cakes, fish cake skewers in broth, and sundae on the board
+            scene.box(-.8f, -.3f, .96f, -.1f, .3f, 1.02f, c(0xFF2A2D31), c(0xFF2A2D31))
+            for (k in 0 until 8) scene.box(-.74f + (k % 4) * .16f, -.22f + (k / 4) * .22f, 1.02f, -.64f + (k % 4) * .16f, -.12f + (k / 4) * .22f, 1.05f,
+                c(0xFFD8322B), c(0xFFB0221C))
+            scene.box(0f, -.25f, .96f, .5f, .25f, 1.08f, c(0xFF8E959C), c(0xFFC9A26A))
+            for (k in 0 until 5) scene.box(.06f + k * .09f, -.02f, 1.08f, .08f + k * .09f, .0f, 1.32f, c(0xFFE8D9B0), c(0xFFE8D9B0))
+            scene.box(.6f, -.2f, .96f, .85f, .2f, .99f, c(0xFFC9A26A), c(0xFF9C6B43))
+        }
+        // the tent: poles, a roof sloped both ways, and the ends closed in
+        val x0 = -1.15f; val x1 = 1.15f; val yIn = -.85f; val yOut = 1.1f
+        for (sx in floatArrayOf(x0, x1)) for (sy in floatArrayOf(yIn, yOut))
+            scene.box(sx - .025f, sy - .025f, 0f, sx + .025f, sy + .025f, 2.05f, IRON, IRON)
+        val ym = (yIn + yOut) * .5f
+        val col = if (night) c(0xFFFF9A4A) else scene.lit(scene.snowy(tarp, .9f), 1f)
+        if (night) scene.glow = true
+        for (side in 0..1) {
+            val ye = if (side == 0) yIn else yOut
+            wx[0] = x0; wy[0] = ym; wz[0] = 2.35f
+            wx[1] = x1; wy[1] = ym; wz[1] = 2.35f
+            wx[2] = x1; wy[2] = ye; wz[2] = 2.05f
+            wx[3] = x0; wy[3] = ye; wz[3] = 2.05f
+            scene.poly(4, wx, wy, wz, if (night) col else scene.lit(col, if (side == 0) 1.05f else .9f))
+        }
+        // the clear plastic sides: tinted by the tarp, the lit inside showing through
+        val wall = scene.withAlpha(scene.mix(col, c(0xFFF4F1EA), .35f), if (night) .55f else .45f)
+        for (sx in floatArrayOf(x0, x1)) {
+            wx[0] = sx; wy[0] = yIn; wz[0] = .5f
+            wx[1] = sx; wy[1] = yIn; wz[1] = 2.05f
+            wx[2] = sx; wy[2] = ym; wz[2] = 2.35f
+            wx[3] = sx; wy[3] = yOut; wz[3] = 2.05f
+            wx[4] = sx; wy[4] = yOut; wz[4] = .5f
+            scene.poly(5, wx, wy, wz, wall)
+        }
+        // the road side closed too, the front open to the pavement with a skirt of tarp along the top
+        scene.quad(x0, yOut, 2.05f, x1, yOut, 2.05f, x1, yOut, .5f, x0, yOut, .5f, wall)
+        scene.quad(x0, yIn, 2.05f, x1, yIn, 2.05f, x1, yIn, 1.8f, x0, yIn, 1.8f, col)
+        scene.glow = false
+        if (near) {
+            // a bare bulb inside, and plastic stools out front
+            if (night) scene.glow = true
+            scene.blob(0f, ym, 2.05f, .07f, if (night) c(0xFFFFF4D8) else c(0xFFE8E4DA), 6)
+            scene.glow = false
+            for (sx in floatArrayOf(-.8f, .8f)) scene.cylinder(sx, -1.15f, .15f, 0f, .42f, 7, if (i % 2 == 0) c(0xFFD32F2F) else c(0xFF2F80ED))
         }
     }
 

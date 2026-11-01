@@ -169,8 +169,18 @@ class GameEngine(context: Context?) {
         interior?.let { sc -> if (sc.nearEntrance()) exitBuilding(); return }
         val door = nearDoor
         val car = nearVehicle
-        if (door != null) enterBuilding(door)
+        if (vendorFirst()) buyStreetFood(StreetFood.menu(city.mapId).first())
+        else if (door != null) enterBuilding(door)
         else if (car != null) { enterVehicle(car); ui.phoneOpen = false }
+    }
+
+    /** True when E buys from the food cart you're at rather than going in a door (the cart is nearer than the door). */
+    fun vendorFirst(): Boolean {
+        val i = nearVendor
+        if (i < 0) return false
+        val p = state.player
+        val door = nearDoor ?: return true
+        return dist(props.x[i], props.y[i], p.x, p.y) < dist(door.doorX, door.doorY, p.x, p.y)
     }
 
     /** Seconds the brake has been held at a standstill (reverse kicks in after a moment). */
@@ -189,6 +199,13 @@ class GameEngine(context: Context?) {
     // interaction hints, refreshed each frame
     var nearDoor: Building? = null
     var nearVehicle: OwnedVehicle? = null
+    /** The street food cart within reach on foot (an index into [props]), or -1. */
+    var nearVendor = -1
+
+    private var propsCache: com.hustlecity.game.render.StreetProps? = null
+    /** The city's street furniture, food carts among it (built once per city, shared with the renderer). */
+    val props: com.hustlecity.game.render.StreetProps
+        get() = propsCache?.takeIf { it.city === city } ?: com.hustlecity.game.render.StreetProps(city).also { propsCache = it }
     var atGasStation = false
 
     private val tmp = FloatArray(2)
@@ -551,6 +568,17 @@ class GameEngine(context: Context?) {
             n++
         }
         traffic.doorCount = n
+        // and which street food carts are about: the cook's spot and where customers stand
+        var m = 0
+        val pr = props
+        pr.forIn(fx - 160f, fy - 160f, fx + 160f, fy + 160f) { i ->
+            if (pr.kind[i] != com.hustlecity.game.render.StreetProps.VENDOR) return@forIn
+            if (traffic.stands.size < (m + 1) * 4) traffic.stands = traffic.stands.copyOf((m + 1) * 4 + 40)
+            traffic.stands[m * 4] = pr.x[i]; traffic.stands[m * 4 + 1] = pr.y[i]
+            traffic.stands[m * 4 + 2] = pr.dirX[i]; traffic.stands[m * 4 + 3] = pr.dirY[i]
+            m++
+        }
+        traffic.standCount = m
     }
 
     fun frame(dtIn: Float) {
@@ -642,14 +670,15 @@ class GameEngine(context: Context?) {
 
     private fun refreshHints() {
         val p = state.player
-        if (p.inBuilding >= 0) { nearDoor = null; nearVehicle = null; atGasStation = false; return }
+        if (p.inBuilding >= 0) { nearDoor = null; nearVehicle = null; nearVendor = -1; atGasStation = false; return }
         if (p.driving >= 0) {
-            nearDoor = null; nearVehicle = null
+            nearDoor = null; nearVehicle = null; nearVendor = -1
             val v = state.vehicle(p.driving)
             atGasStation = v != null && city.buildings.any { it.kind == BKind.GAS && it.contains(v.x, v.y) }
         } else {
             nearDoor = city.nearestDoor(p.x, p.y, 7f)
             nearVehicle = state.vehicles.firstOrNull { !ops.away(it) && dist(it.x, it.y, p.x, p.y) < 6f }
+            nearVendor = vendorNear(p.x, p.y)
             atGasStation = false
         }
     }
@@ -862,6 +891,7 @@ class GameEngine(context: Context?) {
                 var px = tmp[0]; var py = tmp[1]
                 if (traffic.bump(px, py, .45f, tmp)) { px = tmp[0]; py = tmp[1] }
                 if (city.parked.bump(px, py, .45f, tmp)) { px = tmp[0]; py = tmp[1] }
+                if (clearOfCarts(px, py, .45f, tmp)) { px = tmp[0]; py = tmp[1] }
                 if (cartAllows(px, py) || !cartAllows(p.x, p.y)) { p.x = px; p.y = py }
                 else if (cartWarn <= 0f) { toast("Store carts have to stay in the parking lot", ToastKind.INFO, "hand_truck"); cartWarn = 4f }
                 p.heading = atan2(wx, -wy)

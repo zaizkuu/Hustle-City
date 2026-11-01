@@ -4,6 +4,8 @@ import com.hustlecity.game.engine.EATING_TYPES
 import com.hustlecity.game.engine.GameEngine
 import com.hustlecity.game.engine.INDEPENDENT
 import com.hustlecity.game.engine.eatOwnStock
+import com.hustlecity.game.engine.buyStreetFood
+import com.hustlecity.game.engine.clearOfCarts
 import com.hustlecity.game.engine.findFood
 import com.hustlecity.game.engine.nearestFood
 import com.hustlecity.game.engine.startBusiness
@@ -67,5 +69,37 @@ class EateriesTest {
         e.eatOwnStock(biz)
         assertEquals(4, biz.stock["burger"])
         assertTrue(e.state.player.hunger > 55.0)
+    }
+
+    /** Every city has street food carts; walk up to one and E buys its first snack: you pay, you eat, you're not hungry. */
+    @Test
+    fun streetFoodFromACart() {
+        for (map in Maps.all) {
+            val e = GameEngine(null)
+            e.newGame("T", 0, 0, 1, mapId = map.id)
+            e.ui.tip = null
+            val pr = e.props
+            val carts = (0 until pr.count).filter { pr.kind[it] == com.hustlecity.game.render.StreetProps.VENDOR }
+            assertTrue("${map.id} has street food carts (${carts.size})", carts.size >= 10)
+            val i = carts[carts.size / 2]
+            val p = e.state.player
+            // on the pavement side of it, where customers stand
+            p.x = pr.x[i] - pr.dirX[i] * 1.5f; p.y = pr.y[i] - pr.dirY[i] * 1.5f
+            p.hunger = 30.0
+            e.frame(1 / 30f)
+            assertEquals("${map.id}: at the cart", i, e.nearVendor)
+            val snack = com.hustlecity.game.engine.StreetFood.menu(map.id).first()
+            val cash = p.money
+            if (e.vendorFirst()) {
+                e.onKey(android.view.KeyEvent.KEYCODE_E, true); e.onKey(android.view.KeyEvent.KEYCODE_E, false)
+            } else e.buyStreetFood(snack)
+            assertEquals("${map.id}: paid for ${snack.name}", cash - snack.price, p.money, .001)
+            assertTrue("${map.id}: ate it", p.hunger >= 30.0 + snack.hunger - .5)
+            assertTrue("${map.id}: eating it", e.ui.eatingUntil > e.realTime)
+            // and the cart is solid: walking into it stops at its edge
+            val tmp = FloatArray(2)
+            assertTrue(e.clearOfCarts(pr.x[i], pr.y[i], .45f, tmp))
+            assertTrue("${map.id}: pushed out of the cart", kotlin.math.hypot(tmp[0] - pr.x[i], tmp[1] - pr.y[i]) > .8f)
+        }
     }
 }

@@ -483,24 +483,44 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
 
     val playerWalking: Boolean get() = ppathIdx < ppath.size
 
+    /** What the player does at their work spot: [Job.TILL] behind a register, [Job.FLOOR] at a display, or [Job.NONE]. */
+    var playerJob = Job.NONE; private set
+    /** The till the player works at (an index into [items]), or -1. */
+    var playerTill = -1; private set
+    private var workFacing: PlacedItem? = null
+
     /** Where the player stands when working the floor. */
     fun workSpot(): Pair<Float, Float>? {
         val occ = occupancy()
         val reg = registers().firstOrNull()
         if (reg != null) {
             val t = frontTiles(reg, occ, behind = true).firstOrNull() ?: frontTiles(reg, occ).firstOrNull()
-            if (t != null) return (t % w + .5f) to (t / w + .5f)
+            if (t != null) { workFacing = reg; return (t % w + .5f) to (t / w + .5f) }
         }
         val any = browseTargets().firstOrNull() ?: return null
         val t = frontTiles(any, occ).firstOrNull() ?: return null
+        workFacing = any
         return (t % w + .5f) to (t / w + .5f)
     }
 
     fun update(dt: Float, simRunning: Boolean) {
         val step = if (simRunning) dt else 0f
         // player walking
+        playerJob = Job.NONE; playerTill = -1
         if (e.state.player.workingAt >= 0 && business != null && e.state.player.workingAt == business.id) {
-            workSpot()?.let { (sx, sy) -> px = sx; py = sy }
+            workSpot()?.let { (sx, sy) ->
+                px = sx; py = sy
+                // turned to the till (or the display) they're working at
+                workFacing?.let { f ->
+                    val def = Catalog.item(f.itemId)
+                    if (def != null) {
+                        val (fw, fd) = itemDims(def, f.rot)
+                        playerHeading = kotlin.math.atan2(f.x + fw / 2f - px, -(f.y + fd / 2f - py))
+                        playerJob = if (def.fn == ItemFn.CASH_REGISTER) Job.TILL else Job.FLOOR
+                        if (playerJob == Job.TILL) playerTill = items.indexOf(f)
+                    }
+                }
+            }
             ppath = IntArray(0)
         } else if (ppathIdx < ppath.size) {
             val t = ppath[ppathIdx]

@@ -619,7 +619,7 @@ fun GameEngine.eat(cost: Double, hunger: Double, energy: Double = 0.0, happiness
     p.hunger = (p.hunger + hunger).coerceAtMost(100.0)
     p.energy = (p.energy + energy).coerceIn(0.0, 100.0)
     p.happiness = (p.happiness + happiness).coerceIn(0.0, 100.0)
-    if (hunger > 0.0) ui.eatingUntil = realTime + 3f
+    if (hunger > 0.0) { ui.eatingUntil = realTime + 4f; ui.eatingItem = if (hunger < 8.0) com.hustlecity.game.render.Snack.CUP else com.hustlecity.game.render.Snack.WRAP }
     toast("You had $label", ToastKind.GOOD)
 }
 
@@ -646,7 +646,7 @@ fun GameEngine.eatOwnStock(biz: com.hustlecity.game.model.Business) {
     p.hunger = (p.hunger + hunger).coerceAtMost(100.0)
     p.happiness = (p.happiness + 1).coerceAtMost(100.0)
     if (pid == "croissant" || pid == "cupcake") p.energy = (p.energy + 4).coerceAtMost(100.0)
-    ui.eatingUntil = realTime + 3f
+    ui.eatingUntil = realTime + 4f; ui.eatingItem = if (pid == "hotdog") com.hustlecity.game.render.Snack.HOT_DOG else com.hustlecity.game.render.Snack.WRAP
     toast("You made yourself $label at ${biz.name}", ToastKind.GOOD)
     bump()
 }
@@ -675,7 +675,7 @@ fun GameEngine.eatAtHome() {
     if (p.fridgeMeals <= 0) { toast("Your fridge is empty. Buy groceries at a supermarket."); return }
     p.fridgeMeals--
     p.hunger = (p.hunger + 40).coerceAtMost(100.0)
-    ui.eatingUntil = realTime + 3f
+    ui.eatingUntil = realTime + 4f; ui.eatingItem = com.hustlecity.game.render.Snack.WRAP
     toast("You ate a home-cooked meal (${p.fridgeMeals} left)", ToastKind.GOOD)
     bump()
 }

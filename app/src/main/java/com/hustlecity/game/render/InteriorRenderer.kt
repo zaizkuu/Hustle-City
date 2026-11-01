@@ -201,7 +201,8 @@ class InteriorRenderer(private val e: GameEngine) {
                     val carry = if (sc.playerBox && pose == 0) 1 else pose
                     val load = p.hand.size + if (sc.playerBox) 1 else 0
                     people.draw(sc.px, sc.py, 0f, sc.playerHeading, e.realTime * 7f, sc.playerMoving, SHIRT_COLORS[p.shirt % SHIRT_COLORS.size], PersonPainter.PANTS[1],
-                        SKIN_TONES[p.skin % SKIN_TONES.size], PersonPainter.HAIR[p.skin % PersonPainter.HAIR.size], carry = carry, load = load)
+                        SKIN_TONES[p.skin % SKIN_TONES.size], PersonPainter.HAIR[p.skin % PersonPainter.HAIR.size], carry = carry, load = load,
+                        act = playerAct(sc, carry), actT = e.realTime, item = e.ui.eatingItem)
                 }
                 4 -> {
                     val car = sc.showroom[dIdx[i]]
@@ -524,17 +525,7 @@ class InteriorRenderer(private val e: GameEngine) {
     private fun staffAct(sc: InteriorScene, v: com.hustlecity.game.engine.Person): Int {
         if (v.moving > .2f) return Act.NONE
         return when (v.job) {
-            Job.TILL -> {
-                // in time with the customer at this till: scan their goods, bag them, hand the bag over
-                var a = Act.TILL
-                for (c in sc.visitors) {
-                    if (c.counter < 0 || c.counter != v.item) continue
-                    val t = payProgress(c)
-                    a = when { t < 0f -> continue; t < .22f -> Act.TILL; t < .62f -> Act.SCAN; t < .82f -> Act.BAG; t < .98f -> Act.GIVE; else -> Act.TILL }
-                    break
-                }
-                a
-            }
+            Job.TILL -> tillAct(sc, v.item)
             Job.CLEAN -> Act.MOP
             Job.STOCK -> Act.STOCK
             Job.DJ -> Act.DJ
@@ -547,6 +538,30 @@ class InteriorRenderer(private val e: GameEngine) {
             // straightening the displays now and then
             Job.FLOOR -> if ((e.realTime + v.shirt) % 9f < 3.5f) Act.TIDY else Act.NONE
             else -> Act.NONE
+        }
+    }
+
+    /** Working till [till]: in time with the customer at it, scan their goods, bag them, hand the bag over. */
+    private fun tillAct(sc: InteriorScene, till: Int): Int {
+        for (c in sc.visitors) {
+            if (c.counter < 0 || c.counter != till) continue
+            val t = payProgress(c)
+            if (t < 0f) continue
+            return when { t < .22f -> Act.TILL; t < .62f -> Act.SCAN; t < .82f -> Act.BAG; t < .98f -> Act.GIVE; else -> Act.TILL }
+        }
+        return Act.TILL
+    }
+
+    /** What the player's character is doing in here: eating, working the till or the floor, or reading their phone. */
+    private fun playerAct(sc: InteriorScene, carry: Int): Int {
+        val now = e.realTime
+        if (carry != 0) return Act.NONE
+        if (e.ui.eatingUntil > now) return Act.SNACK
+        if (sc.playerMoving > .2f) return Act.NONE
+        return when (sc.playerJob) {
+            Job.TILL -> tillAct(sc, sc.playerTill)
+            Job.FLOOR -> if (now % 9f < 3.5f) Act.TIDY else Act.NONE
+            else -> if (e.ui.phoneOpen) Act.PHONE else Act.NONE
         }
     }
 

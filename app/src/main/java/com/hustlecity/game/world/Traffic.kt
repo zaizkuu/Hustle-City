@@ -62,6 +62,12 @@ class Agent {
     var linger = 0f
     /** A pedestrian carrying a shopping bag (since coming out of a shop). */
     var bag = false
+    /** Which of the cart's snacks they bought (0..2). */
+    var snack = 0
+    /** How far out toward the buildings they've stepped to get round a food cart. */
+    var around = 0f
+    /** The food cart they're buying from. */
+    var standX = 0f; var standY = 0f
     /** Jogs rather than walks. */
     var jogger = false
     /** Seconds left of hurrying clear of a car coming at them. */
@@ -84,7 +90,16 @@ object PedActivity {
     const val PHONE = 2
     /** Stopped to talk to someone they met. */
     const val CHAT = 3
+    /** On a call as they walk. */
+    const val CALL = 4
+    /** At a street food cart, paying and waiting for it. */
+    const val BUY = 5
+    /** Walking on eating what they bought ([Agent.snack]). */
+    const val EAT = 6
 }
+
+/** Where a cart's customers stand, back from its middle toward the buildings. */
+const val STAND_SERVE = 1.05f
 
 /** Eases a car's body [a] toward the lean its braking, accelerating and turning would give it. */
 fun lean(a: Agent, speed: Float, heading: Float, dt: Float) {
@@ -128,6 +143,12 @@ class Traffic(private val rnd: Random = Random(7)) {
     /** Shop doors near the camera: x, y, chance a passer-by walks in, and the inward direction (x, y). */
     var doors = FloatArray(0)
     var doorCount = 0
+    /**
+     * Street food carts near the camera: x, y and the direction to the road (x, y) of each. The cook stands on the road
+     * side; passers-by buy from the pavement side, and step round the cart rather than through it.
+     */
+    var stands = FloatArray(0)
+    var standCount = 0
     var lightClock = 0f
     /** Weather: cars drive slower on wet or snowy roads, pedestrians walk faster in the rain. */
     var speedFactor = 1f
@@ -394,13 +415,77 @@ class Traffic(private val rnd: Random = Random(7)) {
 
     private fun pedOffset(e: RoadEdge, a: Agent) = e.cls.halfWidth + e.cls.sidewalk * (.5f + a.jitter * .28f)
 
+    /** The line a pedestrian walks along: their own, stepped aside for people and round carts, on the pavement. */
+    private fun pedLine(e: RoadEdge, a: Agent) = (pedOffset(e, a) - a.dodge + a.around).coerceIn(e.cls.halfWidth + .3f, e.cls.outer - .35f)
+
+    /** The stand [k]'s along-street position on [e] (meters from node [from]) and how far it stands from the centre line. */
+    private fun standOn(e: RoadEdge, from: Int, k: Int, out: FloatArray) {
+        val dx = stands[k * 4] - e.ax; val dy = stands[k * 4 + 1] - e.ay
+        val along = dx * e.ux + dy * e.uy
+        out[0] = if (from == e.a) along else e.len - along
+        out[1] = -dx * e.uy + dy * e.ux
+    }
+
+    private val standTmp = FloatArray(2)
+
+    /**
+     * How far out (beyond their usual line) [a] must step to pass the carts on their side of [e] near where they are: a
+     * cart takes the pavement from a little off the kerb to [STAND_SERVE] past its middle.
+     */
+    private fun cartClearance(e: RoadEdge, a: Agent): Float {
+        var need = 0f
+        for (k in 0 until standCount) {
+            if (abs(stands[k * 4] - a.x) > 5f || abs(stands[k * 4 + 1] - a.y) > 5f) continue
+            standOn(e, a.from, k, standTmp)
+            val ahead = standTmp[0] - a.s
+            // standOn's offset is to the right of e's direction a->b; a pedestrian's side is relative to where they came from
+            val sideSign = if (a.from == e.a) a.side else -a.side
+            val off = standTmp[1] * sideSign
+            if (off < e.cls.halfWidth || off > e.cls.outer + .5f || ahead < -1.8f || ahead > 3.4f) continue
+            need = max(need, off + STAND_SERVE - .1f - (pedOffset(e, a) - a.dodge))
+        }
+        return need
+    }
+
+    /**
+     * A cart a few meters ahead on [a]'s side of [e]: now and then they go over to buy something. Up to three stand at a
+     * cart at once, side by side. Afterwards they walk on from just past it.
+     */
+    private fun toCart(g: RoadGraph, a: Agent, e: RoadEdge): Boolean {
+        for (k in 0 until standCount) {
+            if (abs(stands[k * 4] - a.x) > 5f || abs(stands[k * 4 + 1] - a.y) > 5f) continue
+            standOn(e, a.from, k, standTmp)
+            val ahead = standTmp[0] - a.s
+            val sideSign = if (a.from == e.a) a.side else -a.side
+            val off = standTmp[1] * sideSign
+            if (off < e.cls.halfWidth || off > e.cls.outer + .5f || ahead < 2.2f || ahead > 4.6f) continue
+            if (rnd.nextFloat() > .035f) continue
+            // a free place at the counter
+            val sx = stands[k * 4]; val sy = stands[k * 4 + 1]; val dx = stands[k * 4 + 2]; val dy = stands[k * 4 + 3]
+            val slot = rnd.nextInt(3)
+            for (t in 0 until 3) {
+                val along = ((slot + t) % 3 - 1) * .5f
+                val tx = sx - dx * STAND_SERVE - dy * along; val ty = sy - dy * STAND_SERVE + dx * along
+                if (peds.any { (it.state == 6 || it.state == 7) && abs(it.tx - tx) < .3f && abs(it.ty - ty) < .3f }) continue
+                a.state = 6; a.tx = tx; a.ty = ty; a.standX = sx; a.standY = sy
+                a.dodge = 0f; a.snack = rnd.nextInt(3)
+                // they walk on from just past the cart, out on the pavement side of it
+                val sEnd = walkEnd(g, e, a.from, a.side)
+                a.s = (standTmp[0] + 2.4f).coerceAtMost(sEnd - .1f)
+                a.around = off + STAND_SERVE - .1f - pedOffset(e, a)
+                return true
+            }
+        }
+        return false
+    }
+
     private fun spawnPed(g: RoadGraph, a: Agent, fx: Float, fy: Float, radius: Float, initial: Boolean) {
         a.color = shirtColors[rnd.nextInt(shirtColors.size)]
         a.cruise = 1.1f + rnd.nextFloat() * .6f
         // a few are out for a run, in bright kit
         a.jogger = rnd.nextFloat() < .07f
         if (a.jogger) { a.cruise = 2.6f + rnd.nextFloat() * .7f; a.color = JOG_COLORS[rnd.nextInt(JOG_COLORS.size)] }
-        a.activity = PedActivity.NONE; a.linger = 0f; a.bag = false; a.startled = 0f
+        a.activity = PedActivity.NONE; a.linger = 0f; a.bag = false; a.startled = 0f; a.around = 0f
         a.speed = a.cruise
         a.phase = rnd.nextFloat() * 6f
         a.jitter = rnd.nextFloat() * 2f - 1f
@@ -751,11 +836,28 @@ class Traffic(private val rnd: Random = Random(7)) {
             }
             5 -> { // back out onto the sidewalk
                 val e = g.edges[a.edge]
-                at(e, a.from, a.s, pedOffset(e, a) * a.side, tmp)
+                at(e, a.from, a.s, pedLine(e, a) * a.side, tmp)
                 if (walkTo(a, dt, tmp[0], tmp[1], a.cruise)) {
                     a.state = 0; a.timer = 8f
-                    // most come out with something
-                    a.bag = !a.jogger && rnd.nextFloat() < .7f
+                    // most come out of a shop with something (from a cart, they're eating it)
+                    if (a.activity != PedActivity.EAT) a.bag = !a.jogger && rnd.nextFloat() < .7f
+                }
+                return
+            }
+            6 -> { // over to a food cart
+                if (walkTo(a, dt, a.tx, a.ty, a.cruise * .8f)) {
+                    a.state = 7; a.timer = 5f + rnd.nextFloat() * 4f; a.linger = a.timer
+                    a.activity = PedActivity.BUY
+                    a.heading = atan2(a.standX - a.x, -(a.standY - a.y))
+                    a.speed = 0f
+                }
+                return
+            }
+            7 -> { // paying, and waiting while it's made
+                a.timer -= dt
+                if (a.timer <= 0f) {
+                    a.state = 5
+                    a.activity = PedActivity.EAT; a.linger = 14f + rnd.nextFloat() * 12f
                 }
                 return
             }
@@ -779,10 +881,13 @@ class Traffic(private val rnd: Random = Random(7)) {
             speed = max(a.cruise, 1.4f) * 2.4f
             a.dodge = max(a.dodge - dt * 5f, -1.4f)
         }
-        // standing at a shop window or chatting: stay put, turned to it, until done
+        // standing at a shop window or chatting: stay put, turned to it, until done (reading a phone, on a call or
+        // eating, they keep walking)
         if (a.linger > 0f && a.startled <= 0f) {
             a.linger -= dt
             if (a.activity == PedActivity.PHONE) speed = min(speed, .55f)
+            else if (a.activity == PedActivity.CALL) speed = min(speed, .85f)
+            else if (a.activity == PedActivity.EAT) speed = min(speed, 1.05f)
             else {
                 a.speed = max(0f, a.speed - 3f * dt)
                 if (a.speed > 0f) { a.s += a.speed * dt; a.phase += dt * a.speed * 3f }
@@ -834,8 +939,12 @@ class Traffic(private val rnd: Random = Random(7)) {
                     return
                 }
             }
-            // now and then one gets their phone out and slows to read it
-            if (!a.jogger && a.activity == PedActivity.NONE && rnd.nextFloat() < .006f) { a.activity = PedActivity.PHONE; a.linger = 6f + rnd.nextFloat() * 8f }
+            // or stop at a food cart for something to eat
+            if (!a.jogger && a.activity == PedActivity.NONE && a.startled <= 0f && toCart(g, a, e)) return
+            // now and then one gets their phone out and slows to read it, or takes a call
+            if (!a.jogger && a.activity == PedActivity.NONE && rnd.nextFloat() < .006f) {
+                a.activity = if (rnd.nextFloat() < .3f) PedActivity.CALL else PedActivity.PHONE; a.linger = 6f + rnd.nextFloat() * 8f
+            }
         }
         a.speed += (speed - a.speed).coerceIn(-4f * dt, 3f * dt)
         a.phase += dt * a.speed * 3f
@@ -844,7 +953,10 @@ class Traffic(private val rnd: Random = Random(7)) {
             planCorner(g, a, e, to)
             return
         }
-        at(e, a.from, a.s, (pedOffset(e, a) - a.dodge).coerceIn(e.cls.halfWidth + .3f, e.cls.outer - .35f) * a.side, tmp)
+        // round a food cart ahead: out toward the buildings, past the customers at it
+        val need = cartClearance(e, a)
+        a.around += (need - a.around).coerceIn(-1.2f * dt, 1.8f * dt)
+        at(e, a.from, a.s, pedLine(e, a) * a.side, tmp)
         val hx = tmp[0] - a.x; val hy = tmp[1] - a.y
         if (hx * hx + hy * hy > 1e-6f) a.heading = atan2(hx, -hy)
         a.x = tmp[0]; a.y = tmp[1]

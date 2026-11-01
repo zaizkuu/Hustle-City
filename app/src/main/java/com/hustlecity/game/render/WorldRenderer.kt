@@ -12,6 +12,7 @@ import com.hustlecity.game.engine.GameEngine
 import com.hustlecity.game.engine.carryPose
 import com.hustlecity.game.engine.SHIRT_COLORS
 import com.hustlecity.game.engine.SKIN_TONES
+import com.hustlecity.game.engine.StreetFood
 import com.hustlecity.game.ui.icons.IconCanvas
 import com.hustlecity.game.world.BKind
 import com.hustlecity.game.world.Building
@@ -74,9 +75,7 @@ class WorldRenderer(private val e: GameEngine) {
     private val painter = BuildingPainter(this, e)
     private val cars = CarPainter(scene)
     private val trees = TreePainter(scene)
-    private var propsCache: StreetProps? = null
-    private val props: StreetProps
-        get() = propsCache?.takeIf { it.city === e.city } ?: StreetProps(e.city).also { propsCache = it }
+    private val props: StreetProps get() = e.props
     private var featCache: CityFeatures? = null
     /** Landmarks, elevated railways, bridges, quays and city walls. */
     private val features: CityFeatures
@@ -125,6 +124,8 @@ class WorldRenderer(private val e: GameEngine) {
     private var density = 2f
 
     companion object {
+        /** How long one look round (both ways and back) takes: a full turn of [Act.LOOK]'s sway. */
+        private const val LOOK_SPAN = 5.46f
         val WATER = c(0xFF27445C)
         /** A phone in a passer-by's hand. */
         private val PHONE_COLOR = c(0xFF1E2228)
@@ -1684,12 +1685,28 @@ class WorldRenderer(private val e: GameEngine) {
         scene.box(rx - .6f, ry - .6f, 2.2f, rx + .6f, ry + .6f, 2.8f, c(0xFFF2C230), c(0xFFF2C230))
     }
 
-    /** The cook behind a street food cart, facing the street. */
+    /** The cook at a street food cart, on the kerb side of it, facing the pavement and turning what's on the griddle. */
     private fun vendor(i: Int) {
         val pr = props
-        val x = pr.x[i] - pr.dirX[i] * .95f; val y = pr.y[i] - pr.dirY[i] * .95f
-        people.draw(x, y, 0f, atan2(pr.dirX[i], -pr.dirY[i]), 0f, 0f, SHIRT_COLORS[(i * 3) % SHIRT_COLORS.size], PersonPainter.PANTS[i % 3],
-            SKIN_TONES[(i % 3) + 1], PersonPainter.HAIR[i % 3], apron = c(0xFFF4F4F0))
+        val x = pr.x[i] + pr.dirX[i] * StreetProps.COOK_AT; val y = pr.y[i] + pr.dirY[i] * StreetProps.COOK_AT
+        people.draw(x, y, 0f, atan2(-pr.dirX[i], pr.dirY[i]), 0f, 0f, SHIRT_COLORS[(i * 3) % SHIRT_COLORS.size], PersonPainter.PANTS[i % 3],
+            SKIN_TONES[(i % 3) + 1], PersonPainter.HAIR[i % 3], apron = c(0xFFF4F4F0), act = Act.COOK, actT = e.realTime + i * .9f)
+    }
+
+    /** What a pedestrian is doing with their hands as they go: their phone, a call, a chat, a snack... */
+    private fun pedAct(a: com.hustlecity.game.world.Agent): Int = when {
+        a.startled > 0f || a.jogger -> Act.NONE
+        // looking both ways at the kerb
+        a.state == 1 -> Act.LOOK
+        a.state == 7 -> { val since = a.linger - a.timer; if (since < 1.4f) Act.PAY else if (a.timer < 1f) Act.GIVE else Act.NONE }
+        else -> when (a.activity) {
+            com.hustlecity.game.world.PedActivity.PHONE -> Act.PHONE
+            com.hustlecity.game.world.PedActivity.CALL -> Act.CALL
+            com.hustlecity.game.world.PedActivity.CHAT -> Act.TALK
+            com.hustlecity.game.world.PedActivity.WINDOW -> Act.POINT
+            com.hustlecity.game.world.PedActivity.EAT -> Act.SNACK
+            else -> Act.NONE
+        }
     }
 
     private fun drawPed(a: com.hustlecity.game.world.Agent, i: Int) {
@@ -1698,18 +1715,47 @@ class WorldRenderer(private val e: GameEngine) {
         val umbrella = if ((v.rain > .25f && i % 10 < 7) || (v.snow > .4f && i % 10 < 3)) PersonPainter.UMBRELLAS[i % PersonPainter.UMBRELLAS.size] else 0
         // joggers and people getting out of a car's way run; a phone in hand, a shopping bag from the shop
         val running = a.jogger || a.startled > 0f
+        // under an umbrella the umbrella hand is taken: a call or a snack yes, two thumbs on the phone no
+        var act = pedAct(a)
+        if (umbrella != 0 && !running && (act == Act.PHONE || act == Act.TALK || act == Act.POINT)) act = Act.NONE
+        val phone = a.activity == com.hustlecity.game.world.PedActivity.PHONE || a.activity == com.hustlecity.game.world.PedActivity.CALL
         people.draw(a.x, a.y, 0f, a.heading, a.phase, (a.speed / 1.3f).coerceIn(0f, 1f),
             a.color, PersonPainter.PANTS[(i * 3) % PersonPainter.PANTS.size], SKIN_TONES[(i * 7) % SKIN_TONES.size], PersonPainter.HAIR[(i * 5) % PersonPainter.HAIR.size],
             umbrella = if (running) 0 else umbrella, pose = if (running && a.speed > .5f) Pose.RUN else Pose.STAND,
-            held = if (a.activity == com.hustlecity.game.world.PedActivity.PHONE) PHONE_COLOR else 0, bag = a.bag && !running)
+            held = if (phone && act == Act.NONE) PHONE_COLOR else 0, bag = a.bag && !running,
+            act = act, actT = e.realTime + i * 1.37f, item = StreetFood.menu(e.city.mapId)[a.snack.coerceIn(0, 2)].item)
+    }
+
+    /** When the player last moved (for looking about after standing still a while). */
+    private var playerMovedAt = 0f
+
+    /** What the player's character is doing on the street: paying, eating, on their phone, or looking about. */
+    private fun playerAct(carry: Int): Int {
+        val now = e.realTime
+        if (e.walkAmount > .05f) playerMovedAt = now
+        if (carry != 0) return Act.NONE
+        if (e.ui.payingUntil > now) return Act.PAY
+        if (e.ui.eatingUntil > now) return Act.SNACK
+        if (e.walkAmount > .05f) return Act.NONE
+        if (e.ui.phoneOpen) return Act.PHONE
+        // stood still a while: a look round now and then
+        val still = now - playerMovedAt - 5f
+        return if (still > 0f && still % 12f < LOOK_SPAN) Act.LOOK else Act.NONE
     }
 
     private fun drawPlayer() {
         val p = e.state.player
         if (!cinematic) scene.disc(p.x, p.y, .04f, 1f, 1f, 14, scene.withAlpha(c(0xFF27AE60), .55f))
+        val carry = e.carryPose()
+        val act = playerAct(carry)
+        val t = when (act) {
+            Act.LOOK -> (e.realTime - playerMovedAt - 5f) % 12f
+            Act.SNACK -> e.realTime - (e.ui.payingUntil.takeIf { it > 0f } ?: 0f)
+            else -> e.realTime
+        }
         people.draw(p.x, p.y, 0f, p.heading, e.walkPhase, e.walkAmount, SHIRT_COLORS[p.shirt % SHIRT_COLORS.size], PersonPainter.PANTS[1],
             SKIN_TONES[p.skin % SKIN_TONES.size], PersonPainter.HAIR[p.skin % PersonPainter.HAIR.size], 1.12f,
-            carry = e.carryPose(), load = p.hand.size)
+            carry = carry, load = p.hand.size, act = act, actT = t, item = e.ui.eatingItem)
     }
 
     // ------------------------------------------------------------------ overlays
