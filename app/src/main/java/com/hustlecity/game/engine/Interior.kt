@@ -489,6 +489,28 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     var playerTill = -1; private set
     private var workFacing: PlacedItem? = null
 
+    /**
+     * The heading for someone standing at (x, y) and working at item [p]: straight across it from in front or behind
+     * (a cashier looks over the counter, not along it), otherwise at its middle.
+     */
+    fun faceItem(p: PlacedItem, x: Float, y: Float): Float {
+        val def = Catalog.item(p.itemId) ?: return 0f
+        val (fw, fd) = itemDims(def, p.rot)
+        val tx = floor(x).toInt(); val ty = floor(y).toInt()
+        // +1 on the item's front row (as frontTiles has it), -1 on the row behind it
+        val side = when (p.rot % 4) {
+            0 -> if (tx in p.x until p.x + fw) (if (ty == p.y + fd) 1 else if (ty == p.y - 1) -1 else 0) else 0
+            1 -> if (ty in p.y until p.y + fd) (if (tx == p.x - 1) 1 else if (tx == p.x + fw) -1 else 0) else 0
+            2 -> if (tx in p.x until p.x + fw) (if (ty == p.y - 1) 1 else if (ty == p.y + fd) -1 else 0) else 0
+            else -> if (ty in p.y until p.y + fd) (if (tx == p.x + fw) 1 else if (tx == p.x - 1) -1 else 0) else 0
+        }
+        if (side == 0) return kotlin.math.atan2(p.x + fw / 2f - x, -(p.y + fd / 2f - y))
+        // the way the item's front faces; from behind you look that way, from in front back at it
+        val fx = when (p.rot % 4) { 1 -> -1f; 3 -> 1f; else -> 0f }
+        val fy = when (p.rot % 4) { 0 -> 1f; 2 -> -1f; else -> 0f }
+        return kotlin.math.atan2(-side * fx, side * fy)
+    }
+
     /** Where the player stands when working the floor. */
     fun workSpot(): Pair<Float, Float>? {
         val occ = occupancy()
@@ -514,8 +536,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 workFacing?.let { f ->
                     val def = Catalog.item(f.itemId)
                     if (def != null) {
-                        val (fw, fd) = itemDims(def, f.rot)
-                        playerHeading = kotlin.math.atan2(f.x + fw / 2f - px, -(f.y + fd / 2f - py))
+                        playerHeading = faceItem(f, px, py)
                         playerJob = if (def.fn == ItemFn.CASH_REGISTER) Job.TILL else Job.FLOOR
                         if (playerJob == Job.TILL) playerTill = items.indexOf(f)
                     }
@@ -613,6 +634,16 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     }
 
     private fun itemsWith(tag: String) = items.withIndex().filter { Catalog.item(it.value.itemId)?.tags?.contains(tag) == true }
+
+    /** A free tile beside item [p] (left or right of its front), when the one in front is taken. */
+    private fun besideTile(p: PlacedItem, occ: BooleanArray): Int? {
+        val def = Catalog.item(p.itemId) ?: return null
+        val (fw, fd) = itemDims(def, p.rot)
+        val around = ArrayList<Int>()
+        if (p.rot % 2 == 0) for (yy in p.y until p.y + fd) { around += idx(p.x - 1, yy); around += idx(p.x + fw, yy) }
+        else for (xx in p.x until p.x + fw) { around += idx(xx, p.y - 1); around += idx(xx, p.y + fd) }
+        return around.firstOrNull { it >= 0 && !occ[it] }
+    }
 
     private fun frontTile(p: PlacedItem, occ: BooleanArray): Int = frontTiles(p, occ).let { if (it.isEmpty()) -1 else it[e.rnd.nextInt(it.size)] }
 
@@ -1031,14 +1062,45 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                 val counters = counters()
                 var regIdx = 0
                 var desk = 0
-                var chairIdx = 0
                 val chairs = itemsWith("hair_chair")
                 val desks = itemsWith("desk").map { it.index }
                 val working = s.employees.filter { it.businessId == b.id && it.worksAt(s.hour, s.weekday) }
+                // where you stand working the till, which staff leave to you
+                val playerTile = if (playerJob == Job.TILL) idx(floor(px).toInt(), floor(py).toInt()) else -1
+                // stylists go to the chairs with a client in them first, then those a client is on the way to; one with a
+                // client already stays with them
+                fun waiting(ci: Int) = if (visitors.any { it.seated && it.item == ci }) 0
+                    else if (visitors.any { it.item == ci && it.seat != null && it.counter < 0 }) 1 else 2
+                val chairFor = HashMap<Int, Int>()
+                val freeChairs = chairs.map { it.index }.toMutableList()
+                val stylists = working.filter { it.role == StaffRole.HAIRSTYLIST }
+                for (emp in stylists) {
+                    val cur = staffById[emp.id]?.item ?: continue
+                    if (cur in freeChairs && waiting(cur) < 2) { chairFor[emp.id] = cur; freeChairs -= cur }
+                }
+                for (emp in stylists) if (emp.id !in chairFor) {
+                    val ci = freeChairs.minByOrNull { waiting(it) } ?: break
+                    chairFor[emp.id] = ci; freeChairs -= ci
+                }
                 for ((n, emp) in working.withIndex()) {
-                    fun behind(item: Int?): Post? = item?.let { ii -> items.getOrNull(ii)?.let { frontTiles(it, occFull, true).firstOrNull() ?: frontTiles(it, occFull).firstOrNull() }?.let { Post(it, ii) } }
+                    fun behind(item: Int?): Post? = item?.let { ii -> items.getOrNull(ii)?.let { frontTiles(it, occFull, true).firstOrNull { t -> t != playerTile } ?: frontTiles(it, occFull).firstOrNull { t -> t != playerTile } }?.let { Post(it, ii) } }
+                    fun onFloor(): Post? = browseTargets().getOrNull(n)?.let { it2 -> items.indexOf(it2).let { ii -> frontTiles(it2, occFull).lastOrNull { t -> t != playerTile }?.let { Post(it, ii) } } }
                     val post: Post? = when (emp.role) {
-                        StaffRole.CUSTOMER_SERVICE -> behind(counters.getOrNull(regIdx++))
+                        StaffRole.CUSTOMER_SERVICE -> {
+                            // behind a till; when you have the only place behind this one, the next till, or the floor
+                            var found: Post? = null
+                            while (found == null && regIdx < counters.size) {
+                                val ci = counters[regIdx++]
+                                val reg = items.getOrNull(ci) ?: continue
+                                val back = frontTiles(reg, occFull, true).firstOrNull { it != playerTile }
+                                found = when {
+                                    back != null -> Post(back, ci)
+                                    ci == playerTill -> null
+                                    else -> frontTiles(reg, occFull).firstOrNull { it != playerTile }?.let { Post(it, ci) }
+                                }
+                            }
+                            found ?: onFloor()
+                        }
                         StaffRole.CLEANER -> {
                             // head for the dirtiest floor, scrub it, move on; with nothing to clean, wait in the back room
                             val cur = staffGoal[emp.id]
@@ -1046,14 +1108,14 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                             if (cur != null && cur >= 0 && t > 0f) Post(cur)
                             else (e.economy.dirt.dirtiest(b, 6).randomOrNull(e.rnd) ?: cleanerRest(occFull) ?: freeTile(occFull, e.rnd.nextInt(w * d))).let { staffTimer[emp.id] = 4f; Post(it) }
                         }
-                        // a stylist stands behind their own chair, at the client's back
-                        StaffRole.HAIRSTYLIST -> chairs.getOrNull(chairIdx++)?.let { (ci, ch) -> frontTiles(ch, occFull).firstOrNull()?.let { Post(it, ci) } }
-                            ?: browseTargets().getOrNull(n)?.let { it2 -> items.indexOf(it2).let { ii -> frontTiles(it2, occFull).lastOrNull()?.let { Post(it, ii) } } }
+                        // a stylist stands behind a chair, at the client's back (or beside it, if something's behind)
+                        StaffRole.HAIRSTYLIST -> chairFor[emp.id]?.let { ci -> items.getOrNull(ci)?.let { ch ->
+                            (frontTiles(ch, occFull).firstOrNull() ?: besideTile(ch, occFull))?.let { Post(it, ci) } } } ?: onFloor()
                         StaffRole.DJ -> behind(itemsWith("dj_booth").firstOrNull()?.index)
                         StaffRole.ACTOR -> itemsWith("stage").firstOrNull()?.let { st -> frontTiles(st.value, occFull).getOrNull(n % 4)?.let { Post(it, -1) } }
                         StaffRole.PROJECTIONIST -> behind(itemsWith("screen").firstOrNull()?.index)
                         else -> if (b.type.office) desks.getOrNull(desk++)?.let { di -> deskSeat(di)?.let { Post(it.tile, di, it) } ?: behind(di) }
-                            else browseTargets().getOrNull(n)?.let { it2 -> items.indexOf(it2).let { ii -> frontTiles(it2, occFull).lastOrNull()?.let { Post(it, ii) } } }
+                            else onFloor()
                     }
                     val base = post ?: freeTile(occFull, n * 7 + 3).takeIf { it >= 0 }?.let { Post(it) } ?: continue
                     // someone bringing a box of stock goes to the box, then to the display
@@ -1068,7 +1130,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                         emp.role == StaffRole.ACTOR && post != null -> Job.STAGE
                         emp.role == StaffRole.PROJECTIONIST && post != null -> Job.PROJECT
                         b.type.office && post?.seat != null -> Job.DESK
-                        emp.role == StaffRole.HAIRSTYLIST -> Job.HAIR
+                        emp.role == StaffRole.HAIRSTYLIST && post != null && post.face in chairs.map { it.index } -> Job.HAIR
                         emp.role == StaffRole.GYM_TRAINER -> Job.TRAIN
                         post != null -> Job.FLOOR
                         else -> Job.NONE
@@ -1122,12 +1184,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                     if (dt <= 0f || moveToward(seat.x, seat.y, p.speed * dt, false, p)) { p.x = seat.x; p.y = seat.y; p.seated = true; p.pose = 1; p.z = seat.z; p.heading = seat.heading }
                 } else if (seat == null && post.face >= 0) {
                     p.item = post.face
-                    items.getOrNull(post.face)?.let { it2 ->
-                        Catalog.item(it2.itemId)?.let { def ->
-                            val (fw, fd) = itemDims(def, it2.rot)
-                            p.heading = kotlin.math.atan2(it2.x + fw / 2f - p.x, -(it2.y + fd / 2f - p.y))
-                        }
-                    }
+                    items.getOrNull(post.face)?.let { it2 -> p.heading = faceItem(it2, p.x, p.y) }
                 }
             }
         }

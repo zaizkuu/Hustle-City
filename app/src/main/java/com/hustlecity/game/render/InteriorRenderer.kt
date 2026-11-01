@@ -533,8 +533,9 @@ class InteriorRenderer(private val e: GameEngine) {
             Job.PROJECT -> Act.TYPE
             Job.STAGE -> Act.PERFORM
             Job.TRAIN -> Act.COACH
-            // cutting when someone's in the chair in front of them
-            Job.HAIR -> if (sc.visitors.any { it.seated && kotlin.math.hypot(it.x - v.x, it.y - v.y) < 1.7f }) Act.HAIR else Act.NONE
+            // cutting when someone's in their chair; between clients, tidying the station now and then
+            Job.HAIR -> if (sc.visitors.any { it.seated && (it.item == v.item || kotlin.math.hypot(it.x - v.x, it.y - v.y) < 1.7f) }) Act.HAIR
+                else if ((e.realTime + v.shirt) % 9f < 3.5f) Act.TIDY else Act.NONE
             // straightening the displays now and then
             Job.FLOOR -> if ((e.realTime + v.shirt) % 9f < 3.5f) Act.TIDY else Act.NONE
             else -> Act.NONE
