@@ -540,6 +540,36 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         }
     }
 
+    private val splatR = FloatArray(24)
+
+    /**
+     * A stain on the floor at (x, y): about [r] across with an uneven edge (its shape from [seed]), [color] at [alpha]
+     * in the middle fading out to nothing at the edge. In the classic renderer, a few stacked uneven discs.
+     */
+    fun stain(x: Float, y: Float, z: Float, r: Float, seed: Int, color: Int, alpha: Float) {
+        val n = 20
+        // a few slow waves round the rim make a blot rather than a circle
+        val p1 = (seed * 0.618f) % 1f * 6.2832f; val p2 = (seed * 0.377f) % 1f * 6.2832f; val p3 = (seed * 0.211f) % 1f * 6.2832f
+        val stretch = .75f + ((seed * 0.131f) % 1f) * .5f
+        for (i in 0 until n) {
+            val a = i * 6.2832f / n
+            val wob = 1f + .22f * sin(2f * a + p1) + .14f * sin(3f * a + p2) + .08f * sin(5f * a + p3)
+            splatR[i] = r * wob * (if (i % n < n / 2) stretch else 1f / stretch).let { k -> 1f + (k - 1f) * kotlin.math.abs(sin(a)) }
+        }
+        val g = gpu
+        if (g != null && !fOn) {
+            if (proj.camZOf(x, y, z) < -r) return
+            g.splat(streamFor(withAlpha(color, alpha * .99f)), x, y, z, splatR, n, withAlpha(color, alpha), withAlpha(color, alpha * .85f), .7f,
+                withAlpha(color, 0f), materialFor(color))
+            return
+        }
+        for (ring in 0 until 3) {
+            val f = 1f - ring * .3f
+            for (i in 0 until n) { val a = i * 6.2832f / n; wx[i] = x + cos(a) * splatR[i] * f; wy[i] = y + sin(a) * splatR[i] * f; wz[i] = z + ring * .001f }
+            poly(n, wx, wy, wz, withAlpha(color, alpha * .4f))
+        }
+    }
+
     /**
      * Axis aligned box with lighting and back-face culling.
      * [top] and [side] are base colors (unlit).
