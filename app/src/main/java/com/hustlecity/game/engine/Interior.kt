@@ -527,7 +527,10 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     private val staffedTills = HashSet<Int>()
     /** How many can serve at the stations right now (stylists on shift, or you); with none, nobody waits for one. */
     private var stationServers = 0
-    /** True when the tills are worked by someone (a cashier on shift, or you): customers then pay only once they're there. */
+    /**
+     * True when the tills are worked by someone (a cashier on shift, or you) or there's a self-checkout or kiosk:
+     * customers then use only those, and pay at a manned till only once the cashier is there.
+     */
     private var tillsManned = false
     /** The station each server (a staff key, or [PLAYER_KEY]) was last given. */
     private val stationOf = HashMap<Int, Int>()
@@ -1236,7 +1239,8 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                         playerJob = Job.HAIR; playerStation = ci
                     }
                 }
-                tillsManned = playerTill >= 0 || working.any { it.role == StaffRole.CUSTOMER_SERVICE }
+                // a self-checkout or a kiosk is always open: with nobody at the other tills, customers use those
+                tillsManned = playerTill >= 0 || working.any { it.role == StaffRole.CUSTOMER_SERVICE } || counters().any { isSelfService(it) }
                 for ((n, emp) in working.withIndex()) {
                     fun behind(item: Int?): Post? = item?.let { ii -> items.getOrNull(ii)?.let { frontTiles(it, occFull, true).firstOrNull { t -> t != playerTile } ?: frontTiles(it, occFull).firstOrNull { t -> t != playerTile } }?.let { Post(it, ii) } }
                     fun onFloor(): Post? = browseTargets().getOrNull(n)?.let { it2 -> items.indexOf(it2).let { ii -> frontTiles(it2, occFull).lastOrNull { t -> t != playerTile }?.let { Post(it, ii) } } }

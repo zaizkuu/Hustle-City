@@ -130,6 +130,19 @@ object BizCalc {
         return out
     }
 
+    /** True when [b] has a self-checkout or an order kiosk: customers there pay by themselves. */
+    fun hasSelfService(b: Business) = b.furniture.any { p -> Catalog.item(p.itemId)?.let { it.fn == ItemFn.CASH_REGISTER && "self_service" in it.tags } == true }
+
+    /**
+     * True when [b] runs on its self-checkouts or order kiosks alone: nobody on shift, but you're in the store keeping
+     * an eye on it. Only the self-service tills take customers then (a salon still needs its stylists, a gym its trainers).
+     */
+    fun selfRunning(e: GameEngine, b: Business, workers: List<Double>) =
+        workers.isEmpty() && e.state.player.inBuilding == b.buildingId && hasSelfService(b)
+
+    /** How well a store does running itself (in place of the staff's skill). */
+    const val SELF_RUN_SKILL = .5
+
     /** Performers on shift (DJ, projectionists, actors) for types that need one. */
     fun performers(e: GameEngine, b: Business, hour: Int, weekday: Int): List<Double> {
         val role = b.type.performer ?: return emptyList()
@@ -192,13 +205,18 @@ object BizCalc {
         return type.baseDemand * (.25 + 1.6 * promo) * type.curve[hour] * wealth * comp * rep * district * e.weather.demandFactor(type) * e.state.player.rules.demand
     }
 
-    /** Customers per hour the business can serve with the given workers. */
-    fun capacity(b: Business, building: Building?, workers: List<Double>): Int = capacityRate(b, building, workers).roundToInt()
+    /** Customers per hour the business can serve with the given workers (or on its own, when [selfRun]). */
+    fun capacity(b: Business, building: Building?, workers: List<Double>, selfRun: Boolean = false): Int =
+        capacityRate(b, building, workers, selfRun).roundToInt()
 
-    fun capacityRate(b: Business, building: Building?, workers: List<Double>): Double {
-        if (workers.isEmpty()) return 0.0
+    /**
+     * Customers per hour the business can serve with [workers] on the floor. With nobody, nothing, unless [selfRun]
+     * ([selfRunning]): then only what needs no one, the self-checkouts and order kiosks.
+     */
+    fun capacityRate(b: Business, building: Building?, workers: List<Double>, selfRun: Boolean = false): Double {
+        if (workers.isEmpty() && !selfRun) return 0.0
         val n = workers.size
-        val skill = workers.average()
+        val skill = if (workers.isEmpty()) SELF_RUN_SKILL else workers.average()
         // billable hours: one per professional at a desk, more for skilled staff
         if (b.type.office) return min(count(b, "desk"), n) * (.6 + .4 * skill) * (if (count(b, "copier") > 0) 1.05 else 1.0)
         val registers = countFn(b, ItemFn.CASH_REGISTER)
@@ -298,10 +316,12 @@ class Economy(private val e: GameEngine) {
             return
         }
         val workers = BizCalc.workers(e, b, hour, weekday)
+        // nobody on shift, but you're in the store: the self-checkouts and kiosks keep selling
+        val selfRun = BizCalc.selfRunning(e, b, workers)
         val demand = BizCalc.demand(e, b, hour)
         // clubs, cinemas and theaters can't run the show without their DJ, projectionist or actors
         val showOn = b.type.performer == null || BizCalc.performers(e, b, hour, weekday).isNotEmpty()
-        val cap = if (showOn) BizCalc.capacityRate(b, building, workers) else 0.0
+        val cap = if (showOn) BizCalc.capacityRate(b, building, workers, selfRun) else 0.0
         capacityNow[b.id] = cap.roundToInt()
         val served = min(demand, cap)
         servedRate[b.id] = served
@@ -310,12 +330,13 @@ class Economy(private val e: GameEngine) {
             b.lostAcc += lostRate / 60.0
             while (b.lostAcc >= 1.0) { b.lostAcc -= 1.0; b.lostToday++ }
         }
-        if (workers.isEmpty()) return
+        if (workers.isEmpty() && !selfRun) return
         b.custAcc += served / 60.0
         val waitScore = if (demand <= 0.1) 1.0 else (served / demand).coerceIn(0.0, 1.0)
         val perf = BizCalc.performers(e, b, hour, weekday)
         // a better DJ or cast makes for happier guests
-        val staffSkill = if (perf.isEmpty()) workers.average() else (workers.average() + perf.average()) / 2
+        val skill = if (workers.isEmpty()) BizCalc.SELF_RUN_SKILL else workers.average()
+        val staffSkill = if (perf.isEmpty()) skill else (skill + perf.average()) / 2
         val interior = BizCalc.decorScore(b, building)
         while (b.custAcc >= 1.0) {
             b.custAcc -= 1.0

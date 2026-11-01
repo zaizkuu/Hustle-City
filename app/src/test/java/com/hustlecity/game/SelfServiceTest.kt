@@ -20,7 +20,8 @@ import org.robolectric.annotation.Config
 
 /**
  * Self-checkouts and order kiosks: customers pay at them with no cashier there, and they add to what the store can
- * serve without needing more staff. When every line is full, customers sit in the waiting area until there's room.
+ * serve without needing more staff. With nobody on shift at all, the store still sells through them while you're in
+ * it. When every line is full, customers sit in the waiting area until there's room.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -56,6 +57,60 @@ class SelfServiceTest {
             assertTrue("$id is in the catalog", Catalog.item(id) != null)
             assertTrue("$id is sold somewhere", Catalog.places.any { id in it.stock })
         }
+    }
+
+    /** An hour of the economy with nobody on shift; returns the customers served. */
+    private fun anHour(e: GameEngine): Int {
+        val biz = e.state.businesses.first()
+        val before = biz.customersToday
+        repeat(60) { e.state.minute++; e.economy.minute() }
+        return biz.customersToday - before
+    }
+
+    @Test
+    fun selfCheckoutsRunTheStoreWhileYoureIn() {
+        val (e, _) = store("supermarket", listOf(PlacedItem("self_checkout", 4, 2, 0), PlacedItem("self_checkout", 6, 2, 0), PlacedItem("shelf", 1, 6, 0),
+            PlacedItem("drinks_fridge", 5, 6, 0)), 0)
+        val biz = e.state.businesses.first()
+        assertTrue("the store has what a supermarket needs", BizCalc.requirementsMet(biz))
+        assertTrue("nobody is on shift", BizCalc.workers(e, biz, e.state.hour, e.state.weekday).isEmpty())
+        assertEquals("you're not working the shift", -1, e.state.player.workingAt)
+        // in the store: the self-checkouts serve customers
+        val inStore = anHour(e)
+        println("self-run hour, in the store: $inStore customers")
+        assertTrue("customers were served with you in the store ($inStore)", inStore > 0)
+        assertTrue("it can't take more than the self-checkouts' 50 an hour ($inStore)", inStore <= 50)
+        // gone: nobody minds the store, so nothing sells
+        e.state.player.inBuilding = -1
+        assertEquals("nobody served with you gone", 0, anHour(e))
+    }
+
+    @Test
+    fun aStaffedTillStillNeedsSomeoneOnShift() {
+        // only a cash register: being in the store isn't enough, somebody has to work it
+        val (e, _) = store("supermarket", listOf(PlacedItem("cash_register", 1, 2, 0), PlacedItem("shelf", 1, 6, 0), PlacedItem("drinks_fridge", 5, 6, 0)), 0)
+        assertTrue(BizCalc.requirementsMet(e.state.businesses.first()))
+        assertEquals(0, anHour(e))
+        // and with you on the shift it sells
+        e.state.player.workingAt = e.state.businesses.first().id
+        assertTrue(anHour(e) > 0)
+    }
+
+    @Test
+    fun customersSkipTheUnmannedTillForTheSelfCheckout() {
+        // a register with nobody behind it and a self-checkout: they all pay at the self-checkout
+        val (_, sc) = store("supermarket", listOf(PlacedItem("cash_register", 1, 2, 0), PlacedItem("self_checkout", 5, 2, 0),
+            PlacedItem("shelf", 1, 6, 0), PlacedItem("shelf", 5, 6, 0)), 0)
+        val reg = sc.items.indexOfFirst { it.itemId == "cash_register" }
+        val self = sc.items.indexOfFirst { it.itemId == "self_checkout" }
+        var atSelf = 0; var atReg = 0
+        repeat(30 * 240) {
+            sc.update(1 / 30f, true)
+            for (v in sc.visitors) if (v.payTime > 0f && v.wait > 0f) { if (v.counter == self) atSelf++ else if (v.counter == reg) atReg++ }
+        }
+        println("unmanned till: $atSelf paying frames at the self-checkout, $atReg at the register")
+        assertTrue("customers paid at the self-checkout ($atSelf)", atSelf > 0)
+        assertEquals("nobody paid at the unmanned register", 0, atReg)
     }
 
     @Test

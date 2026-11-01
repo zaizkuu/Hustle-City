@@ -694,12 +694,12 @@ object Catalog {
             parts = listOf(box(.05f, 0f, 1.0f, .95f, .05f, 1.8f, WHITE), box(.1f, .05f, 1.6f, .9f, .07f, 1.75f, c(0xFFEB5757)), box(.15f, .05f, 1.1f, .85f, .06f, 1.5f, c(0xFFBDBDBD)))),
         // checkout, security and upkeep
         FurnitureDef("self_checkout", "Self-Checkout", 2600.0, 1, 1, ItemFn.CASH_REGISTER, setOf("register", "self_service"), capacity = 25,
-            description = "Customers scan and pay by themselves: no cashier needed at it (someone still has to be on shift). Serves about 25 customers per hour.",
+            description = "Customers scan and pay by themselves: no cashier needed at it. With nobody on shift, the store keeps selling through it while you're in the store. Serves about 25 customers per hour.",
             parts = listOf(
                 box(.12f, .15f, 0f, .88f, .75f, .85f, c(0xFFE8ECEF)), box(.1f, .15f, .85f, .9f, .95f, .9f, c(0xFF9AA3AD)),
                 box(.3f, .1f, .9f, .7f, .25f, 1.5f, c(0xFF2E3238)), box(.33f, .25f, 1.05f, .67f, .26f, 1.42f, c(0xFF56CCF2)))),
         FurnitureDef("order_kiosk", "Self-Order Kiosk", 1900.0, 1, 1, ItemFn.CASH_REGISTER, setOf("register", "self_service"), capacity = 30,
-            description = "A touchscreen stand where customers order and pay by themselves, for restaurants, cafés and cinemas: no cashier needed at it (someone still has to be on shift). Serves about 30 customers per hour.",
+            description = "A touchscreen stand where customers order and pay by themselves, for restaurants, cafés and cinemas: no cashier needed at it. With nobody on shift, the place keeps selling through it while you're there. Serves about 30 customers per hour.",
             parts = listOf(
                 box(.25f, .3f, 0f, .75f, .7f, .05f, c(0xFF2E3238)), box(.42f, .42f, .05f, .58f, .58f, .95f, c(0xFFE8ECEF)),
                 box(.2f, .35f, .95f, .8f, .55f, 1.95f, c(0xFFE8ECEF)), box(.24f, .55f, 1.05f, .76f, .56f, 1.85f, c(0xFF56CCF2)))),

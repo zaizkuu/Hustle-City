@@ -687,6 +687,9 @@ fun InteriorPanel(e: GameEngine, modifier: Modifier = Modifier) {
                         Switch(!biz.tempClosed, { e.setOpen(biz, it) }, colors = SwitchDefaults.colors(checkedTrackColor = HC.Green))
                     }
                     val working = e.state.player.workingAt == biz.id
+                    // nobody on shift, but self-checkouts: the store sells through them while you're here
+                    if (!biz.tempClosed && BizCalc.selfRunning(e, biz, BizCalc.workers(e, biz, e.state.hour, e.state.weekday)))
+                        Text("Self-checkouts serving while you're here", color = HC.GreenLight, fontSize = 10.sp)
                     HButton(if (working) "Stop working" else "Start working", full, small = true, color = if (working) HC.Red else HC.Green) { e.toggleWork(biz) }
                     HButton(if (working) "Skip to end of shift (%02d:00)".format(biz.closeHour) else "Work until %02d:00 (skip ahead)".format(biz.closeHour), full, small = true,
                         color = HC.Teal, icon = Icons.Filled.FastForward) { e.workUntilClosing(biz) }

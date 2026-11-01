@@ -107,8 +107,10 @@ object Objectives {
                 if (missingDisplay.isNotEmpty() && missingDisplay.size < b.type.products.size) {
                     out += Alert("${b.name}: No display for ${missingDisplay.joinToString { it.name }}", false, b.id)
                 }
-                if (BizCalc.isWithinHours(b, s.hour) && BizCalc.workers(e, b, s.hour, s.weekday).isEmpty()) {
-                    out += Alert("${b.name}: Nobody is working right now", true, b.id)
+                val workers = BizCalc.workers(e, b, s.hour, s.weekday)
+                if (BizCalc.isWithinHours(b, s.hour) && workers.isEmpty() && !BizCalc.selfRunning(e, b, workers)) {
+                    out += Alert(if (BizCalc.hasSelfService(b)) "${b.name}: Nobody is working right now (be in the store to let the self-checkouts run it)"
+                        else "${b.name}: Nobody is working right now", true, b.id)
                 }
                 b.type.performer?.let { role ->
                     if (BizCalc.isWithinHours(b, s.hour) && BizCalc.performers(e, b, s.hour, s.weekday).isEmpty()) {

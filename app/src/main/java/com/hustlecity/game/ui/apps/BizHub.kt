@@ -261,12 +261,19 @@ private fun InsightTab(e: GameEngine, biz: Business) {
             WhiteCard(Modifier.fillMaxWidth()) {
                 CardTitle("Customer capacity", Icons.Filled.Groups)
                 val workers = BizCalc.workers(e, biz, s.hour, s.weekday)
-                val cap = BizCalc.capacity(biz, b, workers.ifEmpty { listOf(.5) })
+                val selfRun = BizCalc.selfRunning(e, biz, workers)
+                val cap = if (selfRun) BizCalc.capacity(biz, b, workers, true) else BizCalc.capacity(biz, b, workers.ifEmpty { listOf(.5) })
+                val none = workers.isEmpty() && !selfRun
                 Row {
                     Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Capacity per hour", style = HT.small, color = HC.InkSoft)
-                        Text("${if (workers.isEmpty()) 0 else cap}", style = HT.big, color = if (workers.isEmpty()) HC.Red else HC.Ink)
-                        Text(if (workers.isEmpty()) "nobody working now" else "${workers.size} working now", style = HT.small, color = HC.InkSoft)
+                        Text("${if (none) 0 else cap}", style = HT.big, color = if (none) HC.Red else HC.Ink)
+                        Text(when {
+                            selfRun -> "self-checkouts only (you're here)"
+                            none && BizCalc.hasSelfService(biz) -> "nobody working now (be in the store to run it on the self-checkouts)"
+                            none -> "nobody working now"
+                            else -> "${workers.size} working now"
+                        }, style = HT.small, color = HC.InkSoft, textAlign = TextAlign.Center)
                     }
                     Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Building limit", style = HT.small, color = HC.InkSoft)
