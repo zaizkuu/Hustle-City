@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -446,12 +448,14 @@ fun Joystick(e: GameEngine, modifier: Modifier = Modifier) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ActionButtons(e: GameEngine, modifier: Modifier = Modifier) {
     val p = e.state.player
     if (e.skip != null) return
     if (p.driving >= 0) return
-    Row(modifier.padding(bottom = 22.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(modifier.padding(bottom = 22.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom)) {
         e.nearDoor?.let { b ->
             val label = if (b.kind == BKind.GAS) "Fuel Up" else e.buildingName(b)
             HButton("Enter $label", color = HC.Green) { e.enterBuilding(b) }
@@ -492,8 +496,11 @@ fun LocationLabel(e: GameEngine, modifier: Modifier = Modifier) {
     if (e.state.player.driving >= 0) return
     val (x, y) = e.focusPoint()
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(e.city.describeLocation(x, y), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, style = shadowText)
-        Text(e.city.neighborhoodAt(x, y).name, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, style = shadowText)
+        val where = e.city.describeLocation(x, y)
+        val hood = e.city.neighborhoodAt(x, y).name
+        Text(where, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, style = shadowText)
+        // Manila and Tokyo write the district into the address itself
+        if (hood !in where) Text(hood, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, style = shadowText)
     }
 }
 

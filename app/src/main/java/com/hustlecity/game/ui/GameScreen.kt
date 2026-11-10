@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -85,8 +86,12 @@ fun GameScreen(e: GameEngine) {
                     if (inside && !e.ui.designer) 212.dp + phoneW else 0.dp,
                     if (!inside && e.ui.selected >= 0) 266.dp + phoneW else 0.dp,
                 )
+                // with panels open on both sides the gap can be too narrow to read a tip in: it then spreads over the
+                // objectives until it's dismissed
+                val screenW = LocalConfiguration.current.screenWidthDp.dp
+                val cramped = e.ui.tip != null && screenW - leftGap - rightGap < 280.dp
                 Column(
-                    Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(top = 56.dp, start = leftGap, end = rightGap),
+                    Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(top = 56.dp, start = if (cramped) 8.dp else leftGap, end = rightGap),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     if (!inside) com.hustlecity.game.ui.hud.GpsBanner(e, Modifier.padding(bottom = 4.dp))
@@ -107,7 +112,13 @@ fun GameScreen(e: GameEngine) {
                         Joystick(e, Modifier.align(if (e.settings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart).padding(18.dp))
                         LocationLabel(e, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
                         com.hustlecity.game.ui.hud.CarryingChip(e, Modifier.align(if (e.settings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart).padding(start = 16.dp, end = 16.dp, bottom = 150.dp))
-                        ActionButtons(e, Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp))
+                        // between the joystick and whatever stands on the other side: the phone, and a building's card
+                        val stick = 150.dp
+                        val panels = (if (e.ui.phoneOpen) 192.dp else 76.dp) + (if (e.ui.selected >= 0) 258.dp else 0.dp)
+                        val (padStart, padEnd) = if (e.settings.leftHanded) panels to stick else stick to panels
+                        val room = screenW - padStart - padEnd
+                        ActionButtons(e, Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                            .padding(bottom = 40.dp, start = if (room >= 150.dp) padStart else 8.dp, end = if (room >= 150.dp) padEnd else 8.dp))
                     }
                     BuildingCard(e, Modifier.align(Alignment.TopEnd).padding(top = 58.dp, end = 8.dp))
                 }

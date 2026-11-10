@@ -639,7 +639,7 @@ private fun StartBusiness(e: GameEngine, buildingId: Int) {
                         val sel = typeId == t.id
                         val importLocked = t.sources.contains(Source.IMPORT) && Catalog.COURSE_IMPORT !in e.state.player.courses
                         Column(
-                            Modifier.width(150.dp).fillMaxHeight().clip(RoundedCornerShape(6.dp)).background(if (sel) Color(0xFF3B5B8C) else Color(0xFF4A515C))
+                            Modifier.width(172.dp).fillMaxHeight().clip(RoundedCornerShape(6.dp)).background(if (sel) Color(0xFF3B5B8C) else Color(0xFF4A515C))
                                 .border(3.dp, if (sel) HC.Blue else Color.Transparent, RoundedCornerShape(6.dp))
                                 .clickable(enabled = !importLocked) {
                                     typeId = t.id
@@ -714,7 +714,9 @@ private fun Listing(e: GameEngine, buildingId: Int) {
             KeyValue("Deposit", e.money(e.rentOf(b) / 2))
             Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 HButton("Rent", color = HC.Green, enabled = e.isVacant(b.id)) { if (e.rentBuilding(b.id)) close(e) }
-                if (Catalog.COURSE_REAL_ESTATE in e.state.player.courses) HButton("Buy ${e.moneyShort(b.value)}", color = HC.Purple) { if (e.buyBuilding(b.id)) close(e) }
+                if (Catalog.COURSE_REAL_ESTATE in e.state.player.courses) HButton("Buy ${e.moneyShort(b.value)}", color = HC.Purple) {
+                    e.ui.confirm = Confirm("Buy ${b.address}?", "${e.money(b.value)}, paid now. No more rent, and you can sell it later for 90% of its value.", "Buy") { if (e.buyBuilding(b.id)) close(e) }
+                }
                 HButton("Waypoint") { e.setWaypoint(b.id) }
             }
         }

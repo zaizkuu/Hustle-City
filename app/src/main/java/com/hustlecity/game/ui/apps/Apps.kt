@@ -652,7 +652,9 @@ fun RealtyApp(e: GameEngine) {
                             HButton("Rent", small = true, color = HC.Green) { e.rentBuilding(b.id) }
                             if (Catalog.COURSE_REAL_ESTATE in s.player.courses) {
                                 Spacer(Modifier.width(6.dp))
-                                HButton("Buy ${e.moneyShort(b.value)}", small = true, color = HC.Purple) { e.buyBuilding(b.id) }
+                                HButton("Buy ${e.moneyShort(b.value)}", small = true, color = HC.Purple) {
+                                    e.ui.confirm = Confirm("Buy ${b.address}?", "${e.money(b.value)}, paid now. No more rent, and you can sell it later for 90% of its value.", "Buy") { e.buyBuilding(b.id) }
+                                }
                             }
                         }
                     }
@@ -685,11 +687,14 @@ fun RealtyApp(e: GameEngine) {
                             Icon(Icons.Filled.Place, null, tint = HC.Blue, modifier = Modifier.size(26.dp).clickable { e.setWaypoint(b.id); e.toast("Waypoint set") })
                             Spacer(Modifier.width(6.dp))
                             if (Catalog.COURSE_REAL_ESTATE in s.player.courses && !r.owned) {
-                                HButton("Buy", small = true, color = HC.Purple) { e.buyBuilding(b.id) }
+                                HButton("Buy", small = true, color = HC.Purple) {
+                                    e.ui.confirm = Confirm("Buy ${b.address}?", "${e.money(b.value)}, paid now. No more rent, and you can sell it later for 90% of its value.", "Buy") { e.buyBuilding(b.id) }
+                                }
                                 Spacer(Modifier.width(6.dp))
                             }
                             HButton(if (r.owned) "Sell" else "End lease", small = true, color = HC.Red) {
-                                e.ui.confirm = Confirm(if (r.owned) "Sell ${b.address}?" else "End lease at ${b.address}?", "This can't be undone.", "Confirm") { e.cancelLease(b.id) }
+                                e.ui.confirm = Confirm(if (r.owned) "Sell ${b.address}?" else "End lease at ${b.address}?",
+                                    if (r.owned) "You'll get ${e.money(b.value * .9)}. This can't be undone." else "This can't be undone.", if (r.owned) "Sell" else "End lease") { e.cancelLease(b.id) }
                             }
                         }
                     }
