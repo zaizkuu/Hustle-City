@@ -60,6 +60,9 @@ import com.hustlecity.game.engine.Confirm
 import com.hustlecity.game.engine.GameEngine
 import com.hustlecity.game.engine.buyBuilding
 import com.hustlecity.game.engine.cancelLease
+import com.hustlecity.game.engine.endTenancy
+import com.hustlecity.game.engine.letOut
+import com.hustlecity.game.engine.tenantRentOf
 import com.hustlecity.game.engine.fire
 import com.hustlecity.game.engine.hire
 import com.hustlecity.game.engine.raise
@@ -214,6 +217,21 @@ fun PersonaApp(e: GameEngine) {
                     }
                 }
                 if (p.hand.isNotEmpty()) Text("Carrying: ${p.hand.joinToString { it.label }}", style = HT.small, color = HC.Orange)
+            }
+            WhiteCard(Modifier.fillMaxWidth()) {
+                val all = com.hustlecity.game.engine.Achievements.all
+                CardTitle("Achievements · ${all.count { it.id in s.achievements }} of ${all.size}")
+                for (a in all.sortedBy { it.id !in s.achievements }) {
+                    val day = s.achievements[a.id]
+                    Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                        GIcon("trophy", 16.dp, tint = if (day != null) HC.Orange else Color(0xFFC4CAD2))
+                        Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                            Text(a.title, style = HT.bodyBold, color = if (day != null) HC.Ink else HC.InkSoft)
+                            Text(a.text, style = HT.small, color = HC.InkSoft)
+                        }
+                        if (day != null) Text("Day $day", style = HT.small, color = HC.Green)
+                    }
+                }
             }
         }
     }
@@ -674,6 +692,7 @@ fun RealtyApp(e: GameEngine) {
                                 Text(
                                     when {
                                         b.id == s.player.home -> "Your home"
+                                        r.tenant.isNotEmpty() -> "Let to ${r.tenant} · ${e.money(r.tenantRent)}/mo"
                                         biz != null -> biz.name
                                         b.kind == BKind.RETAIL -> "Empty — go inside to start a business"
                                         else -> "Residential"
@@ -686,6 +705,15 @@ fun RealtyApp(e: GameEngine) {
                             }
                             Icon(Icons.Filled.Place, null, tint = HC.Blue, modifier = Modifier.size(26.dp).clickable { e.setWaypoint(b.id); e.toast("Waypoint set") })
                             Spacer(Modifier.width(6.dp))
+                            if (r.owned && r.tenant.isNotEmpty()) {
+                                HButton("End tenancy", small = true, color = HC.GlassLight) {
+                                    e.ui.confirm = Confirm("Ask ${r.tenant} to leave?", "The rent of ${e.money(r.tenantRent)} a month stops.", "End tenancy") { e.endTenancy(b.id) }
+                                }
+                                Spacer(Modifier.width(6.dp))
+                            } else if (r.owned && biz == null && b.id != s.player.home) {
+                                HButton("Let out ${e.moneyShort(e.tenantRentOf(b))}/mo", small = true, color = HC.Teal) { e.letOut(b.id) }
+                                Spacer(Modifier.width(6.dp))
+                            }
                             if (Catalog.COURSE_REAL_ESTATE in s.player.courses && !r.owned) {
                                 HButton("Buy", small = true, color = HC.Purple) {
                                     e.ui.confirm = Confirm("Buy ${b.address}?", "${e.money(b.value)}, paid now. No more rent, and you can sell it later for 90% of its value.", "Buy") { e.buyBuilding(b.id) }

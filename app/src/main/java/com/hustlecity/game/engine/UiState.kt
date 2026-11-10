@@ -24,6 +24,8 @@ sealed class Panel {
     data object Help : Panel()
     /** The main menu's list of saved games. */
     data object Saves : Panel()
+    /** The board at a station: where its line goes and what the ride costs. */
+    data class Station(val stationId: Int) : Panel()
     data object Sleep : Panel()
     data class Warehouse(val businessId: Int) : Panel()
     data class Trunk(val vehicleId: Int) : Panel()

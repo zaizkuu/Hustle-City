@@ -292,6 +292,9 @@ data class Rental(
     /** Day the lease is up for renewal, when the landlord may raise the rent (0: not set yet, older saves). */
     var leaseEnd: Int = 0,
     var renewals: Int = 0,
+    /** A building you own and let out: who rents it from you ("" for nobody) and what they pay a month. */
+    var tenant: String = "",
+    var tenantRent: Double = 0.0,
 )
 
 /** Leases run for this many days before they renew. */
@@ -383,7 +386,7 @@ data class Message(val day: Int, val minute: Int, val from: String, val text: St
 data class PendingRecruit(val role: StaffRole, val count: Int, val readyAt: Long)
 
 @Serializable
-enum class SkipKind { SLEEP, COURSE, WORK, SIDE_JOB, TAXI, WAIT, HOSPITAL, CLEAN, REST, WORKOUT }
+enum class SkipKind { SLEEP, COURSE, WORK, SIDE_JOB, TAXI, WAIT, HOSPITAL, CLEAN, REST, WORKOUT, TRAIN }
 
 /** A fast-forward in progress. Saved with the game so a course or taxi ride survives the app being closed. */
 @Serializable
@@ -422,6 +425,8 @@ data class GameState(
     val history: MutableList<DayRecord> = mutableListOf(),
     val messages: MutableList<Message> = mutableListOf(),
     val objectivesDone: MutableSet<String> = mutableSetOf(),
+    /** Achievements earned: id to the day it was unlocked. */
+    val achievements: MutableMap<String, Int> = mutableMapOf(),
     val recruits: MutableList<PendingRecruit> = mutableListOf(),
     var nextId: Int = 1,
     var radioIndex: Int = 0,

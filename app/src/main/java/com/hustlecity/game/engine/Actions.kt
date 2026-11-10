@@ -67,6 +67,36 @@ fun GameEngine.buyBuilding(buildingId: Int): Boolean {
     return true
 }
 
+/** What a tenant pays a month for a building of yours: a little over the going rent, for a landlord who's around. */
+fun GameEngine.tenantRentOf(b: com.hustlecity.game.world.Building): Double = (b.baseRent * 1.25 / 10).roundToInt() * 10.0
+
+/** Lets a building you own, and aren't using, to a tenant: rent comes in every midnight. */
+fun GameEngine.letOut(buildingId: Int): Boolean {
+    val b = city.building(buildingId) ?: return false
+    val r = state.rentalFor(buildingId) ?: return false
+    if (!r.owned) { toast("You can only let out buildings you own"); return false }
+    if (r.tenant.isNotEmpty()) return false
+    if (state.businessAt(buildingId) != null) { toast("Close the business there first"); return false }
+    if (buildingId == state.player.home) { toast("You live there"); return false }
+    r.tenantRent = tenantRentOf(b)
+    r.tenant = if (b.kind == BKind.RESIDENTIAL) "${city.map.firstNames.random(rnd)} ${city.map.lastNames.random(rnd)}"
+    else Catalog.randomBusinessName(Catalog.businessTypes.random(rnd).id, rnd)
+    if (state.player.inBuilding == buildingId) exitBuilding()
+    message(r.tenant, "Thanks for the keys to ${b.address}! ${money(r.tenantRent)} a month it is, paid daily.", notify = false)
+    toast("${r.tenant} moves into ${b.address}", ToastKind.GOOD)
+    bump()
+    return true
+}
+
+/** Ends a tenancy, so you can use or sell the building empty. */
+fun GameEngine.endTenancy(buildingId: Int) {
+    val r = state.rentalFor(buildingId) ?: return
+    if (r.tenant.isEmpty()) return
+    toast("${r.tenant} has moved out")
+    r.tenant = ""; r.tenantRent = 0.0
+    bump()
+}
+
 fun GameEngine.cancelLease(buildingId: Int): Boolean {
     val r = state.rentalFor(buildingId) ?: return false
     if (state.businessAt(buildingId) != null) { toast("Close the business first (BizHub → Settings)"); return false }
@@ -88,6 +118,7 @@ fun GameEngine.cancelLease(buildingId: Int): Boolean {
 fun GameEngine.startBusiness(buildingId: Int, typeId: String, name: String): Business? {
     val b = city.building(buildingId) ?: return null
     if (state.rentalFor(buildingId) == null || state.businessAt(buildingId) != null) return null
+    if (state.rentalFor(buildingId)?.tenant?.isNotEmpty() == true) { toast("A tenant rents this building from you"); return null }
     val type = Catalog.type(typeId)
     if (type.buildingKind != b.kind.name) { toast("${type.name} can't open in a ${b.kind.label.lowercase()} building"); return null }
     if (type.sources.contains(Source.IMPORT) && Catalog.COURSE_IMPORT !in state.player.courses) {
@@ -548,6 +579,7 @@ fun GameEngine.takeLoan(def: com.hustlecity.game.data.LoanDef) {
 fun GameEngine.repayLoan(loan: Loan) {
     if (!spend(loan.remaining, "Loan repayment")) return
     state.loans.remove(loan)
+    state.objectivesDone += "loan_repaid"
     toast("Loan repaid in full", ToastKind.GOOD)
 }
 

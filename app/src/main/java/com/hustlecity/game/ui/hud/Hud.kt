@@ -95,6 +95,7 @@ import com.hustlecity.game.engine.AppId
 import com.hustlecity.game.engine.BizCalc
 import com.hustlecity.game.engine.FLOOR_COLORS
 import com.hustlecity.game.engine.GameEngine
+import com.hustlecity.game.engine.nearStation
 import com.hustlecity.game.engine.InteriorMode
 import com.hustlecity.game.engine.Objectives
 import com.hustlecity.game.engine.Panel
@@ -460,6 +461,7 @@ fun ActionButtons(e: GameEngine, modifier: Modifier = Modifier) {
             val label = if (b.kind == BKind.GAS) "Fuel Up" else e.buildingName(b)
             HButton("Enter $label", color = HC.Green) { e.enterBuilding(b) }
         }
+        e.nearStation()?.let { st -> HButton("${st.line}: ${st.name}", color = HC.Purple, icon = Icons.Filled.DirectionsCar) { e.ui.panel = Panel.Station(st.id) } }
         e.nearVehicle?.let { v ->
             HButton("Get in ${v.def.name}", icon = Icons.Filled.DirectionsCar) { e.enterVehicle(v); e.ui.phoneOpen = false }
             // Manage storage: move boxes between the trunk and your hands, hand truck or store cart

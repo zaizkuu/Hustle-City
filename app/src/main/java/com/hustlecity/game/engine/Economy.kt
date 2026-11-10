@@ -675,6 +675,8 @@ class Economy(private val e: GameEngine) {
         }
         // rent
         for (r in s.rentals) if (!r.owned) e.spend(r.rentPerMonth / 30.0, "Rent", allowDebt = true, silent = true)
+        // and what your own tenants pay you
+        for (r in s.rentals) if (r.owned && r.tenant.isNotEmpty()) e.earn(r.tenantRent / 30.0, "Rental income")
         // loans
         val paidOff = ArrayList<Int>()
         for (loan in s.loans) {
@@ -688,6 +690,7 @@ class Economy(private val e: GameEngine) {
         }
         if (paidOff.isNotEmpty()) {
             s.loans.removeAll { it.id in paidOff }
+            s.objectivesDone += "loan_repaid"
             e.message("Hudson Bank", "Congratulations! Your loan has been fully repaid.")
         }
         employeesDaily()

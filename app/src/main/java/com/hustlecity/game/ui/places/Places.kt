@@ -88,6 +88,8 @@ import com.hustlecity.game.engine.eat
 import com.hustlecity.game.engine.refuel
 import com.hustlecity.game.engine.rentBuilding
 import com.hustlecity.game.engine.repairVehicle
+import com.hustlecity.game.engine.rideTrain
+import com.hustlecity.game.engine.stations
 import com.hustlecity.game.engine.repayLoan
 import com.hustlecity.game.engine.requestCandidates
 import com.hustlecity.game.engine.sellVehicle
@@ -121,6 +123,7 @@ private const val ORDER_MAX = 24
 fun PanelHost(e: GameEngine, panel: Panel) {
     when (panel) {
         Panel.Saves -> {}
+        is Panel.Station -> StationBoard(e, panel.stationId)
         is Panel.Place -> {
             val b = e.city.building(panel.buildingId) ?: return
             val place = Catalog.place(panel.placeId)
@@ -590,6 +593,31 @@ private fun RivalShop(e: GameEngine, buildingId: Int) {
             Text("Work a shift for ${owner?.name} at ${e.money(wage)}/hour. Paid at the end of the shift. Tiring!", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(bottom = 6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (h in listOf(2, 4, 8)) HButton("$h hours", small = true, color = HC.Teal) { e.sideJob(h, wage, rb.name) }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ stations
+
+/** The departures board: every other stop on the line, with the fare and how long the ride takes. */
+@Composable
+private fun StationBoard(e: GameEngine, stationId: Int) {
+    val here = e.stations.getOrNull(stationId) ?: return
+    Modal("${here.name} · ${here.line}", { close(e) }, maxWidth = 520.dp) {
+        Text("Trains every few minutes. Pay at the gate, step off at your stop. No boxes or carts on board.", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(bottom = 6.dp))
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (st in e.stations.filter { it.line == here.line && it.id != here.id }) {
+                WhiteCard(Modifier.fillMaxWidth(), padding = 8.dp) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Dot(st.color.toColor(), 10.dp)
+                        Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                            Text(st.name, style = HT.bodyBold, color = HC.Ink)
+                            Text("${e.city.neighborhoodAt(st.x, st.y).name} · ${com.hustlecity.game.engine.Transit.minutes(here, st)} min", style = HT.small, color = HC.InkSoft)
+                        }
+                        HButton("Ride ${e.money(com.hustlecity.game.engine.Transit.fare(here, st))}", small = true, color = HC.Purple) { e.rideTrain(st) }
+                    }
+                }
             }
         }
     }

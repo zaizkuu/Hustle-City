@@ -593,6 +593,7 @@ class GameEngine(context: Context?) {
             toast("Day ${s.day - 1}, 23:59 — Auto saving…", ToastKind.SAVE)
         } else if (s.minute % 30 == 0L) {
             checkObjectives()
+            Achievements.check(this)
         }
     }
 
@@ -738,6 +739,15 @@ class GameEngine(context: Context?) {
                 camera.tx = p.x; camera.ty = p.y
                 camera.panX = 0f; camera.panY = 0f
                 traffic.update(0f, camera.tx, camera.ty, 230f, -9999f, -9999f, initial = true)
+            }
+            SkipKind.TRAIN -> {
+                val st = stations.getOrNull(job.target) ?: return
+                val (x, y) = stationExit(st)
+                p.x = x; p.y = y
+                camera.tx = p.x; camera.ty = p.y
+                camera.panX = 0f; camera.panY = 0f
+                traffic.update(0f, camera.tx, camera.ty, 230f, -9999f, -9999f, initial = true)
+                toast("${st.name} station", icon = "map")
             }
             SkipKind.CLEAN -> {
                 val biz = state.business(job.target) ?: return
@@ -1019,6 +1029,7 @@ class GameEngine(context: Context?) {
         ui.selected = -1
         if (b.kind == BKind.GAS) { ui.panel = Panel.Place(b.id, b.placeId ?: "fuel"); bump(); return }
         if (p.carrier == Carrier.CART && p.cartStore != b.id && !leaveCart("You can't go in")) return
+        s.rentalFor(b.id)?.tenant?.takeIf { it.isNotEmpty() }?.let { toast("$it rents this place from you"); return }
         val mode = when {
             b.id == p.home -> InteriorMode.HOME
             s.businessAt(b.id) != null -> InteriorMode.BUSINESS
