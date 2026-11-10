@@ -145,7 +145,9 @@ class GameEngine(context: Context?) {
     // ------------------------------------------------------------------ lifecycle
 
     fun newGame(name: String, skin: Int, shirt: Int, difficulty: Int, seed: Long = 1337L, mapId: String = Maps.CLASSIC,
-                rules: com.hustlecity.game.model.GameRules = com.hustlecity.game.model.GameRules.preset(difficulty)) {
+                rules: com.hustlecity.game.model.GameRules = com.hustlecity.game.model.GameRules.preset(difficulty), slot: Int = -1) {
+        // a new game takes the slot asked for, else the first empty one, and only then the one in use
+        saves.slot = if (slot >= 0) slot else saves.firstFree().let { if (it >= 0) it else saves.slot }
         city = City(seed, mapId)
         traffic.attach(city)
         val s = GameState(seed = seed, minute = 8L * 60, mapId = city.mapId)
@@ -192,8 +194,8 @@ class GameEngine(context: Context?) {
         save()
     }
 
-    fun loadGame(): Boolean {
-        val s = saves.load() ?: return false
+    fun loadGame(slot: Int = saves.latest()): Boolean {
+        val s = saves.load(slot) ?: return false
         state = s
         city = City(s.seed, s.mapId)
         traffic.attach(city)

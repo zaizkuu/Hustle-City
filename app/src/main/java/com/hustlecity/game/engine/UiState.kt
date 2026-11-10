@@ -22,6 +22,8 @@ sealed class Panel {
     data class Listing(val buildingId: Int) : Panel()
     data object Settings : Panel()
     data object Help : Panel()
+    /** The main menu's list of saved games. */
+    data object Saves : Panel()
     data object Sleep : Panel()
     data class Warehouse(val businessId: Int) : Panel()
     data class Trunk(val vehicleId: Int) : Panel()

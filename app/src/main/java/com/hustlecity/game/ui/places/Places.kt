@@ -120,6 +120,7 @@ private const val ORDER_MAX = 24
 @Composable
 fun PanelHost(e: GameEngine, panel: Panel) {
     when (panel) {
+        Panel.Saves -> {}
         is Panel.Place -> {
             val b = e.city.building(panel.buildingId) ?: return
             val place = Catalog.place(panel.placeId)

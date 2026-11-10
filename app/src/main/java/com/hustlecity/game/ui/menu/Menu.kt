@@ -122,19 +122,54 @@ fun MainMenu(e: GameEngine) {
             if (e.hasGame) {
                 HButton("Continue", Modifier.fillMaxWidth().padding(bottom = 8.dp), color = HC.Green) { e.camera.yaw = 0f; e.ui.screen = Screen.GAME }
             } else if (hasSave) {
-                HButton("Continue", Modifier.fillMaxWidth().padding(bottom = 8.dp), color = HC.Green) {
-                    if (!e.loadGame()) {
-                        e.ui.info = "Couldn't load your save" to
-                            "The save file is damaged or from an incompatible version. It was kept as save-damaged.json. Start a new game to keep playing."
-                    }
-                }
+                HButton("Continue", Modifier.fillMaxWidth().padding(bottom = 8.dp), color = HC.Green) { if (!e.loadGame()) loadFailed(e) }
             }
             HButton("New game", Modifier.fillMaxWidth().padding(bottom = 8.dp)) { e.ui.screen = Screen.NEW_GAME }
+            if (hasSave) HButton("Load game", Modifier.fillMaxWidth().padding(bottom = 8.dp), color = HC.GlassLight) { e.ui.panel = com.hustlecity.game.engine.Panel.Saves }
             HButton("Settings", Modifier.fillMaxWidth(), color = HC.GlassLight) { e.ui.panel = com.hustlecity.game.engine.Panel.Settings }
             Text("v1.7.0 beta · A business life sim for Android", color = Color.White.copy(alpha = .5f), fontSize = 11.sp, modifier = Modifier.padding(top = 18.dp))
         }
         if (e.ui.panel == com.hustlecity.game.engine.Panel.Settings) SettingsPanel(e)
+        if (e.ui.panel == com.hustlecity.game.engine.Panel.Saves) SavesPanel(e)
         Dialogs(e)
+    }
+}
+
+private fun loadFailed(e: GameEngine) {
+    e.ui.info = "Couldn't load your save" to
+        "The save file is damaged or from an incompatible version. It was kept as save-damaged.json. Start a new game to keep playing."
+}
+
+private fun slotLine(e: GameEngine, s: com.hustlecity.game.engine.SlotInfo) = "${Maps.byId(s.mapId).title} · day ${s.day} · ${e.moneyShort(s.money)}"
+
+/** The saved games: load one or delete it. */
+@Composable
+private fun SavesPanel(e: GameEngine) {
+    var version by remember { mutableIntStateOf(0) }
+    val slots = remember(version) { e.saves.slots() }
+    com.hustlecity.game.ui.places.Modal("Load game", { e.ui.panel = null }, maxWidth = 520.dp) {
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            for ((i, s) in slots.withIndex()) {
+                com.hustlecity.game.ui.WhiteCard(Modifier.fillMaxWidth(), padding = 9.dp) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(if (s == null) "Slot ${i + 1} · empty" else "Slot ${i + 1} · ${s.name}", style = HT.bodyBold, color = HC.Ink)
+                            if (s != null) Text(slotLine(e, s), style = HT.small, color = HC.InkSoft)
+                        }
+                        if (s != null) {
+                            HButton("Load", small = true, color = HC.Green) { e.ui.panel = null; if (!e.loadGame(i)) loadFailed(e) }
+                            Spacer(Modifier.width(6.dp))
+                            HButton("Delete", small = true, color = HC.Red) {
+                                e.ui.confirm = com.hustlecity.game.engine.Confirm("Delete ${s.name}'s game?", "${slotLine(e, s)}. This can't be undone.", "Delete") {
+                                    e.saves.delete(i); version++
+                                    if (!e.saves.hasSave()) e.ui.panel = null
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -147,6 +182,9 @@ fun NewGameScreen(e: GameEngine) {
     var seed by remember { mutableIntStateOf(1337) }
     var mapId by remember { mutableStateOf(Maps.CLASSIC) }
     var rules by remember { mutableStateOf(GameRules.NORMAL) }
+    val slots = remember { e.saves.slots() }
+    // the first empty slot; with none empty, the one played longest ago
+    var slot by remember { mutableIntStateOf(slots.indexOfFirst { it == null }.let { free -> if (free >= 0) free else slots.filterNotNull().minByOrNull { it.savedAt }?.slot ?: 0 }) }
     val renderers = remember { Renderers(e) }
     Box(Modifier.fillMaxSize()) {
         WorldCanvas(e, renderers, interactive = false)
@@ -211,15 +249,24 @@ fun NewGameScreen(e: GameEngine) {
                             RuleSlider("Tiredness", rules.needs, 0.0..1.5, { if (it < .025) "Off" else pct(it) }) { rules = rules.copy(needs = snap(it)) }
                         }
                     }
+                    // where the new game is kept: an empty slot unless every one is taken
+                    if (slots.any { it != null }) Row(Modifier.padding(top = 6.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                        Text("SAVE TO  ", style = HT.label, color = HC.InkSoft)
+                        for ((i, s) in slots.withIndex()) Chip(if (s == null) "Slot ${i + 1} · empty" else "Slot ${i + 1} · ${s.name}, day ${s.day}", slot == i, if (s == null) HC.Blue else HC.Red) { slot = i }
+                    }
                     Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         HButton("Back", color = HC.GlassLight) { e.ui.screen = Screen.MENU }
                         HButton("Start your hustle", color = HC.Green, modifier = Modifier.weight(1f)) {
-                            e.newGame(name, skin, shirt, difficulty, if (mapId == Maps.CLASSIC) seed.toLong() else 1337L, mapId, rules)
+                            val start = { e.newGame(name, skin, shirt, difficulty, if (mapId == Maps.CLASSIC) seed.toLong() else 1337L, mapId, rules, slot) }
+                            val old = slots.getOrNull(slot)
+                            if (old == null) start()
+                            else e.ui.confirm = com.hustlecity.game.engine.Confirm("Replace ${old.name}'s game?", "Slot ${slot + 1} holds ${slotLine(e, old)}. Starting here erases it.", "Replace") { start() }
                         }
                     }
                 }
             }
         }
+        Dialogs(e)
     }
 }
 
