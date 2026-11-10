@@ -6,8 +6,16 @@ Native Kotlin + Jetpack Compose with a custom 3D engine. In HD mode the world is
 
 ## Features
 
+**Five cities**
+- **Hustle City**, the original Manhattan-style grid (or a random one): 6 neighborhoods, about 600 buildings with addresses, parks, parking lots and gas stations.
+- **New York**: Manhattan and Brooklyn across the river, Central Park, Times Square's screens and yellow cabs.
+- **Manila**: the bay and Roxas Boulevard, the Pasig and its bridges, walled Intramuros, Rizal Park, Binondo and Makati. Jeepneys old and new, tricycles and mopeds; spaghetti wires, banderitas and basketball hoops; the Manila Cathedral, Quiapo and Binondo churches, the Rizal Monument, City Hall's clock tower, the Chinatown arch and the MOA Eye; LRT-1 overhead.
+- **Tokyo**: keep left. The Yamanote loop and Chuo line, Tokyo Tower, the Shibuya scramble where every car waits while the crowd crosses, lantern-lit alleys and vending machines.
+- **Seoul**: the Han River, Gwanghwamun, N Seoul Tower, hanok roofs and Gangnam's boulevards.
+- Each city has its own street names, people's names, architecture, trees, traffic mix and money: pesos, yen and won (or dollars everywhere, in Settings).
+- You can ride the trains: walk to a station on LRT-1, the Yamanote or the Chuo line, pick a stop and pay the fare.
+
 **The city**
-- Procedural Manhattan-style grid: 6 neighborhoods (Garment District, Hell's Kitchen, Midtown, Murray Hill, Lower Manhattan, Industry City), about 600 buildings with addresses, parks, parking lots and gas stations.
 - Buildings with personality: brick walk-ups with fire escapes and water towers, brownstones with stoops and bay windows, art deco towers with setbacks and spires, glass skyscrapers, stone offices, modern blocks with balconies and industrial sheds with sawtooth roofs. Storefronts dress up for their business (striped awnings, neon, cinema marquees, window displays, sidewalk tables) and close their shutters at night.
 - Street life in detail: lamp posts that light the street, hydrants, benches, bus shelters, newspaper boxes, bike racks and planters; parks with fountains; trees that blossom in spring, turn red and gold in autumn and stand bare in winter. Cars have wheels, lights and brake lights, and taxis cruise the avenues.
 - A day/night cycle with sun-tracking shadows, lit windows and glowing street lamps.
@@ -39,6 +47,12 @@ Native Kotlin + Jetpack Compose with a custom 3D engine. In HD mode the world is
 **Growing the empire**
 - **Warehouses**: rent one, fill it with pallet racks, and buy wholesale in bulk (10% off at 6+ boxes). Delivery contracts and purchasing agents use warehouse stock first, and you can load boxes into your van from inside.
 - **Headquarters**: rent an office and add desks. HR Managers make staff happier and replace anyone who quits; Purchasing Agents restock four stores each every morning.
+- **Fleets**: vans with drivers run delivery routes from wholesalers and warehouses to your stores, and stock reorders itself when it runs low.
+- **Staff in depth**: shifts and fatigue, perks, training courses, managers, and rivals who try to poach your best people.
+- **Property**: leases renew (and rents rise) every 60 days. Take Real Estate Investing to buy buildings, let the ones you aren't using to tenants, or sell them.
+- **Deals and markets**: buy out a rival's store, trade shares in the city's companies, take over a rival you own more than half of, and park cash in city bonds.
+- **Achievements**: 25 milestones from your first sale to the top of the rankings, listed in Persona.
+- **Three save slots**, so a game in Manila and another in Tokyo sit side by side.
 - Bankruptcy after three midnights deep in debt (or keep playing in sandbox mode), and a victory screen when you're #1 with a $5M net worth.
 
 **Sound**
@@ -46,6 +60,7 @@ Native Kotlin + Jetpack Compose with a custom 3D engine. In HD mode the world is
 
 **Management** (on the in-game HustlePhone)
 - **BizHub** has the tabs Insight, Inventory & Pricing, Schedule, Deliveries, Marketing and Settings.
+- **Fleet** plans van routes and drivers; **Markets** is the stock exchange and bond desk; **Realty** lists what's for rent and manages what you hold.
 - **Staff** lets you hire candidates from Apex Recruitment, give raises, train and fire. Unhappy staff quit.
 - **Finance** shows a daily operating-profit chart, a cost breakdown and your loans. Hudson Bank offers three loan tiers.
 - **Rivals** has 8 AI companies, each with its own strategy (balanced, aggressive, premium, discounter, specialist). Their stores earn money with the same demand model as yours. They expand into good locations (always leaving buildings for you), renovate busy stores, advertise, buy their buildings, close money-losers and start price wars with your best stores. Your goal is to become #1.
@@ -89,11 +104,13 @@ The unit tests use Robolectric's native graphics to render the city, interiors a
 app/src/main/java/com/hustlecity/game/
   data/      Catalog: products, furniture models, business types, vehicles, courses, places
   model/     Serializable save state
-  world/     City generator, traffic and pedestrians
-  render/    Projector, triangle batcher, city / interior renderers, 3D thumbnails
+  world/     City generators (the classic grid and the planned maps in world/maps), roads, traffic and pedestrians
+  render/    Projector, triangle batcher, city / interior renderers, landmarks, railways, 3D thumbnails; render/gpu is the OpenGL ES 3 path
   audio/     Procedural music stations, sound effects and the audio mixer
   engine/    Game loop, economy simulation, interiors, actions, objectives, saving
   ui/        Compose HUD, phone apps, BizHub, shops, menus
 ```
+
+`tools/cinema/` holds the trailer pipeline: `CinematicTest` records camera shots from the real game, `render.mjs` draws them with the game's shaders in headless Chromium, and `edit.py` / `manila.py` with `score.py` / `manila_score.py` cut and score the two trailers.
 
 *Hustle City is an independent fan project. It is not affiliated with Hovgaard Games or Big Ambitions. All names of in-game companies are fictional.*

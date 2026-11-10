@@ -227,7 +227,7 @@ fun PersonaApp(e: GameEngine) {
                         GIcon("trophy", 16.dp, tint = if (day != null) HC.Orange else Color(0xFFC4CAD2))
                         Column(Modifier.weight(1f).padding(start = 8.dp)) {
                             Text(a.title, style = HT.bodyBold, color = if (day != null) HC.Ink else HC.InkSoft)
-                            Text(a.text, style = HT.small, color = HC.InkSoft)
+                            Text(e.localized(a.text), style = HT.small, color = HC.InkSoft)
                         }
                         if (day != null) Text("Day $day", style = HT.small, color = HC.Green)
                     }

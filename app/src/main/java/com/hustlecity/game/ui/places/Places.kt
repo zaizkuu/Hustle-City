@@ -376,8 +376,8 @@ private fun GasStation(e: GameEngine, buildingId: Int, place: PlaceDef) {
         }
         Text("SHOP", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HButton("Snack \$3", small = true) { e.eat(3.0, 12.0, label = "a snack") }
-            HButton("Coffee \$3", small = true) { e.eat(3.0, 3.0, energy = 8.0, label = "a coffee") }
+            HButton("Snack ${e.moneyShort(3.0)}", small = true) { e.eat(3.0, 12.0, label = "a snack") }
+            HButton("Coffee ${e.moneyShort(3.0)}", small = true) { e.eat(3.0, 3.0, energy = 8.0, label = "a coffee") }
         }
     }
 }
@@ -418,7 +418,7 @@ private fun Recruiter(e: GameEngine, place: PlaceDef) {
             }
             return@Modal
         }
-        Text("Each search costs \$250 and delivers 3 candidates in about 2 hours. Check the Staff app to hire them.", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(bottom = 8.dp))
+        Text("Each search costs ${e.moneyShort(250.0)} and delivers 3 candidates in about 2 hours. Check the Staff app to hire them.", style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(bottom = 8.dp))
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             for (role in StaffRole.entries) {
                 val pending = e.state.recruits.any { it.role == role }
@@ -447,7 +447,7 @@ private fun Recruiter(e: GameEngine, place: PlaceDef) {
                                 } + " Typical wage ~${e.money(role.baseWage)}/h.", style = HT.small, color = HC.InkSoft,
                             )
                         }
-                        HButton(if (pending) "Searching…" else "Search \$250", small = true, enabled = !pending, color = HC.Purple) { e.requestCandidates(role) }
+                        HButton(if (pending) "Searching…" else "Search ${e.moneyShort(250.0)}", small = true, enabled = !pending, color = HC.Purple) { e.requestCandidates(role) }
                     }
                 }
             }
@@ -530,7 +530,7 @@ private fun FlowRowChips(e: GameEngine, sel: Int, onSel: (Int) -> Unit) {
 private fun Hospital(e: GameEngine, place: PlaceDef) {
     Modal(place.name, { close(e) }, maxWidth = 520.dp) {
         Text("Feeling worn out? Rest in our recovery ward.", style = HT.body, color = HC.InkSoft)
-        HButton("Rest 2 hours — \$200 (+25 energy)", Modifier.padding(top = 10.dp)) {
+        HButton("Rest 2 hours — ${e.moneyShort(200.0)} (+25 energy)", Modifier.padding(top = 10.dp)) {
             if (e.spend(200.0, "Medical")) {
                 close(e)
                 e.startSkip(com.hustlecity.game.model.SkipKind.REST, 120, "Resting at City Hospital…")
@@ -572,20 +572,20 @@ private fun RivalShop(e: GameEngine, buildingId: Int) {
             CardTitle("Buy", modifier = Modifier.padding(top = 10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (type.id) {
-                    "fastfood" -> { HButton("Burger meal \$9", small = true) { e.eat(9.0, 45.0, label = "a burger meal") }; HButton("Fries \$3", small = true) { e.eat(3.0, 15.0, label = "fries") } }
-                    "coffee" -> { HButton("Coffee & croissant \$6", small = true) { e.eat(6.0, 15.0, energy = 12.0, label = "coffee and a croissant") }; HButton("Espresso \$3", small = true) { e.eat(3.0, 2.0, energy = 8.0, label = "an espresso") } }
-                    "supermarket", "produce" -> { HButton("Groceries (4 meals) \$32", small = true) { e.buyGroceries() }; HButton("Snack \$3", small = true) { e.eat(3.0, 12.0, label = "a snack") } }
-                    "liquor" -> HButton("Drink \$8", small = true) { e.eat(8.0, 2.0, energy = -5.0, happiness = 6.0, label = "a drink") }
-                    "bookstore" -> HButton("A good book \$15", small = true) { e.eat(15.0, 0.0, happiness = 5.0, label = "a new book") }
-                    "clothing" -> HButton("New outfit \$60", small = true) { e.eat(60.0, 0.0, happiness = 8.0, label = "a new outfit") }
-                    "jewelry" -> HButton("Watch \$520", small = true) { e.eat(520.0, 0.0, happiness = 15.0, label = "a fancy watch") }
-                    "electronics" -> HButton("Headphones \$79", small = true) { e.eat(79.0, 0.0, happiness = 6.0, label = "new headphones") }
-                    "florist" -> HButton("Bouquet \$22", small = true) { e.eat(22.0, 0.0, happiness = 4.0, label = "a bouquet") }
-                    "giftshop" -> HButton("Souvenir \$12", small = true) { e.eat(12.0, 0.0, happiness = 3.0, label = "a souvenir") }
-                    "gym" -> HButton("Workout \$12 (1h)", small = true) {
+                    "fastfood" -> { HButton("Burger meal ${e.moneyShort(9.0)}", small = true) { e.eat(9.0, 45.0, label = "a burger meal") }; HButton("Fries ${e.moneyShort(3.0)}", small = true) { e.eat(3.0, 15.0, label = "fries") } }
+                    "coffee" -> { HButton("Coffee & croissant ${e.moneyShort(6.0)}", small = true) { e.eat(6.0, 15.0, energy = 12.0, label = "coffee and a croissant") }; HButton("Espresso ${e.moneyShort(3.0)}", small = true) { e.eat(3.0, 2.0, energy = 8.0, label = "an espresso") } }
+                    "supermarket", "produce" -> { HButton("Groceries (4 meals) ${e.moneyShort(32.0)}", small = true) { e.buyGroceries() }; HButton("Snack ${e.moneyShort(3.0)}", small = true) { e.eat(3.0, 12.0, label = "a snack") } }
+                    "liquor" -> HButton("Drink ${e.moneyShort(8.0)}", small = true) { e.eat(8.0, 2.0, energy = -5.0, happiness = 6.0, label = "a drink") }
+                    "bookstore" -> HButton("A good book ${e.moneyShort(15.0)}", small = true) { e.eat(15.0, 0.0, happiness = 5.0, label = "a new book") }
+                    "clothing" -> HButton("New outfit ${e.moneyShort(60.0)}", small = true) { e.eat(60.0, 0.0, happiness = 8.0, label = "a new outfit") }
+                    "jewelry" -> HButton("Watch ${e.moneyShort(520.0)}", small = true) { e.eat(520.0, 0.0, happiness = 15.0, label = "a fancy watch") }
+                    "electronics" -> HButton("Headphones ${e.moneyShort(79.0)}", small = true) { e.eat(79.0, 0.0, happiness = 6.0, label = "new headphones") }
+                    "florist" -> HButton("Bouquet ${e.moneyShort(22.0)}", small = true) { e.eat(22.0, 0.0, happiness = 4.0, label = "a bouquet") }
+                    "giftshop" -> HButton("Souvenir ${e.moneyShort(12.0)}", small = true) { e.eat(12.0, 0.0, happiness = 3.0, label = "a souvenir") }
+                    "gym" -> HButton("Workout ${e.moneyShort(12.0)} (1h)", small = true) {
                         if (e.spend(12.0, "Personal")) { close(e); e.startSkip(com.hustlecity.game.model.SkipKind.WORKOUT, 60, "Working out…") }
                     }
-                    "hairdresser" -> HButton("Haircut \$28", small = true) { e.eat(28.0, 0.0, happiness = 6.0, label = "a fresh haircut") }
+                    "hairdresser" -> HButton("Haircut ${e.moneyShort(28.0)}", small = true) { e.eat(28.0, 0.0, happiness = 6.0, label = "a fresh haircut") }
                 }
             }
             CardTitle("Side job", modifier = Modifier.padding(top = 14.dp))
@@ -794,6 +794,7 @@ fun SettingsPanel(e: GameEngine) {
             ToggleRow("Show FPS counter", st.showFps) { st.showFps = it }
             ToggleRow("Pause the clock while menus are open", st.pauseInMenus) { st.pauseInMenus = it }
             ToggleRow("Left-handed controls", st.leftHanded) { st.leftHanded = it }
+            ToggleRow("Local currency (pesos, yen, won)", st.localCurrency) { st.localCurrency = it }
             ToggleRow("Show the minimap", st.minimap) { st.minimap = it }
             Text("CAR CONTROLS", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
             Row {
@@ -835,7 +836,7 @@ private fun ToggleRow(label: String, value: Boolean, onChange: (Boolean) -> Unit
 fun HelpPanel(e: GameEngine) {
     Modal("How to play", { close(e) }, maxWidth = 720.dp) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            for ((t, body) in HELP) {
+            for ((t, body) in help(e)) {
                 Text(t, style = HT.bodyBold, color = HC.Ink, modifier = Modifier.padding(top = 8.dp))
                 Text(body, style = HT.body, color = HC.InkSoft)
             }
@@ -843,7 +844,10 @@ fun HelpPanel(e: GameEngine) {
     }
 }
 
-private val HELP = listOf(
+private fun help(e: GameEngine) = listOf(
+    "Getting around" to "Walk, drive your own car, take a taxi from any building's card, or ride the trains: Manila's LRT-1 and Tokyo's Yamanote and Chuo lines stop at stations you can board on foot. The fare is small, but no boxes or carts on board.",
+    "Property" to "Rent in the Realty app, or take Real Estate Investing and buy. A building you own and aren't using can be let to a tenant for rent every midnight, or sold for 90% of its value.",
+    "Saves and achievements" to "The game saves every midnight and whenever you leave. Three save slots keep separate games: pick one when you start, and Load game on the main menu switches between them. Persona lists the achievements you've earned.",
     "Moving around" to "Use the joystick to walk. Walk up to a door and tap ENTER. Near your car, tap GET IN — the joystick then steers and accelerates, the red pedal brakes and reverses. Drag the city to look around, pinch to zoom and twist with two fingers to rotate. Taxis (from any building card or Maps) save time.",
     "Your needs" to "Energy, hunger and happiness are shown top-left. Sleep at home, eat from your fridge (buy groceries at supermarkets) or at restaurants and cafés. Let energy hit zero and you'll wake up in hospital with a bill.",
     "Starting a business" to "1) Rent a retail building in the Realty app. 2) Go inside and pick a business type. 3) Buy the required furniture (BizHub lists requirements) at Essentials Appliances, Prime Kitchen Supply, Lux Interiors or OfficePlus: walk around the store, pick things off the displays and pay at the checkout. 4) Push your cart out to your car and load it with MANAGE STORAGE (or pay for delivery), drive to your store, carry the boxes in and place them with the Interior Designer. 5) Buy stock at Metro Wholesale or CityDistro, unload it. 6) Turn off Temporarily Closed and start working the register.",
@@ -863,7 +867,7 @@ private val HELP = listOf(
     "Cleaning" to "Every customer tracks a little dirt along the routes people walk, more near the door when it's wet, and now and then spills something. Trash cans catch litter nearby. Cleaners scrub the dirtiest spots first, and a cleaning station makes them faster.",
     "Security" to "Shoplifters target jewelry, electronics, clothing and liquor stores. Security cameras stop about 30% of thefts each and anti-theft gates about 55%. BizHub Insight shows what was stolen yesterday.",
     "Furniture" to "Checkout counters serve 60 customers per hour (registers 40). Shopping baskets let more people shop at once. Pizza ovens, ice cream freezers, shoe and magazine racks add optional products. A digital scale speeds up fruit & vegetable stores, and a copier helps office firms.",
-    "Winning and losing" to "Stay out of deep debt: three midnights below -\$5,000 and the bank declares you bankrupt. Reach #1 in Rivals with a \$5,000,000 net worth to own Hustle City, then keep building as long as you like.",
+    "Winning and losing" to "Stay out of deep debt: three midnights below ${e.moneyShort(-5000.0)} and the bank declares you bankrupt. Reach #1 in Rivals with a ${e.moneyShort(5000000.0)} net worth to own Hustle City, then keep building as long as you like.",
     "Radio" to "Your phone has a radio with four stations. Tap the station name to switch, or change volumes in Settings.",
 )
 

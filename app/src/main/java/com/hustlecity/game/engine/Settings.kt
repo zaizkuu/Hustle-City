@@ -23,6 +23,8 @@ class Settings(context: Context?) {
     /** Car controls: 0 = steering wheel and pedals, 1 = joystick, 2 = arrow keys. */
     var carControls by mutableIntStateOf(prefs?.getInt("carControls", 0) ?: 0)
     var minimap by mutableStateOf(prefs?.getBoolean("minimap", true) ?: true)
+    /** Show each city's own currency (off: dollars everywhere). */
+    var localCurrency by mutableStateOf(prefs?.getBoolean("localCurrency", true) ?: true)
     /** HD graphics: the GPU renderer (lighting, depth, anti-aliasing) instead of the classic Canvas renderer. */
     var hd by mutableStateOf(prefs?.getBoolean("hd", true) ?: true)
     /** 3D render resolution in percent of the screen, or 0 for automatic (adapts to keep the frame rate up). */
@@ -51,6 +53,7 @@ class Settings(context: Context?) {
             ?.putInt("station", station)
             ?.putInt("carControls", carControls)
             ?.putBoolean("minimap", minimap)
+            ?.putBoolean("localCurrency", localCurrency)
             ?.putBoolean("hd", hd)
             ?.putInt("resolution", resolution)
             ?.apply()

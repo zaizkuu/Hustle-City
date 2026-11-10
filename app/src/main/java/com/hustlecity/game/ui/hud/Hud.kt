@@ -281,7 +281,7 @@ fun ObjectivesPanel(e: GameEngine, modifier: Modifier = Modifier) {
                 ) {
                     CheckBox(done)
                     Text(
-                        o.text, color = if (done) Color.White.copy(alpha = .55f) else Color.White, fontSize = 11.sp, lineHeight = 14.sp,
+                        e.localized(o.text), color = if (done) Color.White.copy(alpha = .55f) else Color.White, fontSize = 11.sp, lineHeight = 14.sp,
                         textDecoration = if (done) TextDecoration.LineThrough else null, modifier = Modifier.padding(start = 7.dp),
                     )
                 }

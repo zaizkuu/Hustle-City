@@ -127,7 +127,7 @@ fun MainMenu(e: GameEngine) {
             HButton("New game", Modifier.fillMaxWidth().padding(bottom = 8.dp)) { e.ui.screen = Screen.NEW_GAME }
             if (hasSave) HButton("Load game", Modifier.fillMaxWidth().padding(bottom = 8.dp), color = HC.GlassLight) { e.ui.panel = com.hustlecity.game.engine.Panel.Saves }
             HButton("Settings", Modifier.fillMaxWidth(), color = HC.GlassLight) { e.ui.panel = com.hustlecity.game.engine.Panel.Settings }
-            Text("v1.7.0 beta · A business life sim for Android", color = Color.White.copy(alpha = .5f), fontSize = 11.sp, modifier = Modifier.padding(top = 18.dp))
+            Text("v1.8.0 beta · A business life sim for Android", color = Color.White.copy(alpha = .5f), fontSize = 11.sp, modifier = Modifier.padding(top = 18.dp))
         }
         if (e.ui.panel == com.hustlecity.game.engine.Panel.Settings) SettingsPanel(e)
         if (e.ui.panel == com.hustlecity.game.engine.Panel.Saves) SavesPanel(e)
@@ -140,7 +140,8 @@ private fun loadFailed(e: GameEngine) {
         "The save file is damaged or from an incompatible version. It was kept as save-damaged.json. Start a new game to keep playing."
 }
 
-private fun slotLine(e: GameEngine, s: com.hustlecity.game.engine.SlotInfo) = "${Maps.byId(s.mapId).title} · day ${s.day} · ${e.moneyShort(s.money)}"
+private fun slotLine(e: GameEngine, s: com.hustlecity.game.engine.SlotInfo) =
+    "${Maps.byId(s.mapId).title} · day ${s.day} · ${com.hustlecity.game.engine.Currency.of(s.mapId, e.settings.localCurrency).short(s.money)}"
 
 /** The saved games: load one or delete it. */
 @Composable
@@ -226,11 +227,12 @@ fun NewGameScreen(e: GameEngine) {
                             Chip("Classic layout", seed == 1337) { seed = 1337 }
                             Chip("Random city", seed != 1337) { seed = (1000..999_999).random() }
                         }
+                        val cur = com.hustlecity.game.engine.Currency.of(mapId, e.settings.localCurrency)
                         Text("DIFFICULTY", style = HT.label, color = HC.InkSoft, modifier = Modifier.padding(top = 10.dp))
                         Row(Modifier.padding(vertical = 6.dp)) {
-                            Chip("Easy · \$20,000", difficulty == 0, HC.Green) { difficulty = 0; rules = GameRules.EASY }
-                            Chip("Normal · \$5,000", difficulty == 1) { difficulty = 1; rules = GameRules.NORMAL }
-                            Chip("Hard · \$1,500", difficulty == 2, HC.Red) { difficulty = 2; rules = GameRules.HARD }
+                            Chip("Easy · ${cur.whole(20000.0)}", difficulty == 0, HC.Green) { difficulty = 0; rules = GameRules.EASY }
+                            Chip("Normal · ${cur.whole(5000.0)}", difficulty == 1) { difficulty = 1; rules = GameRules.NORMAL }
+                            Chip("Hard · ${cur.whole(1500.0)}", difficulty == 2, HC.Red) { difficulty = 2; rules = GameRules.HARD }
                             Chip("Custom", difficulty == 3, HC.Purple) { difficulty = 3 }
                         }
                         Text(when (difficulty) {
@@ -240,7 +242,7 @@ fun NewGameScreen(e: GameEngine) {
                             else -> "The city as it is."
                         }, style = HT.small, color = HC.InkSoft)
                         if (difficulty == 3) Column(Modifier.padding(top = 4.dp)) {
-                            RuleSlider("Starting cash", rules.startMoney, 0.0..50000.0, { "\$" + "%,d".format(it.toInt()) }) { rules = rules.copy(startMoney = Math.round(it / 500) * 500.0) }
+                            RuleSlider("Starting cash", rules.startMoney, 0.0..50000.0, { cur.whole(it) }) { rules = rules.copy(startMoney = Math.round(it / 500) * 500.0) }
                             RuleSlider("Customers", rules.demand, .5..1.5, ::pct) { rules = rules.copy(demand = snap(it)) }
                             RuleSlider("Rent", rules.rent, .5..1.5, ::pct) { rules = rules.copy(rent = snap(it)) }
                             RuleSlider("Wages", rules.wages, .5..1.5, ::pct) { rules = rules.copy(wages = snap(it)) }

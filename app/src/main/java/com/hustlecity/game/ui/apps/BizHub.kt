@@ -563,7 +563,7 @@ private fun DeliveriesTab(e: GameEngine, biz: Business) {
                         }
                     }
                 }
-                Text("Estimated cost right now: ${e.money(est)} + \$60 delivery fee. Wholesale price +12%." +
+                Text("Estimated cost right now: ${e.money(est)} + ${e.moneyShort(60.0)} delivery fee. Wholesale price +12%." +
                     (if (contract.auto) " With reorder on, an extra delivery goes out when anything drops below its threshold (at most every 3 hours)." else ""),
                     style = HT.small, color = HC.InkSoft, modifier = Modifier.padding(top = 6.dp))
             } else Text("Turn on to set up daily deliveries.", style = HT.small, color = HC.InkSoft)

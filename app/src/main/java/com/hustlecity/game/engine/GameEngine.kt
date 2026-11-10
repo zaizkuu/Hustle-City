@@ -140,7 +140,6 @@ class GameEngine(context: Context?) {
     var atGasStation = false
 
     private val tmp = FloatArray(2)
-    private val moneyFmt: NumberFormat = NumberFormat.getCurrencyInstance(Locale.US)
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -252,16 +251,16 @@ class GameEngine(context: Context?) {
 
     // ------------------------------------------------------------------ helpers
 
-    fun money(v: Double): String = moneyFmt.format(v)
+    /** The city's own money (pesos, yen, won) unless Settings asks for dollars everywhere. */
+    val currency: Currency get() = Currency.of(if (::city.isInitialized) city.mapId else "", settings.localCurrency)
 
-    fun moneyShort(v: Double): String {
-        val a = abs(v)
-        val sign = if (v < 0) "-" else ""
-        return when {
-            a >= 1_000_000 -> "$sign$%.2fM".format(a / 1_000_000)
-            a >= 10_000 -> "$sign$%.1fK".format(a / 1000)
-            else -> "$sign$" + "%,.0f".format(a)
-        }
+    fun money(v: Double): String = currency.format(v)
+
+    fun moneyShort(v: Double): String = currency.short(v)
+
+    /** A fixed text with dollar amounts in it (an objective, an achievement), in the city's money. */
+    fun localized(text: String): String = if (currency.rate == 1.0) text else DOLLARS.replace(text) { m ->
+        m.groupValues[1].replace(",", "").toDouble().let { if (it >= 10_000) moneyShort(it) else money(it) }
     }
 
     fun bump() { ui.tick++ }
@@ -626,7 +625,7 @@ class GameEngine(context: Context?) {
             if (s.player.money < -5000) {
                 s.debtDays++
                 when (s.debtDays) {
-                    1 -> message("Hudson Bank", "Your account is ${money(s.player.money)} overdrawn. Bring it above -\$5,000 within two days or we will close your accounts.")
+                    1 -> message("Hudson Bank", "Your account is ${money(s.player.money)} overdrawn. Bring it above ${this.moneyShort(-5000.0)} within two days or we will close your accounts.")
                     2 -> message("Hudson Bank", "FINAL NOTICE: your account is still ${money(s.player.money)} overdrawn. Tomorrow at midnight we start bankruptcy proceedings.")
                     else -> {
                         s.gameOver = true
@@ -1211,6 +1210,7 @@ class GameEngine(context: Context?) {
     }
 
     companion object {
+        private val DOLLARS = Regex("""\$([\d,]+)""")
         val HOME_TIERS = listOf("Studio", "Apartment", "Condo", "Mansion")
         /** How fast you recover energy asleep in each kind of home. */
         val HOME_REST = doubleArrayOf(1.0, 1.1, 1.22, 1.35)
