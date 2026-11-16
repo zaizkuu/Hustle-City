@@ -85,7 +85,7 @@ data class ProductDef(
 data class Req(val tag: String, val label: String)
 
 /** Where a person sits or exercises on a piece of furniture, in its own tile units (before rotation). */
-data class SitSpot(val x: Float, val y: Float, val z: Float, /** 0 faces -y, 1 +x, 2 +y, 3 -x */ val face: Int, /** 1 sitting, 3 running in place */ val pose: Int = 1)
+data class SitSpot(val x: Float, val y: Float, val z: Float, /** 0 faces -y, 1 +x, 2 +y, 3 -x */ val face: Int, /** 1 sitting, 3 running in place, 4 pedalling, 5 rowing, 6 pressing weights, 7 eating (render/People.kt `Pose`) */ val pose: Int = 1)
 
 data class BusinessTypeDef(
     val id: String,
@@ -708,6 +708,10 @@ object Catalog {
         FurnitureDef("security_gate", "Anti-theft Gates", 1600.0, 2, 1, ItemFn.DECOR, setOf("security_gate"),
             description = "Alarm gates by the door: stop about 55% of thefts.",
             parts = listOf(box(.1f, .4f, 0f, .25f, .6f, 1.5f, c(0xFFD5DBE2)), box(1.75f, .4f, 0f, 1.9f, .6f, 1.5f, c(0xFFD5DBE2)), box(.1f, .45f, 1.3f, .25f, .55f, 1.45f, c(0xFF2F80ED)), box(1.75f, .45f, 1.3f, 1.9f, .55f, 1.45f, c(0xFF2F80ED)))),
+        FurnitureDef("safe", "Office Safe", 1200.0, 1, 1, ItemFn.DECOR, setOf("safe"), decor = 1,
+            description = "A heavy steel safe for the day's takings, the cash bag waiting beside it for the bank.",
+            parts = listOf(box(.2f, .17f, 0f, .8f, .82f, .8f, c(0xFF5B6770)), box(.25f, .82f, .08f, .75f, .84f, .72f, c(0xFF4A5560)),
+                box(.44f, .84f, .38f, .56f, .87f, .5f, c(0xFFD9DEE4)))),
         FurnitureDef("trash_can", "Trash Can", 90.0, 1, 1, ItemFn.DECOR, setOf("trash"),
             description = "Customers drop their litter here instead of on the floor (within about 3 m).",
             parts = listOf(box(.3f, .3f, 0f, .7f, .7f, .8f, c(0xFF5B6770)), box(.27f, .27f, .8f, .73f, .73f, .86f, c(0xFF3E474F)))),
@@ -784,7 +788,7 @@ object Catalog {
     /** Seats and machines people use in place: they sit or exercise right on the furniture. */
     val sitSpots: Map<String, List<SitSpot>> = mapOf(
         "cinema_seats" to listOf(SitSpot(.5f, .55f, .45f, 0), SitSpot(1.5f, .55f, .45f, 0), SitSpot(2.5f, .55f, .45f, 0)),
-        "table_set" to listOf(SitSpot(.3f, 1f, .45f, 1), SitSpot(1.7f, 1f, .45f, 3)),
+        "table_set" to listOf(SitSpot(.3f, 1f, .45f, 1, pose = 7), SitSpot(1.7f, 1f, .45f, 3, pose = 7)),
         "barstool" to listOf(SitSpot(.5f, .5f, .85f, 0)),
         "bench" to listOf(SitSpot(.6f, .5f, .48f, 0), SitSpot(1.4f, .5f, .48f, 0)),
         "lounge_sofa" to listOf(SitSpot(.6f, .62f, .42f, 2), SitSpot(1.4f, .62f, .42f, 2)),
@@ -792,9 +796,9 @@ object Catalog {
         "hair_chair" to listOf(SitSpot(.5f, 1.2f, .62f, 0)),
         "hair_wash" to listOf(SitSpot(.5f, 1.25f, .55f, 0)),
         "treadmill" to listOf(SitSpot(.5f, 1.15f, .28f, 0, pose = 3)),
-        "exercise_bike" to listOf(SitSpot(.5f, 1.25f, .78f, 0)),
-        "rowing_machine" to listOf(SitSpot(.5f, 1.05f, .3f, 0)),
-        "workout_bench" to listOf(SitSpot(.5f, 1.2f, .5f, 0)),
+        "exercise_bike" to listOf(SitSpot(.5f, 1.25f, .78f, 0, pose = 4)),
+        "rowing_machine" to listOf(SitSpot(.5f, 1.05f, .3f, 0, pose = 5)),
+        "workout_bench" to listOf(SitSpot(.5f, 1.2f, .5f, 0, pose = 6)),
         "meeting_table" to listOf(SitSpot(.5f, .25f, .45f, 2), SitSpot(1.5f, .25f, .45f, 2), SitSpot(2.5f, .25f, .45f, 2),
             SitSpot(.5f, 1.78f, .45f, 0), SitSpot(1.5f, 1.78f, .45f, 0), SitSpot(2.5f, 1.78f, .45f, 0)),
     )
@@ -1019,7 +1023,7 @@ object Catalog {
             listOf("cash_register", "shelf", "drinks_fridge", "fresh_fridge", "freezer", "treadmill", "workout_bench", "weight_rack", "boxing_bag",
                 "gym_locker", "shower", "fitness_board", "bookshelf", "bench", "barstool", "neon_cactus", "neon_circle", "speaker_small",
                 "speaker_medium", "speaker_large", "cleaning_station", "storage_shelf", "wall_lamp", "pallet_rack", "dance_floor", "dj_booth", "cinema_screen", "cinema_seats", "stage",
-                "checkout_counter", "shopping_baskets", "security_camera", "security_gate", "trash_can", "exercise_bike", "rowing_machine", "coat_check", "stage_lights", "hand_truck")),
+                "checkout_counter", "shopping_baskets", "security_camera", "security_gate", "safe", "trash_can", "exercise_bike", "rowing_machine", "coat_check", "stage_lights", "hand_truck")),
         PlaceDef("primekitchen", "Prime Kitchen Supply", PlaceKind.FURNITURE_STORE, "Pro gear for food & beauty.", c(0xFFF2994A), "place_kitchen",
             listOf("coffee_machine", "pastry_case", "grill", "fryer", "pizza_oven", "ice_cream_freezer", "digital_scale", "hair_chair", "hair_wash", "cash_register", "checkout_counter",
                 "home_fridge", "bed", "tv", "table_set", "cocktail_bar", "concession_stand", "trash_can")),
@@ -1038,7 +1042,7 @@ object Catalog {
         PlaceDef("fuel", "Fuel Up", PlaceKind.GAS_STATION, "Fill her up.", c(0xFFF2C94C), "place_gas"),
         PlaceDef("officeplus", "OfficePlus Supply", PlaceKind.FURNITURE_STORE, "Racks, desks and everything in between.", c(0xFF1F5FAD), "place_office",
             listOf("pallet_rack", "office_desk", "graphic_tablet", "desk_globe", "desk_calendar", "copier", "meeting_table", "whiteboard", "filing_cabinet", "water_cooler",
-                "plant_large", "painting", "speaker_small", "wall_lamp", "cleaning_station", "storage_shelf", "trash_can", "security_camera", "bench", "hand_truck")),
+                "plant_large", "painting", "speaker_small", "wall_lamp", "cleaning_station", "storage_shelf", "trash_can", "security_camera", "safe", "bench", "hand_truck")),
     )
     fun place(id: String) = places.first { it.id == id }
 

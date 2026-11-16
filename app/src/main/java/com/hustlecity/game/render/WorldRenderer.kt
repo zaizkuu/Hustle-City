@@ -180,6 +180,9 @@ class WorldRenderer(private val e: GameEngine) {
         if (!e.ready) return
         this.density = density
         scene.gpu = gpu
+        // Low keeps the classic box look (and its cost); Medium uses the lighter model levels; High full detail up close
+        scene.modelDetail = e.settings.quality
+        people.clock = e.realTime
         setupCamera(w, h)
         val day = e.daylight()
         scene.applyDaylight(if (mapMode) max(day, .75f) else day)
@@ -999,14 +1002,7 @@ class WorldRenderer(private val e: GameEngine) {
     private fun worn(color: Int, a: Int, b: Int, amount: Float) = scene.withAlpha(color, 1f - amount * hash01(a, b))
 
     /** How crossings are painted at a junction: 0 none, 1 zebra, 2 zebra between two edge lines, 3 two thin lines. */
-    private fun crossStyle(n: com.hustlecity.game.world.RoadNode): Int {
-        if (n.degree < 3) return 0
-        return when (e.city.mapId) {
-            "nyc" -> if (n.signal) 2 else 3
-            com.hustlecity.game.world.Maps.CLASSIC -> if (n.signal) 1 else 3
-            else -> 1
-        }
-    }
+    private fun crossStyle(n: com.hustlecity.game.world.RoadNode): Int = com.hustlecity.game.world.Crossings.style(e.city, n)
 
     /**
      * Curbs: a pale concrete edge between the asphalt and the sidewalk with a darker gutter inside it, along every
@@ -1161,9 +1157,10 @@ class WorldRenderer(private val e: GameEngine) {
                 // lanes go unmarked, except where they join a scramble: there every road has its crossing
                 if (style == 0 || (ed.cls.rank < 1 && !node.scramble)) continue
                 val clear = if (end == 0) ed.clearA else ed.clearB
-                val a = if (end == 0) clear + .5f else ed.len - clear - 3.2f
+                // only where the band lies on this road alone, kerb to kerb (world/Crossings.kt)
+                val a = com.hustlecity.game.world.Crossings.start(e.city, ed, end)
                 val salt = ed.id * 2 + end
-                when (style) {
+                if (!a.isNaN()) when (style) {
                     3 -> {
                         strip(ed, a, a + .3f, -hw + .3f, hw - .3f, .04f, worn(white, salt, 1, fade))
                         strip(ed, a + 2.4f, a + 2.7f, -hw + .3f, hw - .3f, .04f, worn(white, salt, 2, fade))
@@ -1374,6 +1371,9 @@ class WorldRenderer(private val e: GameEngine) {
     internal fun bizAt(buildingId: Int) = bizByBuilding[buildingId]
     internal fun rivalAt(buildingId: Int) = rivalByBuilding[buildingId]
     internal fun isVacant(b: Building) = vacant(b)
+    /** A building with nothing of its own to show on its front: no business, no FOR RENT sign, not a place, not yours. */
+    internal fun plainLot(b: Building) = b.placeId == null && b.id !in rentedBuildings && b.id !in rivalByBuilding && bizByBuilding[b.id] == null &&
+        !(b.kind == BKind.RETAIL && vacant(b))
     internal fun car(x: Float, y: Float, heading: Float, len: Float, wid: Float, hgt: Float, color: Int, style: Int) =
         drawCar(x, y, heading, len, wid, hgt, color, style, false)
 
@@ -1429,14 +1429,39 @@ class WorldRenderer(private val e: GameEngine) {
         val off = ed.cls.halfWidth + 1.4f
         val x = n.x + dx * (clear + 1f) + dy * off * side
         val y = n.y + dy * (clear + 1f) - dx * off * side
+        val state = e.traffic.light(n, ed)
+        if (scene.meshesOn && signalModel(x, y, dx, dy, side, state)) return
         val pole = c(0xFF3A3D42)
         scene.box(x - .1f, y - .1f, 0f, x + .1f, y + .1f, 4.4f, pole, pole)
         // the arm reaches over the lanes it controls
         val ax = x - dy * side * 2.6f; val ay = y + dx * side * 2.6f
         scene.box(min(x, ax) - .05f, min(y, ay) - .05f, 4.3f, max(x, ax) + .05f, max(y, ay) + .05f, 4.42f, pole, pole)
-        val state = e.traffic.light(n, ed)
         val lightColor = when (state) { 0 -> c(0xFF2EE87A); 1 -> c(0xFFFFD34D); else -> c(0xFFFF4D4D) }
         scene.box(ax - .25f, ay - .25f, 3.5f, ax + .25f, ay + .25f, 4.4f, lightColor, c(0xFF22252A))
+    }
+
+    private var signalLib = -1
+    private var signalMesh: Mesh? = null
+    private val signalTints = IntArray(6)
+
+    /**
+     * The traffic light as its Blender model: the pole on the corner, the arm out over the lanes it controls and the
+     * heads looking down the road at the traffic coming ([dx], [dy] point from the junction back up the approach).
+     * Only the lamp for [state] (0 green, 1 amber, 2 red) is lit. Where traffic keeps left the model is mirrored, so
+     * the arm still reaches over the lanes.
+     */
+    private fun signalModel(x: Float, y: Float, dx: Float, dy: Float, side: Float, state: Int): Boolean {
+        if (signalLib != MeshLib.version) { signalLib = MeshLib.version; signalMesh = MeshLib.get("prop_traffic_light") }
+        val m = signalMesh ?: return false
+        // the arm (the model's +y) across the road; its heads (the model's +x) then look along side·(dx, dy)
+        val ax = -dy * side; val ay = dx * side
+        signalTints[3] = if (state >= 2) c(0xFFFF4D4D) else c(0xFF4A1C1C)
+        signalTints[4] = if (state == 1) c(0xFFFFD34D) else c(0xFF4A3A12)
+        signalTints[5] = if (state == 0) c(0xFF2EE87A) else c(0xFF12402A)
+        val glow = (1 shl (if (state == 0) 5 else if (state == 1) 4 else 3)) or (if (scene.daylight < .5f) MeshPart.NIGHT_LIGHTS else 0)
+        val level = scene.meshLevel(m, scene.pixels(x, y, 3f, 5.7f), 260f, 80f)
+        scene.mesh(m, level, x, y, 0f, ay, -ax, side, 1f, 1f, signalTints, glow)
+        return true
     }
 
     private fun drawParkedCar(code: Int) {

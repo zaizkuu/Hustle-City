@@ -8,6 +8,7 @@ import com.hustlecity.game.data.StockShape
 import com.hustlecity.game.data.c
 import com.hustlecity.game.engine.ShelfStock
 import com.hustlecity.game.model.PlacedItem
+import kotlin.math.max
 import kotlin.math.min
 
 /**
@@ -107,6 +108,8 @@ class StockPainter(private val scene: Scene3D, private val parts: PartSorter) {
         val prod = Catalog.product(pid)
         val color = shade(prod?.color ?: KRAFT, s)
         val h = row.h
+        // the product itself, as its model from the library (GPU renderer); clothes on hangers stay as they are
+        if (scene.meshesOn && !row.hang && goods(pid, s, cx, cy, z, cw, cd, h, boxed)) return
         if (boxed) {
             // a cardboard box of stock with the product's label on the front
             val bw = cw * .9f; val bd = cd * .9f; val bh = h * .92f
@@ -223,6 +226,51 @@ class StockPainter(private val scene: Scene3D, private val parts: PartSorter) {
             StockShape.GLASS -> cbox(cx, cy, min(cw * .62f, .07f), min(cd * .5f, .07f), z, z + min(h * .5f, .13f), color, if (pid == "draft_beer") WHITE else color)
             else -> cbox(cx, cy, min(cw * .8f, .15f), min(cd * .8f, .12f), z, z + min(h * .75f, .2f), color, scene.mix(color, 0xFFFFFFFF.toInt(), .25f))
         }
+    }
+
+    private var libVersion = -1
+    private val goodsCache = HashMap<String, Mesh?>()
+
+    private fun mesh(name: String): Mesh? {
+        if (libVersion != MeshLib.version) { goodsCache.clear(); libVersion = MeshLib.version }
+        return goodsCache.getOrPut(name) { MeshLib.get(name) }
+    }
+
+    /**
+     * Slot [s]'s product [pid] as its model, standing in the middle of its cell at item-local ([cx], [cy]) on height
+     * [z], shrunk where it wouldn't fit the cell ([cw] by [cd], [h] of room), turned with the display. Boxed stock is a
+     * carton filling the cell, every so often one already opened. False when the product has no model.
+     */
+    private fun goods(pid: String, s: Int, cx: Float, cy: Float, z: Float, cw: Float, cd: Float, h: Float, boxed: Boolean): Boolean {
+        val name = if (boxed) (if (s % 4 == 3) "item_open_box" else "item_cardboard_box") else Goods.modelFor(pid, s) ?: return false
+        val m = mesh(name) ?: return false
+        val d = def ?: return false
+        val sx: Float; val sy: Float; val sz: Float
+        if (boxed) { sx = cw * .9f / m.width; sy = cd * .9f / m.length; sz = h * .9f / m.height }
+        else {
+            val k = min(1f, min(min(cw * .92f / m.width, cd * .92f / m.length), h * .95f / m.height))
+            sx = k; sy = k; sz = k
+        }
+        // the cell's middle in the room, and the display's turn (as StockPainter.slotWorld)
+        val r = ((rot % 4) + 4) % 4
+        val w = d.w.toFloat(); val dd = d.d.toFloat()
+        val rx = when (r) { 0 -> px + cx; 1 -> px + dd - cy; 2 -> px + w - cx; else -> px + cy }
+        val ry = when (r) { 0 -> py + cy; 1 -> py + cx; 2 -> py + dd - cy; else -> py + w - cx }
+        val cs = when (r) { 0 -> 1f; 2 -> -1f; else -> 0f }
+        val sn = when (r) { 1 -> 1f; 3 -> -1f; else -> 0f }
+        val level = scene.meshLevel(m, scene.pixels(rx, ry, z, max(m.width * sx, m.height * sz)), 90f, 28f)
+        if (pid == "apples" && !boxed) {
+            // a little pile of them
+            for (k in 0 until 3) {
+                val ox = (k - 1) * .07f; val oy = if (k == 1) .04f else -.02f
+                scene.mesh(m, level, rx + ox * cs - oy * sn, ry + ox * sn + oy * cs, z - m.minZ * sz + (if (k == 1) .03f else 0f), cs, sn, sx, sy, sz)
+            }
+            return true
+        }
+        // the model's own middle over the cell's
+        val mx = m.centerX * sx; val my = m.centerY * sy
+        scene.mesh(m, level, rx - (mx * cs - my * sn), ry - (mx * sn + my * cs), z - m.minZ * sz, cs, sn, sx, sy, sz)
+        return true
     }
 
     /** Far away: each run of slots showing the same product on a level becomes one block. */

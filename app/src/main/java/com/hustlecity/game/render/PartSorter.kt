@@ -23,6 +23,7 @@ class PartSorter(private val scene: Scene3D) {
 
     /** Draws [def] at grid position (x, y) turned [rot] quarter turns, optionally see-through, leaving out the parts in [skip] (bit per part). */
     fun draw(def: FurnitureDef, x: Float, y: Float, rot: Int, alpha: Float = 1f, skip: Long = 0L) {
+        if (skip == 0L && scene.meshesOn && model(def, x, y, rot, alpha)) return
         begin()
         for (i in 0 until min(def.parts.size, 64)) {
             if (skip != 0L && (skip ushr i) and 1L == 1L) continue
@@ -31,6 +32,69 @@ class PartSorter(private val scene: Scene3D) {
         }
         end(alpha)
     }
+
+    private var libVersion = -1
+    private val models = HashMap<String, Mesh>()
+    private val missing = HashSet<String>()
+
+    /**
+     * Draws [def] as its Blender model when there is one (GPU renderer only): furniture that has no live stock to
+     * show. Displays keep their boxes, because what's on their shelves is drawn slot by slot from the stock.
+     * The model's origin is the middle of the footprint and it turns in quarter turns exactly like the boxes do.
+     */
+    private fun model(def: FurnitureDef, x: Float, y: Float, rot: Int, alpha: Float): Boolean {
+        if (libVersion != MeshLib.version) { models.clear(); missing.clear(); libVersion = MeshLib.version }
+        var mesh = models[def.id]
+        if (mesh == null) {
+            if (def.id in missing) return false
+            // the three loudspeakers are one cabinet at three sizes; the safe is a model from the goods
+            mesh = MeshLib.get(when (def.id) { "speaker_small", "speaker_medium" -> "speaker_large"; "safe" -> "item_safe"; else -> def.id })
+            if (mesh == null) { missing += def.id; return false }
+            models[def.id] = mesh
+        }
+        val s = when (def.id) { "speaker_small" -> .6f; "speaker_medium" -> .88f; "speaker_large" -> 1.15f; else -> 1f }
+        val r = ((rot % 4) + 4) % 4
+        val fw = if (r % 2 == 0) def.w else def.d
+        val fd = if (r % 2 == 0) def.d else def.w
+        val cx = x + fw / 2f; val cy = y + fd / 2f
+        val cs = when (r) { 0 -> 1f; 2 -> -1f; else -> 0f }
+        val sn = when (r) { 1 -> 1f; 3 -> -1f; else -> 0f }
+        val level = scene.meshLevel(mesh, scene.pixels(cx, cy, .8f, max(def.w, def.d).toFloat()), 300f, 0f)
+        if (def.id == "safe") {
+            // the safe to one side of its tile, the cash bag on the floor beside it, takings stacked on top
+            put("item_safe", level, cx, cy, -.12f, 0f, 0f, cs, sn, false, alpha)
+            put("item_money_bag", level, cx, cy, .33f, .08f, 0f, cs, sn, false, alpha)
+            val top = mesh.maxZ
+            put("item_cash_stack", level, cx, cy, -.2f, -.05f, top, cs, sn, false, alpha)
+            put("item_coins", level, cx, cy, -.02f, .12f, top, cs, sn, false, alpha)
+            return true
+        }
+        scene.mesh(mesh, level, cx, cy, 0f, cs, sn, s, s, s, null, 0, alpha)
+        when (def.id) {
+            // the manager's chair, pulled up to the desk on the side they sit, facing it
+            "office_desk" -> put("office_chair", level, cx, cy, 0f, .42f, 0f, cs, sn, true, alpha)
+            // a record sleeve left lying on top of the big cabinet
+            "speaker_large" -> put("item_vinyl", level, cx, cy, .04f, -.02f, mesh.maxZ * s, cs, sn, false, alpha)
+        }
+        return true
+    }
+
+    /**
+     * A second model standing with a piece of furniture: [name] at ([ox], [oy]) from the middle of the piece in its
+     * own frame (before it's turned) and [z] up, turned with it by ([cs], [sn]); [back] turns it half round more.
+     */
+    private fun put(name: String, level: Int, cx: Float, cy: Float, ox: Float, oy: Float, z: Float, cs: Float, sn: Float, back: Boolean, alpha: Float) {
+        if (extraVersion != MeshLib.version) { extra.clear(); extraVersion = MeshLib.version }
+        val m = extra.getOrPut(name) { MeshLib.get(name) } ?: return
+        // the piece's frame turns like its model: (x, y) -> (x·cos − y·sin, x·sin + y·cos)
+        val wx = cx + ox * cs - oy * sn
+        val wy = cy + ox * sn + oy * cs
+        val k = if (back) -1f else 1f
+        scene.mesh(m, level.coerceAtMost(m.levels.size - 1), wx, wy, z, cs * k, sn * k, 1f, 1f, 1f, null, 0, alpha)
+    }
+
+    private val extra = HashMap<String, Mesh?>()
+    private var extraVersion = -1
 
     /** Starts a batch of boxes drawn (and sorted) together, like one model. */
     fun begin() { count = 0 }

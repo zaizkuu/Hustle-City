@@ -283,6 +283,7 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
     private fun drawLocal(b: Building, roof: Int, facadeIn: Int, d0: Float, detail: Boolean) {
         if (b.kind == BKind.GAS) { gasStation(b, d0); return }
         val st = style(b)
+        if (detail && d0 < 420f && scene.meshesOn && model(b, st, facadeIn)) return
         val facade = facadeIn
         val h = b.height
         val q = e.settings.quality
@@ -317,6 +318,49 @@ class BuildingPainter(private val r: WorldRenderer, private val e: GameEngine) {
         visibleFaces(0f, 0f, b.w, b.d) { face -> facade(b, st, face, d0, near) }
         if (d0 < 300f && q >= 1) rooftop(b, st, d0)
         b.placeId?.let { landmark(b, it, d0) }
+    }
+
+    // ------------------------------------------------------------------ the Blender models
+
+    private var libVersion = -1
+    private val archMesh = arrayOfNulls<Mesh>(Arch.values().size)
+    private val bTints = IntArray(5)
+
+    /**
+     * A building as the Blender model of its style (GPU renderer only), stretched to its lot and height: walls in the
+     * building's own facade color, its windows in three groups that each light up at night or don't, per building, and
+     * its signs and lamps glowing after dark. Only for plain lots ([WorldRenderer.plainLot]: storefronts, FOR RENT signs
+     * and named places are the painter's) whose size is near enough the model's design size that the stretch doesn't
+     * show. False leaves the building to the painter.
+     */
+    private fun model(b: Building, st: Arch, facade: Int): Boolean {
+        if (libVersion != MeshLib.version) {
+            libVersion = MeshLib.version
+            for (a in Arch.values()) archMesh[a.ordinal] = MeshLib.get("bld_" + when (a) {
+                Arch.WALKUP -> "walkup"; Arch.BROWNSTONE -> "brownstone"; Arch.DECO -> "deco"; Arch.GLASS -> "glass_tower"
+                Arch.CLASSIC -> "classic"; Arch.MODERN -> "modern"; Arch.INDUSTRIAL -> "industrial"; Arch.SHOP -> "shop"
+                Arch.COLONIAL -> "colonial"; Arch.TROPICAL -> "tropical"; Arch.PENCIL -> "pencil"; Arch.HANOK -> "hanok"
+            })
+        }
+        val m = archMesh[st.ordinal] ?: return false
+        if (m.meta.size < 3 || !r.plainLot(b)) return false
+        val sx = b.w / m.meta[0]; val sy = b.d / m.meta[1]; val sz = b.height / m.meta[2]
+        if (sx < .7f || sx > 1.4f || sy < .7f || sy > 1.4f || sz < .7f || sz > 1.4f) return false
+        // only where it's big enough on screen for its detail to show: further off the painter's massing is as good and far cheaper
+        val size = max(max(b.w, b.d), b.height)
+        val px = scene.pixels(b.w * .5f, b.d * .5f, b.height * .5f, size)
+        if (px < 220f) return false
+        val night = scene.daylight < .5f
+        bTints[1] = facade
+        var glow = if (night) MeshPart.NIGHT_LIGHTS else 0
+        for (g in 2..4) {
+            val lit = night && hash(b.id, g, 5) % 100 < 45
+            bTints[g] = if (lit) WorldRenderer.LIT else if (night) scene.lit(WorldRenderer.GLASS_NIGHT, 1f) else WorldRenderer.GLASS
+            if (lit) glow = glow or (1 shl g)
+        }
+        val level = scene.meshLevel(m, px, 700f, 420f)
+        scene.mesh(m, level, b.w * .5f, b.d * .5f, 0f, 1f, 0f, sx, sy, sz, bTints, glow)
+        return true
     }
 
     // ------------------------------------------------------------------ massing

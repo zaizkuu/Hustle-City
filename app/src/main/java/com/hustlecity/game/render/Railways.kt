@@ -414,7 +414,33 @@ class Railways(private val city: City) {
         try { carLocal(scene, l, carFlags[i], near) } finally { scene.clearFrame() }
     }
 
+    private var libVersion = -1
+    private var metro: Mesh? = null
+    private val metroTints = IntArray(4)
+
+    /**
+     * A train car as the Blender model (GPU renderer only), stretched to the line's car length and banded in its
+     * color: headlights on the leading cab, tail lights on the last, the destination boards and windows lit after dark.
+     */
+    private fun carModel(scene: Scene3D, l: Line, flags: Int): Boolean {
+        if (libVersion != MeshLib.version) { libVersion = MeshLib.version; metro = MeshLib.get("car_metro_car") }
+        val m = metro ?: return false
+        val night = scene.daylight < .55f
+        val sl = l.carLen / m.length
+        if (sl < .6f || sl > 1.6f) return false
+        metroTints[1] = l.color
+        // the model's front (+y) is this car's +x end: lamps lit only on a cab that leads or trails the train
+        metroTints[2] = if (flags and 1 != 0) c(0xFFFFF4D6) else c(0xFF6E7378)
+        metroTints[3] = if (flags and 2 != 0) c(0xFFFF2E2E) else c(0xFF6E7378)
+        val glow = (if (flags and 1 != 0) 4 else 0) or (if (flags and 2 != 0 && night) 8 else 0) or (if (night) MeshPart.NIGHT_LIGHTS else 0)
+        val level = scene.meshLevel(m, scene.pixels(0f, 0f, DECK + 2f, l.carLen), 300f, 110f)
+        // turn the model's +y onto the car's +x: (x, y) -> (y, -x)
+        scene.mesh(m, level, 0f, 0f, DECK, 0f, -1f, 2.9f / m.width, sl, 1f, metroTints, glow)
+        return true
+    }
+
     private fun carLocal(scene: Scene3D, l: Line, flags: Int, near: Boolean) {
+        if (scene.meshesOn && carModel(scene, l, flags)) return
         val hl = l.carLen * .5f; val hw = 1.45f
         val z0 = DECK + .62f; val z1 = DECK + 3.95f
         val night = scene.daylight < .55f

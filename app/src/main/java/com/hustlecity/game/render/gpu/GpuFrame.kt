@@ -286,6 +286,79 @@ class GpuFrame {
         s.ni = k
     }
 
+    /** Float bits of every per-vertex flags value a model can carry (material times two, plus one when emissive). */
+    private val flagBits = IntArray(64) { java.lang.Float.floatToRawIntBits(it.toFloat()) }
+
+    /**
+     * Appends one part of a model (see [com.hustlecity.game.render.MeshPart]), placed by the 3x3 matrix [m] (row-major)
+     * and the offset ([tx], [ty], [tz]). [nm] turns its normals: the same matrix for a plain turn, the turn with the
+     * inverse scales when the model is stretched; [renorm] re-normalizes them after any scaling.
+     *
+     * [tints] colors the vertices that have a slot (ARGB, indexed by slot; null leaves their shade as their color) and
+     * [glowMask] has a bit per slot that should shine (a street lamp's head at night). [alpha] below one fades the
+     * whole part. One pass over the vertices and one over the indices: no per-triangle work.
+     */
+    fun mesh(stream: Int, p: com.hustlecity.game.render.MeshPart, m: FloatArray, nm: FloatArray, tx: Float, ty: Float, tz: Float,
+             tints: IntArray?, glowMask: Int, alpha: Float, renorm: Boolean, glow: Boolean) {
+        val nv = p.nv
+        if (nv == 0 || p.ni == 0) return
+        val s = streams[stream]
+        s.ensure(nv, p.ni)
+        val base = s.nv
+        val v = s.v
+        val pos = p.pos; val nrm = p.nrm; val col = p.rgba; val mat = p.mat; val slot = p.slot
+        val m0 = m[0]; val m1 = m[1]; val m2 = m[2]; val m3 = m[3]; val m4 = m[4]; val m5 = m[5]; val m6 = m[6]; val m7 = m[7]; val m8 = m[8]
+        val n0 = nm[0]; val n1 = nm[1]; val n2 = nm[2]; val n3 = nm[3]; val n4 = nm[4]; val n5 = nm[5]; val n6 = nm[6]; val n7 = nm[7]; val n8 = nm[8]
+        val fade = alpha < 1f
+        val a8 = (alpha * 255f).toInt().coerceIn(0, 255)
+        var o = base * STRIDE
+        var k = 0
+        for (i in 0 until nv) {
+            val x = pos[k]; val y = pos[k + 1]; val z = pos[k + 2]
+            val ux = nrm[k]; val uy = nrm[k + 1]; val uz = nrm[k + 2]
+            k += 3
+            v[o] = java.lang.Float.floatToRawIntBits(tx + m0 * x + m1 * y + m2 * z)
+            v[o + 1] = java.lang.Float.floatToRawIntBits(ty + m3 * x + m4 * y + m5 * z)
+            v[o + 2] = java.lang.Float.floatToRawIntBits(tz + m6 * x + m7 * y + m8 * z)
+            var ax = n0 * ux + n1 * uy + n2 * uz
+            var ay = n3 * ux + n4 * uy + n5 * uz
+            var az = n6 * ux + n7 * uy + n8 * uz
+            if (renorm) {
+                val l = sqrt(ax * ax + ay * ay + az * az)
+                if (l > 1e-6f) { ax /= l; ay /= l; az /= l }
+            }
+            v[o + 3] = java.lang.Float.floatToRawIntBits(ax)
+            v[o + 4] = java.lang.Float.floatToRawIntBits(ay)
+            v[o + 5] = java.lang.Float.floatToRawIntBits(az)
+            var c = col[i]
+            var f = mat[i].toInt() and 63
+            val sl = slot[i].toInt()
+            if (sl >= com.hustlecity.game.render.MeshPart.LIGHT_SLOT) {
+                // a light in its own color: it only shines when asked
+                if ((glowMask shr sl) and 1 == 1) f = f or 1
+            } else if (sl != 0 && tints != null && sl < tints.size) {
+                val t = tints[sl]
+                val sh = c and 255
+                val r = ((t shr 16) and 255) * sh / 255
+                val g = ((t shr 8) and 255) * sh / 255
+                val b = (t and 255) * sh / 255
+                c = (c and 0xFF000000.toInt()) or (b shl 16) or (g shl 8) or r
+                if ((glowMask shr sl) and 1 == 1) f = f or 1
+            }
+            if (glow) f = f or 1
+            if (fade) c = (c and 0xFFFFFF) or ((((c ushr 24) * a8) / 255) shl 24)
+            v[o + 6] = c
+            v[o + 7] = flagBits[f]
+            o += STRIDE
+        }
+        s.nv += nv
+        val idx = s.idx
+        val src = p.idx
+        var q = s.ni
+        for (i in 0 until p.ni) idx[q++] = base + (src[i].toInt() and 0xFFFF)
+        s.ni = q
+    }
+
     private class Sphere(val rings: Int, val segs: Int) {
         val unit = FloatArray((rings + 1) * (segs + 1) * 3).also { u ->
             var k = 0

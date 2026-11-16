@@ -554,6 +554,95 @@ class Scene3D(val proj: Projector, val batch: RenderBatch) {
         }
     }
 
+    // ------------------------------------------------------------------ models
+
+    /**
+     * How much the Blender models (see [MeshLib]) are used: 0 none, so every painter draws its own boxes as the
+     * classic renderer always does; 1 the reduced levels only; 2 full detail up close. Renderers set it from the
+     * quality setting, so Low stays exactly as cheap as it was.
+     */
+    var modelDetail = 2
+
+    /** True when models can be drawn here: this is the GPU renderer, models are wanted and the pack has loaded. */
+    val meshesOn: Boolean get() = gpu != null && modelDetail > 0 && MeshLib.ready
+
+    private val mm = FloatArray(9); private val mn = FloatArray(9)
+    private val fm = FloatArray(9); private val fn = FloatArray(9)
+
+    /** On-screen size in pixels of something [size] meters big at local (lx, ly, z); 0 when it's behind the camera. */
+    fun pixels(lx: Float, ly: Float, z: Float, size: Float): Float {
+        val zc = proj.camZOf(toWorldX(lx, ly), toWorldY(lx, ly), z)
+        return if (zc < proj.near) 0f else proj.focal * size / zc
+    }
+
+    /** Picks a level of detail: full above [full] pixels (where allowed), the next above [mid], the smallest below. */
+    fun meshLevel(mesh: Mesh, px: Float, full: Float, mid: Float): Int {
+        val want = if (px > full && modelDetail >= 2) 0 else if (px > mid) 1 else 2
+        return want.coerceAtMost(mesh.levels.size - 1)
+    }
+
+    /**
+     * Stands a model at local (lx, ly, z), turned so its own (x, y) maps to (x·cos − y·sin, x·sin + y·cos) like
+     * [setFrame], and scaled along its axes. GPU renderer only: callers check [meshesOn] and keep their boxes otherwise.
+     */
+    fun mesh(mesh: Mesh, level: Int, lx: Float, ly: Float, z: Float, cos: Float, sin: Float, sx: Float = 1f, sy: Float = 1f, sz: Float = 1f,
+             tints: IntArray? = null, glowMask: Int = 0, alpha: Float = 1f) {
+        mm[0] = cos * sx; mm[1] = -sin * sy; mm[2] = 0f
+        mm[3] = sin * sx; mm[4] = cos * sy; mm[5] = 0f
+        mm[6] = 0f; mm[7] = 0f; mm[8] = sz
+        val even = sx == sy && sy == sz
+        if (even) {
+            mn[0] = cos; mn[1] = -sin; mn[2] = 0f
+            mn[3] = sin; mn[4] = cos; mn[5] = 0f
+            mn[6] = 0f; mn[7] = 0f; mn[8] = 1f
+        } else {
+            mn[0] = cos / sx; mn[1] = -sin / sy; mn[2] = 0f
+            mn[3] = sin / sx; mn[4] = cos / sy; mn[5] = 0f
+            mn[6] = 0f; mn[7] = 0f; mn[8] = 1f / sz
+        }
+        meshMatrix(mesh, level, mm, mn, lx, ly, z, tints, glowMask, alpha, !even)
+    }
+
+    /**
+     * Draws a model placed by a 3x3 matrix [m] (row-major) and the local offset (lx, ly, z); [nm] turns its normals
+     * (see [com.hustlecity.game.render.gpu.GpuFrame.mesh]). Posed figures and vehicles build their own matrices.
+     * Models outside the view (a sphere round them) are skipped whole.
+     */
+    fun meshMatrix(mesh: Mesh, level: Int, m: FloatArray, nm: FloatArray, lx: Float, ly: Float, z: Float, tints: IntArray?, glowMask: Int,
+                   alpha: Float, renorm: Boolean) {
+        val g = gpu ?: return
+        var a = m; var b = nm
+        var tx = lx; var ty = ly
+        if (fOn) {
+            for (c in 0 until 3) {
+                fm[c] = fc * m[c] - fs * m[3 + c]; fm[3 + c] = fs * m[c] + fc * m[3 + c]; fm[6 + c] = m[6 + c]
+                fn[c] = fc * nm[c] - fs * nm[3 + c]; fn[3 + c] = fs * nm[c] + fc * nm[3 + c]; fn[6 + c] = nm[6 + c]
+            }
+            a = fm; b = fn
+            tx = fx0 + lx * fc - ly * fs; ty = fy0 + lx * fs + ly * fc
+        }
+        val cx = mesh.centerX; val cy = mesh.centerY; val cz = mesh.centerZ
+        val mx = tx + a[0] * cx + a[1] * cy + a[2] * cz
+        val my = ty + a[3] * cx + a[4] * cy + a[5] * cz
+        val mz = z + a[6] * cx + a[7] * cy + a[8] * cz
+        var big = 0f
+        for (i in 0 until 9) { val v = kotlin.math.abs(a[i]); if (v > big) big = v }
+        val r = mesh.radius * big * 1.8f
+        val zc = proj.camZOf(mx, my, mz)
+        if (zc < -r) return
+        if (zc > proj.near) {
+            val px = proj.centerX + proj.focal * proj.camXOf(mx, my, mz) / zc
+            val py = proj.centerY - proj.focal * proj.camYOf(mx, my, mz) / zc
+            val pr = proj.focal * r / zc
+            val ex = if (cacheBuild) proj.screenW * .5f else 0f; val ey = if (cacheBuild) proj.screenH * .5f else 0f
+            if (px + pr < -ex || px - pr > proj.screenW + ex || py + pr < -ey || py - pr > proj.screenH + ey) return
+        }
+        val lv = mesh.level(level)
+        val solid = if (alpha < 1f) com.hustlecity.game.render.gpu.GpuFrame.TRANSPARENT else com.hustlecity.game.render.gpu.GpuFrame.OPAQUE
+        g.mesh(solid, lv.solid, a, b, tx, ty, z, tints, glowMask, alpha, renorm, glow)
+        g.mesh(com.hustlecity.game.render.gpu.GpuFrame.TRANSPARENT, lv.clear, a, b, tx, ty, z, tints, glowMask, alpha, renorm, glow)
+    }
+
     /** A camera-facing billboard quad standing on the ground (used for people). */
     fun billboard(x: Float, y: Float, z0: Float, z1: Float, halfWidth: Float, color: Int) {
         // right vector of the camera in world space is (cos(yaw), -sin(yaw))

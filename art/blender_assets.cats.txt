@@ -1,0 +1,11 @@
+# This is an Asset Catalog Definition file for Blender.
+
+VERSION 1
+
+9e1568eb-0bfb-5a35-927d-0e9a918b1cdd:Hustle City/Furniture:Hustle City-Furniture
+86c8afbd-7ae0-59e9-b834-57bf029868b8:Hustle City/Items:Hustle City-Items
+2e6e2d85-feca-55ca-b79f-eee6872c417f:Hustle City/Street Props:Hustle City-Street Props
+4cdf5fa6-6371-5c31-a535-87808de97e9f:Hustle City/Vehicles:Hustle City-Vehicles
+0c9434ad-a90b-59c3-a4d8-0a88d0f1570c:Hustle City/Buildings:Hustle City-Buildings
+803ad08e-b6c3-5de6-b4be-26c8f3ab7e7b:Hustle City/Landmarks:Hustle City-Landmarks
+a2f1fb1a-675a-5e66-b875-e6ac16f5141b:Hustle City/People:Hustle City-People

@@ -43,6 +43,7 @@ class TreePainter(private val scene: Scene3D) {
      */
     fun draw(x: Float, y: Float, r: Float, h: Float, tone: Int, kind: Int, month: Int, i: Int, near: Boolean) {
         scene.sphereDetail = if (near) 2 else 1
+        if (near && scene.meshesOn && model(x, y, r, h, tone, kind, month, i)) return
         val white = scene.lit(0xFFF2F5F8.toInt(), 1f)
         if (kind == 4) { palm(x, y, r, h, tone, i, near, white); return }
         if (kind == 5 && month == 10 && scene.snow < .3f) {
@@ -108,6 +109,84 @@ class TreePainter(private val scene: Scene3D) {
             scene.blob(x, y, z, r * .35f, scene.mix(scene.lit(base, .88f), white, scene.snow * .4f), 8, .55f, -.05f)
         }
         scene.material = Mat.PLAIN
+    }
+
+    private var libVersion = -1
+    /** Per kind: the model in leaf, and bare for winter (null for the evergreens). */
+    private val leafy = arrayOfNulls<Mesh>(6)
+    private val bareM = arrayOfNulls<Mesh>(6)
+    private val tints = IntArray(2)
+
+    /**
+     * Close trees as their Blender models (GPU renderer only): an oak in its street pit (or without one in a park), a
+     * pine, a cherry, a coconut palm leaning its own way and a ginkgo, sized to the tree's canopy and height. The
+     * leaves take the season's color the painted trees use (blossom, fresh green, summer green, autumn reds and gold)
+     * and pale under snow; in winter the deciduous ones stand bare in a haze of twigs.
+     */
+    private fun model(x: Float, y: Float, r: Float, h: Float, tone: Int, kind: Int, month: Int, i: Int): Boolean {
+        if (libVersion != MeshLib.version) {
+            libVersion = MeshLib.version
+            leafy[0] = MeshLib.get("prop_tree_oak"); leafy[1] = MeshLib.get("prop_tree_oak_park"); leafy[2] = MeshLib.get("prop_tree_pine")
+            leafy[3] = MeshLib.get("prop_tree_cherry"); leafy[4] = MeshLib.get("prop_tree_palm"); leafy[5] = MeshLib.get("prop_tree_ginkgo")
+            bareM[0] = MeshLib.get("prop_tree_oak_bare"); bareM[1] = bareM[0]; bareM[3] = MeshLib.get("prop_tree_cherry_bare")
+            bareM[5] = MeshLib.get("prop_tree_ginkgo_bare")
+        }
+        if (kind < 0 || kind > 5) return false
+        val bare = kind != 2 && kind != 4 && (month == 11 || month == 0 || month == 1 || (month == 2 && i % 3 != 0))
+        val mesh = (if (bare) bareM[kind] else leafy[kind]) ?: return false
+        val white = 0xFFF2F5F8.toInt()
+        // how tall and wide the painted tree would stand, and the leaves' color this month
+        var top: Float; var reach: Float; var cs = 1f; var sn = 0f
+        val base: Int
+        when (kind) {
+            2 -> { top = h * 1.3f; reach = r * .95f; base = TREE[2] }
+            4 -> {
+                top = palmHeight(h) + 1f; reach = palmReach(r); base = PALM[tone % 3]
+                // the model leans along +x: turn it to lean the way this palm does
+                val la = i * 2.39996f; cs = cos(la); sn = sin(la)
+            }
+            5 -> {
+                top = ginkgoHeight(h) + ginkgoRadius(r) * .4f; reach = ginkgoRadius(r)
+                base = when (month) {
+                    9, 10 -> GINKGO_GOLD[(i + tone) % 3]
+                    8 -> scene.mix(GINKGO[tone % 3], GINKGO_GOLD[0], .35f)
+                    2, 3, 4 -> scene.mix(GINKGO[tone % 3], c(0xFFB6DA6C), .4f)
+                    else -> GINKGO[tone % 3]
+                }
+            }
+            else -> {
+                top = h * .75f + r; reach = r
+                base = when {
+                    kind == 3 && (month == 3 || month == 2) -> if (i % 2 == 0) c(0xFFF4B6C8) else c(0xFFF7E1E8)
+                    month == 3 || month == 4 -> scene.mix(TREE[tone], c(0xFF9CCB5A), .35f)
+                    month in 8..10 -> AUTUMN[(i + tone) % AUTUMN.size].let { if (month == 8) scene.mix(TREE[tone], it, .45f) else it }
+                    else -> TREE[tone]
+                }
+                // every other tree turned a quarter, so a row of them doesn't repeat itself
+                if (i % 2 == 1) { cs = 0f; sn = 1f }
+            }
+        }
+        // the model's leaves are shaded down from their brightest tuft: give that tuft a little more light than the mid tone
+        tints[1] = scene.mix(scene.mix(base, white, .14f), white, scene.snow * .55f)
+        // sized by the tree in leaf, so a bare one in winter keeps the same branches
+        val ref = leafy[kind] ?: mesh
+        val sxy = (reach / (ref.width * .5f)).coerceIn(.45f, 2.2f)
+        val sz = (top / ref.height).coerceIn(.45f, 2.2f)
+        val level = scene.meshLevel(mesh, scene.pixels(x, y, top * .5f, max(top, reach * 2f)), 380f, 120f)
+        scene.mesh(mesh, level, x, y, 0f, cs, sn, sxy, sxy, sz, tints, 0)
+        if (bare) {
+            // the fine twigs no model carries: a haze round the branches, dusted with snow
+            scene.material = Mat.FOLIAGE
+            val twig = scene.withAlpha(scene.mix(scene.lit(c(0xFF6B5444), 1f), scene.lit(white, 1f), scene.snow * .5f), .3f)
+            if (kind == 5) scene.blob(x, y, top * .62f, reach * .9f, twig, 10, squash = 1.6f)
+            else scene.blob(x, y, top * .7f, reach * .85f, twig, 10)
+            scene.material = Mat.PLAIN
+        } else if (kind == 5 && month == 10 && scene.snow < .3f) {
+            // ginkgos drop their leaves all at once: a gold carpet round the foot
+            val gold = scene.withAlpha(scene.lit(GINKGO_GOLD[(i + tone) % 3], .95f), .7f)
+            scene.disc(x + reach * .3f, y - reach * .2f, .02f, reach * 1.5f, reach * 1.3f, 10, gold)
+        }
+        return true
     }
 
     /**

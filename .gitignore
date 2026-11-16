@@ -15,3 +15,9 @@ dist/
 .claude/worktrees/
 .kotlin/
 __pycache__/
+
+# trailer intermediates (rendered frames; the film and the .blend are kept)
+art/trailer/frames/
+art/trailer/viewport/
+art/trailer/preview/
+*.blend1
