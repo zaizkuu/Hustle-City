@@ -26,6 +26,14 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
         val engine = EngineHolder.get(this)
+        // the Blender models load off the main thread; until they have, every painter draws its own boxes
+        if (!com.hustlecity.game.render.MeshLib.ready) {
+            val am = applicationContext.assets
+            Thread {
+                try { am.open("models.hcm").use { com.hustlecity.game.render.MeshLib.load(it) } } catch (e: Exception) { }
+                try { am.open("anims.hca").use { com.hustlecity.game.render.AnimLib.load(it) } } catch (e: Exception) { }
+            }.start()
+        }
         setContent { HustleCityApp(engine, onExit = { finish() }) }
     }
 

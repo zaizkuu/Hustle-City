@@ -33,6 +33,9 @@ class CarPainter(private val scene: Scene3D) {
         val TAXI = c(0xFFF2C230)
         val HEAD = c(0xFFFFF4D6)
         val TAIL = c(0xFFC0392B)
+        /** Model headlights by day, and tail lights under braking. */
+        private val LAMP_OFF = c(0xFFE4E6E8)
+        private val BRAKE = c(0xFFFF2E2E)
         val CHROME = c(0xFFD3D8DD)
         /** Open window holes and doorways: the dim inside of a jeepney or a sidecar. */
         val INSIDE = c(0xFF2B2622)
@@ -72,7 +75,11 @@ class CarPainter(private val scene: Scene3D) {
         val nearSide = if (camL >= 0f) 1 else -1
         // the smallest trim (ornaments, mirrors, lettering) only close to the camera
         val fine = proj.camZOf(x, y, 1f) < 42f
-        when (style) {
+        // the common vehicles have Blender models (GPU renderer, on level ground); the rest are painted below
+        val modelled = pitch == 0f && roll == 0f && scene.meshesOn && model(x, y, len, wid, hgt, body, accent, style, taxi, lights, braking)
+        // the scooter model comes without its rider: seat the painter's on it
+        if (modelled && style == 8) { ahead(-.3f); rider(body xor (if (accent != 0) accent else CHROME), fine); ahead(.3f) }
+        if (!modelled) when (style) {
             4 -> jeepney(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
             5 -> tricycle(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
             6 -> kei(hl, hw, hgt, body, accent, night, braking, camF, nearSide, fine)
@@ -93,6 +100,57 @@ class CarPainter(private val scene: Scene3D) {
             scene.glowOval(bx, by, .04f, 1.5f, 1.15f, fx, fy, c(0xFFFF3B30), .15f)
             scene.glow = false
         }
+    }
+
+    private var libVersion = -1
+    private val carMesh = arrayOfNulls<Mesh>(15)
+    private val carTints = IntArray(5)
+    private val cm = FloatArray(9); private val cn = FloatArray(9)
+
+    /**
+     * Draws the vehicle as its Blender model, stretched to this vehicle's length, width and height and painted its
+     * color; headlights and tail lights are slots that shine after dark and under braking. Three levels of detail by
+     * size on screen. Every style has one: a short sedan is the tired old hatchback everyone starts with, the scooter
+     * gets its rider from the painter, the moped and the tricycle bring theirs. False (so the painter draws it) for
+     * sizes too far from the model's.
+     */
+    private fun model(x: Float, y: Float, len: Float, wid: Float, hgt: Float, body: Int, accent: Int, style: Int, taxi: Boolean, lights: Boolean, braking: Boolean): Boolean {
+        if (libVersion != MeshLib.version) {
+            libVersion = MeshLib.version
+            java.util.Arrays.fill(carMesh, null)
+            carMesh[0] = MeshLib.get("car_sedan"); carMesh[1] = MeshLib.get("car_pickup"); carMesh[2] = MeshLib.get("car_van")
+            carMesh[3] = MeshLib.get("car_sports_car"); carMesh[4] = MeshLib.get("car_jeepney"); carMesh[7] = MeshLib.get("car_bus")
+            carMesh[9] = MeshLib.get("car_suv"); carMesh[10] = MeshLib.get("car_box_truck"); carMesh[13] = MeshLib.get("car_taxi")
+            carMesh[6] = MeshLib.get("car_kei_car"); carMesh[11] = MeshLib.get("car_modern_jeepney")
+            carMesh[5] = MeshLib.get("car_tricycle"); carMesh[8] = MeshLib.get("car_scooter"); carMesh[12] = MeshLib.get("car_moped")
+            carMesh[14] = MeshLib.get("car_beater")
+        }
+        if (style < 0 || style > 12) return false
+        val mesh = (when {
+            style == 0 && taxi -> carMesh[13]
+            // the compacts and the shortest sedans in traffic: the old hatchback
+            style == 0 && len < 4.45f -> carMesh[14] ?: carMesh[0]
+            else -> carMesh[style]
+        }) ?: return false
+        val sx = wid / mesh.width; val sy = len / mesh.length; val sz = hgt / mesh.height
+        if (sx < .6f || sx > 1.7f || sy < .6f || sy > 1.7f || sz < .6f || sz > 1.7f) return false
+        // the models have their doors on +x: the kerb side, which is the left where traffic keeps left
+        val side = if (leftHand) -1f else 1f
+        cm[0] = side * rx * sx; cm[1] = fx * sy; cm[2] = 0f
+        cm[3] = side * ry * sx; cm[4] = fy * sy; cm[5] = 0f
+        cm[6] = 0f; cm[7] = 0f; cm[8] = sz
+        cn[0] = side * rx / sx; cn[1] = fx / sy; cn[2] = 0f
+        cn[3] = side * ry / sx; cn[4] = fy / sy; cn[5] = 0f
+        cn[6] = 0f; cn[7] = 0f; cn[8] = 1f / sz
+        carTints[1] = body
+        // the second color: a kei car's roof, a modern jeepney's band
+        carTints[4] = if (accent != 0) accent else if (style == 11) scene.mix(body, 0xFF000000.toInt(), .35f) else body
+        carTints[2] = if (lights) HEAD else LAMP_OFF
+        carTints[3] = if (braking) BRAKE else TAIL
+        val glow = (if (lights) 4 else 0) or (if (lights || braking) 8 else 0)
+        val level = scene.meshLevel(mesh, scene.pixels(x, y, 1f, len), 230f, 95f)
+        scene.meshMatrix(mesh, level, cm, cn, x, y, 0f, carTints, glow, 1f, true)
+        return true
     }
 
     private fun frame(x: Float, y: Float, heading: Float) {

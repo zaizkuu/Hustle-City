@@ -365,6 +365,7 @@ class Landmarks(private val city: City) {
         k = l.size
         scene.setFrame(l.x, l.y, l.cs, l.sn)
         try {
+            if (scene.meshesOn && model(scene, i, l, d, mapMode)) return
             when (l.kind) {
                 Landmark.TOWER -> if (l.style == Landmark.LATTICE) lattice(scene, d, mapMode) else concreteTower(scene, l, d)
                 Landmark.TORII -> { torii(scene, 0f, 1f, d); torii(scene, 38f, .72f, d); lanterns(scene, d) }
@@ -384,7 +385,164 @@ class Landmarks(private val city: City) {
         val l = city.landmarks[i]
         k = l.size
         scene.setFrame(l.x, l.y, l.cs, l.sn)
-        try { rotor(scene, d, time) } finally { scene.glow = false; scene.material = Mat.PLAIN; scene.clearFrame() }
+        try {
+            if (scene.meshesOn && modelRotor(scene, time)) return
+            rotor(scene, d, time)
+        } finally { scene.glow = false; scene.material = Mat.PLAIN; scene.clearFrame() }
+    }
+
+    // ------------------------------------------------------------------ the Blender models
+
+    private var libVersion = -1
+    private var mLattice: Mesh? = null; private var mTorii: Mesh? = null; private var mMonument: Mesh? = null
+    private var mPalace: Mesh? = null; private var mCathedral: Mesh? = null; private var mWheel: Mesh? = null
+    private var mRotor: Mesh? = null; private var mGondola: Mesh? = null; private var mPaifang: Mesh? = null
+    private var mCityHall: Mesh? = null
+    private val lmTints = IntArray(2)
+    private val rm = FloatArray(9); private val rn = FloatArray(9)
+
+    private fun lib() {
+        if (libVersion == MeshLib.version) return
+        libVersion = MeshLib.version
+        mLattice = MeshLib.get("lmk_lattice_tower"); mTorii = MeshLib.get("lmk_torii"); mMonument = MeshLib.get("lmk_monument")
+        mPalace = MeshLib.get("lmk_palace_gate"); mCathedral = MeshLib.get("lmk_cathedral"); mWheel = MeshLib.get("lmk_ferris_wheel")
+        mRotor = MeshLib.get("lmk_ferris_rotor"); mGondola = MeshLib.get("lmk_ferris_gondola"); mPaifang = MeshLib.get("lmk_paifang")
+        mCityHall = MeshLib.get("lmk_city_hall")
+    }
+
+    /** Level of detail for [mesh] standing at local (lx, ly) scaled by [s]. */
+    private fun lod(scene: Scene3D, mesh: Mesh, lx: Float, ly: Float, s: Float): Int {
+        val size = max(mesh.width, mesh.height) * s
+        return scene.meshLevel(mesh, scene.pixels(lx, ly, mesh.height * s * .4f, size), 520f, 140f)
+    }
+
+    /** Stands [mesh] at local (lx, ly) scaled by [s], turned half round when [back] (the library's front is +y). */
+    private fun put(scene: Scene3D, mesh: Mesh, lx: Float, ly: Float, s: Float, back: Boolean, glowMask: Int = 0, sx: Float = s) {
+        scene.mesh(mesh, lod(scene, mesh, lx, ly, s), lx, ly, 0f, if (back) -1f else 1f, 0f, sx, s, s, lmTints, glowMask)
+    }
+
+    /**
+     * Draws landmark [l] as its Blender model when the library has one for its kind and style (GPU renderer only),
+     * with the parts of the game's own drawing the model doesn't carry: a torii's stone lanterns, the monument's flag
+     * and its honour guard, the palace walls running off either side of the gate. The models face +y and the game's
+     * landmarks mostly front onto -y, so those turn half round. False leaves the landmark to the code below.
+     */
+    private fun model(scene: Scene3D, i: Int, l: Landmark, d: Float, mapMode: Boolean): Boolean {
+        lib()
+        val night = scene.daylight < .55f && !mapMode
+        val lights = if (night) MeshPart.NIGHT_LIGHTS else 0
+        when (l.kind) {
+            Landmark.TOWER -> {
+                if (l.style != Landmark.LATTICE) return false
+                val m = mLattice ?: return false
+                // lit up orange and white from top to toe after dark
+                scene.glow = night
+                put(scene, m, 0f, 0f, k, false, lights)
+                scene.glow = false
+            }
+            Landmark.TORII -> {
+                val m = mTorii ?: return false
+                put(scene, m, 0f, 0f, k, false)
+                // the second, smaller gate further up the approach
+                put(scene, m, 0f, 38f * k, .72f * k, false)
+                lanterns(scene, d)
+            }
+            Landmark.MONUMENT -> {
+                val m = mMonument ?: return false
+                put(scene, m, 0f, 0f, k, true, lights)
+                // the honour guard on the steps before the statue, and the country's own flag on its pole
+                if (city.mapId == Maps.MANILA && d < 260f) for (sx in -1..1 step 2) guard(scene, sx * 2.6f, -6.4f, 1.5f)
+                val fxp = 8.5f; val fyp = -8.5f; val top = 24.5f
+                bx(scene, fxp - .12f, fyp - .12f, .7f, fxp + .12f, fyp + .12f, top, c(0xFFD5D8DC), c(0xFFBFC5CB))
+                scene.blob(fxp * k, fyp * k, (top + .2f) * k, .22f * k, scene.lit(c(0xFFD9B44A), 1f), 8)
+                if (city.mapId == Maps.NYC) usFlag(scene, fxp + .12f, fyp, top - .3f, 5.6f)
+                else philippineFlag(scene, fxp + .12f, fyp, top - .3f, 6.4f, d < 420f)
+            }
+            Landmark.PALACE_GATE -> {
+                if (l.style != Landmark.HANOK_GATE) return false
+                val m = mPalace ?: return false
+                put(scene, m, 0f, 0f, k, true, lights)
+                palaceWalls(scene, m.width * .5f)
+            }
+            Landmark.CHURCH -> {
+                if (l.style != Landmark.CATHEDRAL) return false
+                val m = mCathedral ?: return false
+                // floodlit at night
+                if (night) scene.glow = true
+                put(scene, m, 0f, 0f, k, true, lights)
+                scene.glow = false
+            }
+            Landmark.WHEEL -> {
+                val m = mWheel ?: return false
+                if (mRotor == null || mGondola == null) return false
+                put(scene, m, 0f, 0f, k, false)
+            }
+            Landmark.ARCH -> {
+                val m = mPaifang ?: return false
+                // the model's inner columns stand 6.7 m out, on the kerbs of a 13 m street: stretch it to this one
+                val stretch = archInner[i] / 6.7f
+                if (stretch < .75f || stretch > 1.45f) return false
+                put(scene, m, 0f, 0f, k, false, lights, sx = k * stretch)
+            }
+            Landmark.CITY_HALL -> {
+                val m = mCityHall ?: return false
+                val e = l.extent ?: return false
+                val fit = min(1f, min((e[2] - e[0]) / m.width, (e[3] - e[1]) / m.length))
+                put(scene, m, 0f, 0f, k * fit, true, lights)
+            }
+            else -> return false
+        }
+        return true
+    }
+
+    /** The palace's walls running off either side of a gate model [half] meters wide. */
+    private fun palaceWalls(scene: Scene3D, half: Float) {
+        scene.material = Mat.STONE
+        for (sx in -1..1 step 2) {
+            val x0 = sx * half; val x1 = sx * 46f
+            bx(scene, x0, -1f, 0f, x1, 1f, 1.4f, GRANITE, GRANITE)
+            scene.material = Mat.PLASTER
+            bx(scene, x0, -.85f, 1.4f, x1, .85f, 4f, c(0xFFB0574A), c(0xFF9E4B3F))
+            scene.material = Mat.STONE
+            q(scene, x0, -1.5f, 4f, x1, -1.5f, 4f, x1, 0f, 4.9f, x0, 0f, 4.9f, scene.lit(scene.snowy(TILE_ROOF), .9f))
+            q(scene, x1, 1.5f, 4f, x0, 1.5f, 4f, x0, 0f, 4.9f, x1, 0f, 4.9f, scene.lit(scene.snowy(TILE_ROOF), 1f))
+        }
+        scene.material = Mat.PLAIN
+    }
+
+    /**
+     * The Ferris wheel model's turning part: rims and spokes about the hub, then the 24 gondolas hanging level from
+     * where the rim has carried them, each in its own color, the rim lit after dark.
+     */
+    private fun modelRotor(scene: Scene3D, time: Float): Boolean {
+        lib()
+        val rotor = mRotor ?: return false
+        val gondola = mGondola ?: return false
+        if (mWheel == null) return false
+        val hub = rotor.meta.getOrElse(2) { 32f }; val rim = rotor.meta.getOrElse(3) { 28f }
+        val night = scene.daylight < .55f
+        val spin = time * 2f * PI.toFloat() / WHEEL_TURN
+        val cs = cos(spin); val sn = sin(spin)
+        // a turn about the axle (the y axis): x' = x·cos + z·sin, z' = −x·sin + z·cos
+        rm[0] = cs * k; rm[1] = 0f; rm[2] = sn * k
+        rm[3] = 0f; rm[4] = k; rm[5] = 0f
+        rm[6] = -sn * k; rm[7] = 0f; rm[8] = cs * k
+        val nm = rn
+        nm[0] = cs; nm[1] = 0f; nm[2] = sn; nm[3] = 0f; nm[4] = 1f; nm[5] = 0f; nm[6] = -sn; nm[7] = 0f; nm[8] = cs
+        val level = lod(scene, rotor, 0f, 0f, k)
+        scene.glow = night
+        scene.meshMatrix(rotor, level, rm, nm, 0f, 0f, hub * k, null, 0, 1f, false)
+        scene.glow = false
+        val gl = (level + 1).coerceAtMost(gondola.levels.size - 1)
+        for (g in 0 until 24) {
+            // the model's spoke g, at 2πg/24 from the x axis, carried round by the same turn
+            val a = g * 2f * PI.toFloat() / 24 - spin
+            // the cabin's hanger point on the rim, turned with the wheel; the cabin itself stays upright
+            val gx = cos(a) * rim; val gz = hub + sin(a) * rim
+            lmTints[1] = GONDOLAS[g % GONDOLAS.size]
+            scene.mesh(gondola, gl, gx * k, 0f, gz * k, 1f, 0f, k, k, k, lmTints, 0)
+        }
+        return true
     }
 
     fun height(l: Landmark): Float = l.size * when (l.kind) {

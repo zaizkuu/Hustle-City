@@ -328,7 +328,8 @@ class City(val seed: Long, val mapId: String = Maps.CLASSIC) {
         val layout = map.generate(seed)
         roads = layout.roads
         buildings += layout.buildings
-        trees += layout.trees
+        // a street tree planted along one road can land in another where two meet at a slant: those go
+        for (t in layout.trees) if (!roads.nearAsphalt(t.x, t.y, .5f)) trees += t
         water = layout.shore.water
         shore = layout.shore
         parks = layout.parks

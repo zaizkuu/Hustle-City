@@ -52,6 +52,8 @@ class Person(var x: Float, var y: Float, var shirt: Int, var skin: Int) {
     var item = -1
     /** What a customer has picked up: a product color (0 = nothing yet) shown in their hand once [heldIn] runs out. */
     var held = 0
+    /** The product [held] is the color of (null = nothing picked yet), for drawing it as its model. */
+    var heldPid: String? = null
     var heldCount = 0
     var heldIn = 0f
     /** True once they've paid: the goods go into a paper bag. */
@@ -497,8 +499,8 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     /** Longest queue right now (for tests and the HUD). */
     val longestQueue get() = queues.values.maxOfOrNull { it.size } ?: 0
 
-    /** What kind of place this is, for customer routines. */
-    private val typeId: String? = when (mode) {
+    /** What kind of place this is, for customer routines (and what people eat and carry here). */
+    val typeId: String? = when (mode) {
         InteriorMode.BUSINESS -> business?.typeId
         InteriorMode.RIVAL -> e.state.rivalBusinessAt(building.id)?.typeId
         else -> null
@@ -579,7 +581,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
             val ly = when (sp.face) { 0 -> -1f; 2 -> 1f; else -> 0f }
             val (vx, vy) = when (p.rot % 4) { 0 -> lx to ly; 1 -> -ly to lx; 2 -> -lx to -ly; else -> ly to -lx }
             val wx = p.x + ax; val wy = p.y + ay
-            SeatPos(idx(floor(wx).toInt().coerceIn(0, w - 1), floor(wy).toInt().coerceIn(0, d - 1)), wx, wy, sp.z, kotlin.math.atan2(vx, -vy), if (sp.pose == 3) 3 else 1)
+            SeatPos(idx(floor(wx).toInt().coerceIn(0, w - 1), floor(wy).toInt().coerceIn(0, d - 1)), wx, wy, sp.z, kotlin.math.atan2(vx, -vy), sp.pose)
         }
     }
 
@@ -787,7 +789,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
     private fun stepVisitor(v: Person, dt: Float, occ: BooleanArray) {
         if (dt <= 0f) return
         if (v.heldIn > 0f) v.heldIn -= dt
-        if (v.wait > 0f) { v.wait -= dt; if (v.pose == 2 || v.pose == 3) v.phase += dt * 5f; return }
+        if (v.wait > 0f) { v.wait -= dt; if (v.pose >= 2) v.phase += dt * 5f; return }
         if (v.goal < 0 || v.stage == 3) standUp(v)
         when (v.stage) {
             0 -> { // browsing displays / using machines
@@ -810,6 +812,7 @@ class InteriorScene(val e: GameEngine, val building: Building, val mode: Interio
                     // shoppers take an item off the display (it shows one fewer) and carry it to the register
                     shelf?.customerTakes(v.item, v)?.let { pid ->
                         v.held = Catalog.product(pid)?.color ?: c(0xFFC8A165)
+                        v.heldPid = pid
                         v.heldCount++
                         v.heldIn = ShelfStock.TAKE_TIME
                     }

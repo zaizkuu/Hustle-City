@@ -34,6 +34,30 @@ class StreetProps(val city: City) {
         const val BUNTING = 15
         /** Manila's residential lanes: a home-made basketball hoop on a post, hanging over the street. */
         const val HOOP = 16
+        /** Short steel posts guarding the corner of a big road. */
+        const val BOLLARD = 17
+        /** A parking meter at the kerb of a busy shopping street. */
+        const val METER = 18
+        /** Sidewalk works: a striped barrier with a warning lamp, a traffic cone at each end. */
+        const val WORKS = 19
+        /** A street-name sign on its pole at the end of a block. */
+        const val SIGN = 20
+        /** A dumpster against the wall of a lane. */
+        const val DUMPSTER = 21
+        /** A billboard on its legs at the back of a parking lot, facing the street. */
+        const val BILLBOARD = 22
+        /** A cash machine against a shop wall. */
+        const val ATM = 23
+        /** A phone booth on the pavement. */
+        const val PHONE = 24
+        /** A bush beside a park path. */
+        const val BUSH = 25
+        /** A café table under its umbrella, a chair either side, where the sidewalk is wide. */
+        const val CAFE = 26
+        /** Tokyo's drinking lanes: an izakaya's red paper lantern on its post by the door. */
+        const val AKACHOCHIN = 27
+        /** How many kinds there are. */
+        const val KINDS = 28
         /** Heights of the two strings of banderitas and of the lantern string where they're tied. */
         const val BUNTING_LOW = 5.2f; const val BUNTING_HIGH = 5.75f; const val LANTERN_Z = 4.3f
         /** A pole's service drops: how far along the street each runs, and the heights it leaves the pole and meets the wall. */
@@ -44,6 +68,7 @@ class StreetProps(val city: City) {
         const val BUNDLE_Z = 4.75f; const val BUNDLE_STEP = .18f
         /** How much wall a tie needs above it: a house must stand this much taller than the line it holds. */
         const val TIE_CLEAR = .4f
+        private const val SPOT = .8f
         /** Manila's neighborhoods of narrow streets and fiestas: Tondo, Quiapo, Sampaloc and Paco. */
         private val BARANGAYS = setOf(0, 2, 3, 7)
         private val FLAGS = intArrayOf(c(0xFFE53935), c(0xFFFDD835), c(0xFF1E88E5), c(0xFFF5F5F5), c(0xFF43A047), c(0xFFEC407A), c(0xFFFB8C00))
@@ -111,15 +136,55 @@ class StreetProps(val city: City) {
             cross = cross.copyOf(count * 2); drops = drops.copyOf(count * 6)
         }
         x[count] = px; y[count] = py; kind[count] = k; face[count] = 1; dirX[count] = dx; dirY[count] = dy
+        if (k != BUNTING && k != LANTERNS) taken[spot(px, py)] = count
         link[count] = -1; aux[count] = 0f; cross[count] = 0f
         drops[count * 3] = 0f; drops[count * 3 + 1] = 0f; drops[count * 3 + 2] = 0f
         return count++
     }
 
+    // which prop stands in each square of pavement, so two never go in the same place
+    private val taken = HashMap<Long, Int>()
+    private fun spot(px: Float, py: Float): Long =
+        (kotlin.math.floor(px / SPOT).toLong() shl 32) xor (kotlin.math.floor(py / SPOT).toLong() and 0xFFFFFFFFL)
+
+    /** True when something already stands within [r] meters of (px, py). */
+    private fun crowded(px: Float, py: Float, r: Float): Boolean {
+        val n = kotlin.math.ceil(r / SPOT).toInt().coerceAtLeast(1)
+        for (dx in -n..n) for (dy in -n..n) {
+            val i = taken[spot(px + dx * SPOT, py + dy * SPOT)] ?: continue
+            val ex = x[i] - px; val ey = y[i] - py
+            if (ex * ex + ey * ey < r * r) return true
+        }
+        return false
+    }
+
+    /**
+     * True when a prop of kind [k] at (px, py) would run into one already standing: their footprints (half lengths,
+     * taken as circles) come closer than a little elbow room. Bollards go in rows, so they only mind other kinds.
+     */
+    private fun clashes(px: Float, py: Float, k: Int): Boolean {
+        val mine = footprint(k)
+        val n = kotlin.math.ceil((mine + 2.4f) / SPOT).toInt()
+        for (dx in -n..n) for (dy in -n..n) {
+            val i = taken[spot(px + dx * SPOT, py + dy * SPOT)] ?: continue
+            if (k == BOLLARD && kind[i] == BOLLARD) { if (dist(x[i], y[i], px, py) < .9f) return true; continue }
+            val r = mine + footprint(kind[i]) * .85f + .25f
+            val ex = x[i] - px; val ey = y[i] - py
+            if (ex * ex + ey * ey < r * r) return true
+        }
+        return false
+    }
+
     /** Half the length (along the street) and depth (toward the building) of a prop's footprint. */
     private fun footprint(k: Int): Float = when (k) {
-        VENDING -> 1.7f; VENDOR -> 1.5f; BUS_STOP -> 2.3f; BIKE_RACK -> 1.6f; BENCH, NEWS -> 1f; PLANTER -> .65f; else -> .35f
+        VENDING -> 1.7f; VENDOR -> 1.5f; BUS_STOP -> 2.3f; BIKE_RACK -> 1.6f; BENCH, NEWS -> 1f; PLANTER -> .65f
+        WORKS -> 1.55f; DUMPSTER -> 1.05f; CAFE -> 1.15f; PHONE -> .55f; ATM -> .45f; BILLBOARD -> 3.7f; BUSH -> .75f
+        else -> .35f
     }
+
+    /** How far a prop reaches back toward the buildings, and out toward the road, from where it stands. */
+    private fun backOf(k: Int): Float = when (k) { BUS_STOP, VENDING -> .7f; DUMPSTER, ATM, PHONE, CAFE, AKACHOCHIN -> .2f; else -> .3f }
+    private fun frontOf(k: Int): Float = when (k) { DUMPSTER -> .72f; CAFE -> 1.1f; PHONE -> .55f; WORKS -> .35f; else -> .3f }
 
     /**
      * Whether a prop of kind [k] at (px, py) keeps clear of every road's asphalt (crossings and junctions too: another
@@ -129,13 +194,17 @@ class StreetProps(val city: City) {
     private fun clearSpot(px: Float, py: Float, ux: Float, uy: Float, nx: Float, ny: Float, k: Int): Boolean {
         val g = city.roads
         val half = footprint(k)
-        for (sx in floatArrayOf(-half, 0f, half)) for (sy in floatArrayOf(0f, if (k == BUS_STOP || k == VENDING) .7f else .3f)) {
+        // lamps and poles keep their rhythm along the street; whatever comes after finds another place or goes without
+        if (k != LAMP && k != UTIL_POLE && k != BUNTING && k != LANTERNS && (if (k >= BOLLARD) clashes(px, py, k) else crowded(px, py, .75f))) return false
+        for (sx in floatArrayOf(-half, 0f, half)) for (sy in floatArrayOf(0f, backOf(k))) {
             val qx = px + ux * sx + nx * sy; val qy = py + uy * sx + ny * sy
             if (g.nearAsphalt(qx, qy, .25f)) return false
             if (k != LAMP && k != UTIL_POLE && k != HYDRANT && building(qx, qy)) return false
         }
         // and off the curb's own side of the street, toward the road
-        val fx = px - nx * .3f; val fy = py - ny * .3f
+        val front = frontOf(k)
+        val fx = px - nx * front; val fy = py - ny * front
+        if (k >= BOLLARD && (building(fx, fy) || nearTree(px, py, half + .5f))) return false
         return !(k != LAMP && k != UTIL_POLE && k != HYDRANT && k != BIN && k != MAILBOX && g.nearAsphalt(fx, fy, 0f))
     }
 
@@ -359,6 +428,7 @@ class StreetProps(val city: City) {
             }
         }
         for (park in city.parks) if (park.kind == Park.GREEN) park(park)
+        extras()
         // tree kinds: what the map planted, or park trees vs street trees with some conifers and flowering trees
         for ((i, t) in city.trees.withIndex()) {
             val inPark = city.parks.any { it.kind != Park.PLAZA && Geo.inside(t.x, t.y, it.poly) }
@@ -412,9 +482,95 @@ class StreetProps(val city: City) {
         }
     }
 
+    /**
+     * The rest of the street furniture: street-name signs on the corners, bollards guarding the corners of the big
+     * roads, parking meters along busy shopping streets, cash machines and phone booths by the shops, café tables
+     * where the sidewalk is wide enough to sit out, now and then sidewalk works behind a barrier and cones, dumpsters
+     * in the lanes, a red lantern by the izakaya doors of Tokyo's drinking lanes, bushes along park paths and
+     * billboards over parking lots. A pass of its own after the rest, on its own random sequence, so what was placed
+     * before stays exactly where it was and these find the room that's left.
+     */
+    private fun extras() {
+        seed = 7654321
+        val g = city.roads
+        val mapId = city.mapId
+        val manila = mapId == com.hustlecity.game.world.Maps.MANILA
+        val tokyo = mapId == com.hustlecity.game.world.Maps.TOKYO
+        for (e in g.edges) {
+            if (e.overWater || e.under || e.len < 14f) continue
+            val major = e.cls.rank >= 2
+            for (side in -1..1 step 2) {
+                val nx = e.uy * side; val ny = -e.ux * side
+                val curb = e.cls.halfWidth + .6f
+                val s0 = e.clearA + 4f; val s1 = e.len - e.clearB - 4f
+                if (s1 - s0 < 6f) continue
+                fun at(s: Float, off: Float, k: Int): Int {
+                    if (s < 0f || s > e.len) return -1
+                    val px = e.ax + e.ux * s + nx * off; val py = e.ay + e.uy * s + ny * off
+                    if (city.shore.anyWater(px, py) || city.parks.any { Geo.inside(px, py, it.poly) } || city.reserved(px, py)) return -1
+                    if (!clearSpot(px, py, e.ux, e.uy, nx, ny, k)) return -1
+                    return add(px, py, k, -nx, -ny)
+                }
+                fun anywhere(margin: Float) = s0 + margin + rand() * (s1 - s0 - 2f * margin).coerceAtLeast(1f)
+                val hood = city.neighborhoodAt(e.ax + e.ux * (s0 + s1) * .5f + nx * 12f, e.ay + e.uy * (s0 + s1) * .5f + ny * 12f)
+                val busy = hood.traffic > .3f
+                val wall = e.cls.halfWidth + e.cls.sidewalk - .45f
+                if (e.cls == RoadClass.LANE) {
+                    if (rand() < .3f) at(anywhere(3f), wall - .45f, DUMPSTER)
+                    if (tokyo && hood.look == com.hustlecity.game.world.Look.DENSE_ASIA) repeat(2) { if (rand() < .6f) at(anywhere(2f), wall - .05f, AKACHOCHIN) }
+                    continue
+                }
+                // the street's name on the corner where it begins, on its right-hand side
+                if (e.cls.rank >= 1 && rand() < .75f) at(if (side > 0) s0 - 1.5f else s1 + 1.5f, curb, SIGN)
+                // a row of bollards guarding the corner of a big road
+                if (major && rand() < .4f) for (b in 0..2) at(s1 - .4f - b * 1.25f, curb - .1f, BOLLARD)
+                // meters along the kerb where people shop (Manila parks where it can)
+                if (!manila && busy && e.cls.rank >= 1 && rand() < .5f) {
+                    var s = s0 + 9f; var n = 0
+                    while (s < s1 - 9f && n < 6) { if (at(s, curb - .1f, METER) >= 0) n++; s += 6.5f }
+                }
+                // a cash machine, or a phone booth, by the shops
+                if (busy && rand() < .4f) { val atm = manila || rand() < .6f; at(anywhere(5f), if (atm) wall else wall - .3f, if (atm) ATM else PHONE) }
+                // tables out on a wide sidewalk
+                if (e.cls.sidewalk >= 3.6f && (busy || major) && rand() < .4f) {
+                    val s = anywhere(6f)
+                    if (at(s, wall - 1.05f, CAFE) >= 0 && rand() < .6f) at(s + 2.7f, wall - 1.05f, CAFE)
+                }
+                // sidewalk works
+                if (rand() < .05f) at(anywhere(6f), curb + .25f, WORKS)
+            }
+        }
+        // bushes along the park paths, clear of the trees, the paths and each other
+        for (p in city.parks) {
+            if (p.kind != Park.GREEN || Geo.area(p.poly) < 1200f) continue
+            for (path in p.paths) {
+                val ax = path[0]; val ay = path[1]; val bx = path[2]; val by = path[3]
+                val len = dist(ax, ay, bx, by)
+                if (len < 12f) continue
+                val ux = (bx - ax) / len; val uy = (by - ay) / len
+                var s = 9f; var k = 0
+                while (s < len - 6f) {
+                    val side = if (k % 2 == 0) -1f else 1f
+                    val px = ax + ux * s - uy * 4.3f * side; val py = ay + uy * s + ux * 4.3f * side
+                    if (Geo.inside(px, py, p.poly) && !nearTree(px, py, 2f) && !city.reserved(px, py) && !clashes(px, py, BUSH)) offRoad(px, py, BUSH, uy * side, -ux * side)
+                    s += 9f + rand() * 7f; k++
+                }
+            }
+        }
+        // billboards on their legs at the back of parking lots, facing the street (Manila's big lots are jeepney terminals)
+        for (b in city.buildings) {
+            if (b.kind != com.hustlecity.game.world.BKind.PARKING || b.w < 9f || b.d < 8f) continue
+            if (manila && max(b.w, b.d) > 14f && kotlin.math.min(b.w, b.d) > 9f) continue
+            if (rand() >= .45f) continue
+            val px = b.wx(b.w * .5f, 1.1f); val py = b.wy(b.w * .5f, 1.1f)
+            if (city.shore.anyWater(px, py) || city.reserved(px, py) || g.nearAsphalt(px, py, 1f) || clashes(px, py, BILLBOARD)) continue
+            add(px, py, BILLBOARD, -b.sn, b.cs)
+        }
+    }
+
     /** Park furniture where a road cuts through the park stays on the grass side of the kerb. */
     private fun offRoad(px: Float, py: Float, k: Int, dx: Float, dy: Float) {
-        if (!city.roads.nearAsphalt(px, py, 1.2f)) add(px, py, k, dx, dy)
+        if (!city.roads.nearAsphalt(px, py, 1.2f) && !city.inWater(px, py) && !crowded(px, py, .75f)) add(px, py, k, dx, dy)
     }
 
     // ------------------------------------------------------------------ painting
@@ -426,9 +582,136 @@ class StreetProps(val city: City) {
         try { drawLocal(scene, i, near, time) } finally { scene.clearFrame() }
     }
 
+    private var libVersion = -1
+    private val propMesh = arrayOfNulls<Mesh>(KINDS)
+    private var mCone: Mesh? = null; private var mCart: Mesh? = null; private var mLanternLine: Mesh? = null
+    private var mBuntingLine: Mesh? = null; private var mPole: Mesh? = null; private var mCrate: Mesh? = null
+    private val tints = IntArray(6)
+
+    /** Umbrellas, awnings and dumpsters come in a few colors; phone booths in the city's own. */
+    private val CANOPIES = intArrayOf(c(0xFF27AE60), c(0xFFC0392B), c(0xFF2F5D8C), c(0xFFE0A030), c(0xFF34495E))
+    private val DUMPSTERS = intArrayOf(c(0xFF2F6F4F), c(0xFF2F5D8C), c(0xFF6B4E33), c(0xFF5B6770))
+
+    /** Looks the models up again whenever the pack changes: one per kind, and the parts some kinds share. */
+    private fun meshes() {
+        if (libVersion == MeshLib.version) return
+        libVersion = MeshLib.version
+        java.util.Arrays.fill(propMesh, null)
+        propMesh[LAMP] = MeshLib.get("prop_lamp_post"); propMesh[HYDRANT] = MeshLib.get("prop_fire_hydrant")
+        propMesh[BIN] = MeshLib.get("prop_trash_bin"); propMesh[BENCH] = MeshLib.get("prop_park_bench")
+        propMesh[BUS_STOP] = MeshLib.get("prop_bus_shelter"); propMesh[NEWS] = MeshLib.get("prop_newspaper_box")
+        propMesh[MAILBOX] = MeshLib.get("prop_mailbox"); propMesh[PLANTER] = MeshLib.get("prop_planter")
+        propMesh[VENDING] = MeshLib.get("prop_vending_machine"); propMesh[HOOP] = MeshLib.get("prop_basketball_hoop")
+        propMesh[BIKE_RACK] = MeshLib.get("prop_bike_rack"); propMesh[FOUNTAIN] = MeshLib.get("prop_fountain")
+        propMesh[PARK_LAMP] = MeshLib.get("prop_park_lamp"); propMesh[VENDOR] = MeshLib.get("prop_market_stall")
+        propMesh[LANTERNS] = MeshLib.get("prop_lantern_string"); propMesh[BUNTING] = MeshLib.get("prop_bunting_string")
+        propMesh[BOLLARD] = MeshLib.get("prop_bollard"); propMesh[METER] = MeshLib.get("prop_parking_meter")
+        propMesh[WORKS] = MeshLib.get("prop_barrier"); propMesh[SIGN] = MeshLib.get("prop_street_sign")
+        propMesh[DUMPSTER] = MeshLib.get("prop_dumpster"); propMesh[BILLBOARD] = MeshLib.get("prop_billboard")
+        propMesh[ATM] = MeshLib.get("prop_atm"); propMesh[PHONE] = MeshLib.get("prop_phone_booth")
+        propMesh[BUSH] = MeshLib.get("prop_bush"); propMesh[CAFE] = MeshLib.get("prop_cafe_table")
+        propMesh[AKACHOCHIN] = MeshLib.get("prop_paper_lantern")
+        mCone = MeshLib.get("prop_traffic_cone"); mCart = MeshLib.get("prop_hotdog_cart"); mPole = MeshLib.get("prop_power_pole")
+        mLanternLine = MeshLib.get("prop_lantern_string_line"); mBuntingLine = MeshLib.get("prop_bunting_string_line")
+        mCrate = MeshLib.get("item_wooden_crate")
+    }
+
+    /** Billboards are big enough to want their model from further off than the rest. */
+    fun bigModel(i: Int) = kind[i] == BILLBOARD
+
+    /**
+     * Props as their Blender models (GPU renderer only): same spot, same facing (their front toward the road), lamps
+     * and lit panels shining at night, signs and lanterns in their own colors after dark. Some keep a part of the
+     * painted version the model doesn't have: a fountain's moving water, the wires between Manila's poles, the ties
+     * at the ends of a string across the street. False for a kind or a size the models don't cover, which keeps its
+     * boxes.
+     */
+    private fun model(scene: Scene3D, i: Int, near: Boolean, night: Boolean, time: Float): Boolean {
+        meshes()
+        val k = kind[i]
+        if (k < 0 || k >= propMesh.size) return false
+        if (k == UTIL_POLE) {
+            val pole = mPole ?: return false
+            // the model's cross-arms run along its x: turn them across the line of wires (local y)
+            scene.mesh(pole, lod(scene, pole), 0f, 0f, 0f, 0f, 1f, 1f, 1f, 8.6f / 8f, null, 0)
+            utilityPole(scene, i, near, night, modelled = true)
+            return true
+        }
+        val mesh = (if (k == VENDOR && i % 3 != 2) mCart else propMesh[k]) ?: return false
+        val level = lod(scene, mesh)
+        tints[2] = if (night) c(0xFFFFE6A8) else c(0xFF8A9199)
+        val glow = (if (night) 4 else 0) or (if (night) MeshPart.NIGHT_LIGHTS else 0)
+        when (k) {
+            NEWS -> for (m in 0..2) {
+                tints[1] = NEWS_COLORS[(i + m) % NEWS_COLORS.size]
+                scene.mesh(mesh, level, (m - 1) * .55f, 0f, 0f, 1f, 0f, .9f, .9f, .85f, tints, glow)
+            }
+            VENDING -> {
+                val n = 2 + i % 2
+                for (m in 0 until n) {
+                    tints[1] = VENDING_BODIES[(i + m) % VENDING_BODIES.size]
+                    scene.mesh(mesh, level, (m - n * .5f) * 1.02f + .49f, 0f, 0f, 1f, 0f, tints = tints, glowMask = glow)
+                }
+            }
+            FOUNTAIN -> {
+                // the model is the stonework and still water; the jets and ripples stay alive on top
+                scene.mesh(mesh, level, 0f, 0f, 0f, 1f, 0f, 1.36f, 1.36f, 1f, tints, glow)
+                fountainWater(scene, near, time)
+            }
+            VENDOR -> {
+                // a cart with its umbrella in the vendor's colors, or a stall of fruit under a striped awning
+                tints[1] = when (i % 3) { 0 -> c(0xFFE74C3C); 1 -> c(0xFF2F80ED); else -> c(0xFFE74C3C) }
+                scene.mesh(mesh, level, 0f, 0f, 0f, 1f, 0f, tints = tints, glowMask = glow)
+                // the cart's supplies in a crate on the pavement beside it
+                if (i % 3 != 2 && near) mCrate?.let { scene.mesh(it, lod(scene, it), -1.65f, -.3f, 0f, 1f, 0f, tints = tints) }
+            }
+            LANTERNS, BUNTING -> return string(scene, i, k, near, night)
+            WORKS -> {
+                scene.mesh(mesh, level, 0f, 0f, 0f, 1f, 0f, tints = tints, glowMask = glow)
+                mCone?.let { cone -> for (s in -1..1 step 2) scene.mesh(cone, lod(scene, cone), s * 1.45f, 0f, 0f, 1f, 0f, tints = tints) }
+            }
+            DUMPSTER -> { tints[1] = DUMPSTERS[i % DUMPSTERS.size]; scene.mesh(mesh, level, 0f, 0f, 0f, 1f, 0f, tints = tints, glowMask = glow) }
+            CAFE -> { tints[1] = CANOPIES[i % CANOPIES.size]; scene.mesh(mesh, level, 0f, 0f, 0f, if (i % 2 == 0) 1f else -1f, 0f, tints = tints, glowMask = glow) }
+            PHONE -> {
+                tints[1] = when (city.mapId) { com.hustlecity.game.world.Maps.TOKYO -> c(0xFF3E8E5A); com.hustlecity.game.world.Maps.SEOUL -> c(0xFFD9DEE4); else -> c(0xFFC0392B) }
+                scene.mesh(mesh, level, 0f, 0f, 0f, 1f, 0f, tints = tints, glowMask = glow)
+            }
+            BUSH -> { val s = .8f + (i % 5) * .1f; scene.mesh(mesh, level, 0f, 0f, 0f, if (i % 2 == 0) 1f else 0f, if (i % 2 == 0) 0f else 1f, s, s, s, tints, glow) }
+            else -> scene.mesh(mesh, level, 0f, 0f, 0f, 1f, 0f, tints = tints, glowMask = glow)
+        }
+        return true
+    }
+
+    private fun lod(scene: Scene3D, mesh: Mesh) = scene.meshLevel(mesh, scene.pixels(0f, 0f, 1f, maxOf(mesh.width, mesh.height)), 260f, 70f)
+
+    /**
+     * A string of lanterns or banderitas across the street as the model, stretched to this street: tied to poles at
+     * both ends it's the whole model, poles and all; otherwise just the line, tied by the painter's hooks and poles.
+     */
+    private fun string(scene: Scene3D, i: Int, k: Int, near: Boolean, night: Boolean): Boolean {
+        val span = aux[i]
+        if (span <= 0f) return true
+        val both = link[i] == 3
+        val m = (if (both) propMesh[k] else (if (k == LANTERNS) mLanternLine else mBuntingLine)) ?: return false
+        val stretch = span / 9f
+        if (stretch < .5f || stretch > 1.8f) return false
+        val glow = if (night) MeshPart.NIGHT_LIGHTS else 0
+        val level = scene.meshLevel(m, scene.pixels(0f, 0f, 4f, span), 300f, 90f)
+        // the model's string runs along its x: turn it along the prop's y, across the street
+        if (k == LANTERNS) scene.mesh(m, level, 0f, 0f, 0f, 0f, 1f, stretch, 1f, LANTERN_Z / 4.8f, null, glow)
+        else {
+            scene.mesh(m, level, 0f, 0f, 0f, 0f, 1f, stretch, 1f, BUNTING_HIGH / 5.7f, null, glow)
+            // the lower string of the pair, without poles of its own
+            mBuntingLine?.let { scene.mesh(it, level.coerceAtMost(it.levels.size - 1), 0f, 0f, 0f, 0f, 1f, stretch, 1f, BUNTING_LOW / 5.7f, null, glow) }
+        }
+        if (!both) ties(scene, i, span * .5f, if (k == LANTERNS) LANTERN_Z else BUNTING_LOW, if (k == LANTERNS) LANTERN_Z else BUNTING_HIGH, near, k == BUNTING)
+        return true
+    }
+
     private fun drawLocal(scene: Scene3D, i: Int, near: Boolean, time: Float) {
         val px = 0f; val py = 0f; val f = face[i]
         val night = scene.daylight < .5f
+        if ((near || bigModel(i)) && scene.meshesOn && model(scene, i, near, night, time)) return
         // unit vector toward the road
         val ox = when (f) { 2 -> -1f; 3 -> 1f; else -> 0f }
         val oy = when (f) { 0 -> -1f; 1 -> 1f; else -> 0f }
@@ -509,6 +792,85 @@ class StreetProps(val city: City) {
             LANTERNS -> lanterns(scene, i, near, night)
             BUNTING -> bunting(scene, i, near)
             HOOP -> hoop(scene, i, near)
+            else -> boxes(scene, i, near, night)
+        }
+    }
+
+    /** The props added with the Blender library, as the classic renderer and Low quality draw them: a few boxes each. */
+    private fun boxes(scene: Scene3D, i: Int, near: Boolean, night: Boolean) {
+        val steel = c(0xFFB8C0CA); val dark = c(0xFF2A2D31)
+        when (kind[i]) {
+            BOLLARD -> {
+                scene.cylinder(0f, 0f, .08f, 0f, .92f, 6, dark)
+                if (near) scene.cylinder(0f, 0f, .085f, .62f, .7f, 6, c(0xFFF2C94C))
+            }
+            METER -> {
+                scene.box(-.04f, -.04f, 0f, .04f, .04f, 1.08f, c(0xFF5B6770), c(0xFF5B6770))
+                scene.box(-.1f, -.08f, 1.08f, .1f, .08f, 1.42f, c(0xFFB8C0CA), c(0xFF8E9399))
+                if (near) scene.box(-.06f, .08f, 1.22f, .06f, .085f, 1.32f, c(0xFF56CCF2), c(0xFF56CCF2))
+            }
+            WORKS -> {
+                val orange = c(0xFFF2994A); val white = c(0xFFE9EDF2)
+                scene.box(-1.1f, -.03f, .4f, 1.1f, .03f, .6f, orange, white)
+                scene.box(-1.1f, -.03f, .75f, 1.1f, .03f, .95f, white, orange)
+                for (s in -1..1 step 2) {
+                    scene.box(s * .9f - .03f, -.28f, 0f, s * .9f + .03f, .28f, 1f, steel, steel)
+                    scene.cone(s * 1.45f, 0f, .15f, 0f, .7f, 6, orange, 0f)
+                }
+                if (night) { scene.glow = true; scene.blob(.9f, 0f, 1.08f, .08f, c(0xFFFFD34D), 6); scene.glow = false }
+            }
+            SIGN -> {
+                val green = c(0xFF1F6F43)
+                scene.box(-.035f, -.035f, 0f, .035f, .035f, 3.2f, steel, steel)
+                scene.box(-.6f, -.02f, 2.9f, .6f, .02f, 3.15f, green, green)
+                scene.box(-.02f, -.6f, 2.55f, .02f, .6f, 2.8f, green, green)
+            }
+            DUMPSTER -> {
+                val body = DUMPSTERS[i % DUMPSTERS.size]
+                scene.box(-.95f, -.6f, .15f, .95f, .55f, 1.2f, c(0xFF1B1D21), body)
+                if (near) scene.box(-.9f, -.5f, 0f, .9f, .45f, .15f, dark, dark)
+            }
+            BILLBOARD -> {
+                val gun = c(0xFF5B6770)
+                for (s in -1..1 step 2) scene.box(s * 2.2f - .12f, -.12f, 0f, s * 2.2f + .12f, .12f, 5f, gun, gun)
+                scene.box(-3.6f, -.1f, 5f, 3.6f, .25f, 8.2f, c(0xFF1B1D21), c(0xFF1B1D21))
+                // the ad on the front, toward the road
+                if (night) scene.glow = true
+                scene.quad(-3.45f, .27f, 5.15f, 3.45f, .27f, 5.15f, 3.45f, .27f, 8.05f, -3.45f, .27f, 8.05f, scene.lit(c(0xFFF2C94C), 1f))
+                scene.quad(-3.45f, .28f, 5.15f, 3.45f, .28f, 5.15f, 3.45f, .28f, 6.1f, -3.45f, .28f, 6f, scene.lit(c(0xFFEB5757), 1f))
+                scene.glow = false
+            }
+            ATM -> {
+                scene.box(-.4f, -.35f, 0f, .4f, .25f, 1.9f, c(0xFF2F5D8C), c(0xFF2F5D8C))
+                if (near) scene.quad(-.2f, .26f, 1.1f, .2f, .26f, 1.1f, .2f, .26f, 1.4f, -.2f, .26f, 1.4f, c(0xFF56CCF2))
+            }
+            PHONE -> {
+                val body = when (city.mapId) { com.hustlecity.game.world.Maps.TOKYO -> c(0xFF3E8E5A); com.hustlecity.game.world.Maps.SEOUL -> c(0xFFD9DEE4); else -> c(0xFFC0392B) }
+                scene.box(-.52f, -.52f, 2.3f, .52f, .52f, 2.55f, body, body)
+                for (sx in -1..1 step 2) for (sy in -1..1 step 2) scene.box(sx * .45f - .05f, sy * .45f - .05f, 0f, sx * .45f + .05f, sy * .45f + .05f, 2.3f, body, body)
+                if (near) scene.box(-.4f, -.4f, .12f, .4f, .4f, 2.3f, scene.withAlpha(c(0xFFBFE3F5), .35f), scene.withAlpha(c(0xFFBFE3F5), .35f))
+            }
+            BUSH -> {
+                scene.material = Mat.FOLIAGE
+                val s = .8f + (i % 5) * .1f
+                scene.blob(0f, 0f, .5f * s, .72f * s, scene.lit(scene.mix(c(0xFF3E8E4E), c(0xFFF2F5F8), scene.snow * .6f), .95f), 9)
+                if (near) scene.blob(.35f * s, .1f * s, .55f * s, .4f * s, scene.lit(scene.mix(c(0xFF5FB36A), c(0xFFF2F5F8), scene.snow * .7f), 1.05f), 7)
+                scene.material = Mat.PLAIN
+            }
+            CAFE -> {
+                val canopy = CANOPIES[i % CANOPIES.size]
+                scene.cylinder(0f, 0f, .4f, .72f, .75f, 8, c(0xFFE9EDF2))
+                scene.box(-.03f, -.03f, 0f, .03f, .03f, 2.3f, dark, dark)
+                scene.cone(0f, 0f, 1.15f, 2.1f, 2.45f, 8, scene.lit(scene.snowy(canopy), 1f), .8f)
+                if (near) for (s in -1..1 step 2) scene.box(s * .62f - .18f, -.18f, 0f, s * .62f + .18f, .18f, .45f, dark, dark)
+            }
+            AKACHOCHIN -> {
+                scene.box(-.04f, -.04f, 0f, .04f, .04f, 2.6f, c(0xFF3E2723), c(0xFF3E2723))
+                scene.box(-.03f, 0f, 2.47f, .03f, .5f, 2.53f, c(0xFF3E2723), c(0xFF3E2723))
+                if (night) scene.glow = true
+                scene.cylinder(0f, .45f, .2f, 1.72f, 2.28f, 8, if (night) c(0xFFFF6A3D) else c(0xFFD8322B))
+                scene.glow = false
+            }
         }
     }
 
@@ -544,18 +906,28 @@ class StreetProps(val city: City) {
      * in a long loop. Junction boxes and coils of spare cable cling to the pole, drops run into the houses behind, and
      * now and then a bundle crosses the street to the houses opposite.
      */
-    private fun utilityPole(scene: Scene3D, i: Int, near: Boolean, night: Boolean) {
+    private val ARM_PAINTED = floatArrayOf(-.65f, -.22f, .22f, .65f)
+    /** Where the power lines sit on the model pole's upper cross-arm (props.py power_pole, turned across the wires). */
+    private val ARM_MODEL = floatArrayOf(-1.1f, -.55f, .55f, 1.1f)
+
+    /**
+     * [modelled]: the pole itself, its cross-arms, insulators and transformer are the Blender model, already drawn;
+     * this adds the street light and the wires, which run to wherever the next pole and the houses are.
+     */
+    private fun utilityPole(scene: Scene3D, i: Int, near: Boolean, night: Boolean, modelled: Boolean = false) {
         val concrete = c(0xFFA8A49B)
         val dark = c(0xFF1E1F22)
-        scene.box(-.2f, -.2f, 0f, .2f, .2f, 1f, concrete, concrete)
-        scene.box(-.15f, -.15f, 1f, .15f, .15f, 8.6f, concrete, concrete)
-        // a cross-arm across the line of wires
-        scene.box(-.08f, -.75f, 7.9f, .08f, .75f, 8.08f, c(0xFF5A4A3A), c(0xFF5A4A3A))
+        if (!modelled) {
+            scene.box(-.2f, -.2f, 0f, .2f, .2f, 1f, concrete, concrete)
+            scene.box(-.15f, -.15f, 1f, .15f, .15f, 8.6f, concrete, concrete)
+            // a cross-arm across the line of wires
+            scene.box(-.08f, -.75f, 7.9f, .08f, .75f, 8.08f, c(0xFF5A4A3A), c(0xFF5A4A3A))
+        }
         // the street light reaches over the road
         scene.box(-.05f, 0f, 6.95f, .05f, 1.7f, 7.05f, IRON, IRON)
         val head = if (night) c(0xFFFFE6A8) else c(0xFF5B6168)
         scene.box(-.28f, 1.35f, 6.75f, .28f, 1.95f, 6.98f, IRON, head)
-        if (i % 3 == 0) {
+        if (!modelled && i % 3 == 0) {
             // a transformer drum
             scene.cylinder(0f, -.42f, .3f, 6f, 6.95f, 8, c(0xFF7D858C), c(0xFF5E666D))
             if (near) scene.box(-.05f, -.25f, 6.4f, .05f, -.15f, 6.5f, IRON, IRON)
@@ -563,13 +935,15 @@ class StreetProps(val city: City) {
         // junction boxes of the cable and phone companies, strapped on one above the other
         if (i % 2 == 0) scene.box(-.17f, -.36f, 4.7f, .17f, -.15f, 5.25f, c(0xFF8D9399), c(0xFF6E757C))
         if (i % 3 == 1) scene.box(-.15f, .15f, 5.05f, .15f, .34f, 5.45f, c(0xFF55606A), c(0xFF454E57))
-        if (near) for (yy in floatArrayOf(-.65f, -.22f, .22f, .65f)) scene.box(-.04f, yy - .04f, 8.08f, .04f, yy + .04f, 8.22f, c(0xFFE8E4DA), c(0xFFE8E4DA))
+        val arm = if (modelled) ARM_MODEL else ARM_PAINTED
+        val power = if (modelled) 8.3f else 8.15f
+        if (near && !modelled) for (yy in arm) scene.box(-.04f, yy - .04f, 8.08f, .04f, yy + .04f, 8.22f, c(0xFFE8E4DA), c(0xFFE8E4DA))
         val nxt = link[i]
         val segs = if (near) 7 else 4
         if (nxt >= 0) {
             val tx = localX(i, x[nxt], y[nxt]); val ty = localY(i, x[nxt], y[nxt])
             // power on the cross-arm
-            for ((k, yy) in floatArrayOf(-.65f, -.22f, .22f, .65f).withIndex()) wire(scene, 0f, yy, 8.15f, tx, ty + yy, 8.15f, .45f + k * .06f, dark, segs = segs)
+            for ((k, yy) in arm.withIndex()) wire(scene, 0f, yy, power, tx, ty + yy, power, .45f + k * .06f, dark, segs = segs)
             // the tangle: seven lines at their own heights and slack, mostly black, a grey one and a pale fibre
             for (k in 0 until 7) {
                 val h = ((i * 7 + k * 13) * 2654435761L ushr 9).toInt() and 0xFF
@@ -844,6 +1218,22 @@ class StreetProps(val city: City) {
             val sx = px + ox * .6f + (if (f >= 2) 0f else len / 2 + .6f); val sy = py + oy * .6f + (if (f >= 2) len / 2 + .6f else 0f)
             scene.box(sx - .05f, sy - .05f, 0f, sx + .05f, sy + .05f, 2.8f, IRON, IRON)
             scene.box(sx - .28f, sy - .28f, 2.4f, sx + .28f, sy + .28f, 2.95f, c(0xFF1F6FD1), c(0xFF1F6FD1))
+        }
+    }
+
+    /** The fountain model's living water: ripples spreading on the basin and the jets playing over it (not when frozen). */
+    private fun fountainWater(scene: Scene3D, near: Boolean, time: Float) {
+        if (scene.snow > .3f) return
+        for (k in 0..1) {
+            val ph = ((time * .5f + k * .5f) % 1f)
+            scene.disc(0f, 0f, .48f, .8f + ph * 2f, .8f + ph * 2f, 14, scene.withAlpha(c(0xFFE3F1FA), (1f - ph) * .35f))
+        }
+        if (!near) return
+        val jet = 3.3f + sin(time * 2.3f) * .15f
+        scene.blob(0f, 0f, jet, .24f, scene.withAlpha(c(0xFFF4FAFF), .75f), 8)
+        for (k in 0 until 6) {
+            val a = k * 1.047f + time * .3f
+            scene.blob(kotlin.math.cos(a) * 1.55f, sin(a) * 1.55f, .75f, .16f, scene.withAlpha(c(0xFFE3F1FA), .5f), 6)
         }
     }
 

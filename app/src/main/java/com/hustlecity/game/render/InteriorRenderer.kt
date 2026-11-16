@@ -72,6 +72,10 @@ class InteriorRenderer(private val e: GameEngine) {
     fun draw(canvas: Canvas, w: Int, h: Int, gpu: com.hustlecity.game.render.gpu.GpuFrame? = null, density: Float = 1f) {
         val sc = e.interior ?: return
         scene.gpu = gpu
+        scene.modelDetail = e.settings.quality
+        carts = false; baskets = false
+        for (p in sc.items) { if (p.itemId == "cart_rack") carts = true else if (p.itemId == "shopping_baskets") baskets = true }
+        people.clock = e.realTime
         setupCamera(sc, w, h)
         scene.applyDaylight(1f)
         scene.sunX = .45f; scene.sunY = .89f
@@ -494,10 +498,32 @@ class InteriorRenderer(private val e: GameEngine) {
     private fun person(v: com.hustlecity.game.engine.Person, staff: Boolean) {
         // shoppers hold what they picked (once it has reached their hands), then a paper bag after paying
         val held = if (!staff && v.heldIn <= 0f && !v.bagged) v.held else 0
+        val sc = e.interior
+        val seed = (v.shirt * 31) xor (v.skin * 131) xor (v.hair * 17) xor (v.pants * 7)
+        // the product as its model; sitting down, what this place serves; a cart or a basket where the store has them
+        val item = when {
+            staff -> null
+            v.pose == Pose.EAT || (v.pose == Pose.SIT && (sc?.typeId == "cinema" || sc?.typeId == "theater")) -> Goods.mealFor(sc?.typeId, seed)
+            held != 0 -> v.heldPid?.let { Goods.modelFor(it) }
+            else -> null
+        }
+        val shopping = !staff && !v.bagged && v.stage == 0 && v.pose == Pose.STAND
+        val carry = when {
+            staff || v.carry > 0 -> v.carry
+            shopping && carts -> 4
+            shopping && baskets -> 5
+            else -> 0
+        }
         people.draw(v.x, v.y, v.z, v.heading, v.phase, v.moving, v.shirt, PersonPainter.PANTS[v.pants % PersonPainter.PANTS.size], v.skin,
             PersonPainter.HAIR[v.hair % PersonPainter.HAIR.size], pose = v.pose, apron = if (staff) c(0xFF2C3E50) else 0,
-            carry = v.carry, load = if (v.carry > 0) 1 else 0, held = held, bag = !staff && v.bagged)
+            carry = carry, load = if (v.carry > 0) 1 else 0, held = if (carry >= 4) 0 else held, bag = !staff && v.bagged,
+            reach = if (!staff && carry < 4 && v.heldIn > 0f) 1f - (v.heldIn / com.hustlecity.game.engine.ShelfStock.TAKE_TIME).coerceIn(0f, 1f) else -1f,
+            item = if (carry >= 4) null else item)
     }
+
+    /** Whether this room has shopping carts (a cart rack) or baskets by the door for its shoppers, worked out per frame. */
+    private var carts = false
+    private var baskets = false
 
     private val takeFrom = FloatArray(3)
 
